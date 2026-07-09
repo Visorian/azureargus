@@ -1,0 +1,77 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+@import "vue-virtual-scroller/index.css";
+
+@theme static {
+  --color-brand-gray-50: hsl(0, 0%, 97%);
+  --color-brand-gray-100: hsl(0, 0%, 93%);
+  --color-brand-gray-200: hsl(0, 0%, 87%);
+  --color-brand-gray-300: hsl(0, 0%, 78%);
+  --color-brand-gray-400: hsl(0, 0%, 68%);
+  --color-brand-gray-500: hsl(0, 0%, 62%);
+  --color-brand-gray-600: hsl(0, 0%, 48%);
+  --color-brand-gray-700: hsl(0, 0%, 43%);
+  --color-brand-gray-800: hsl(0, 0%, 35%);
+  --color-brand-gray-900: hsl(0, 0%, 27%);
+  --color-brand-gray-950: hsl(0, 0%, 12%);
+
+  --color-brand-orange-50: hsl(38, 100%, 96%);
+  --color-brand-orange-100: hsl(40, 100%, 91%);
+  --color-brand-orange-200: hsl(37, 100%, 82%);
+  --color-brand-orange-300: hsl(36, 100%, 71%);
+  --color-brand-orange-400: hsl(32, 100%, 60%);
+  --color-brand-orange-500: hsl(29, 100%, 52%);
+  --color-brand-orange-600: hsl(25, 100%, 50%);
+  --color-brand-orange-700: hsl(22, 98%, 40%);
+  --color-brand-orange-800: hsl(19, 87%, 34%);
+  --color-brand-orange-900: hsl(19, 83%, 28%);
+  --color-brand-orange-950: hsl(17, 89%, 15%);
+
+  --color-brand-turquoise-50: hsl(164, 65%, 97%);
+  --color-brand-turquoise-100: hsl(165, 67%, 89%);
+  --color-brand-turquoise-200: hsl(166, 64%, 78%);
+  --color-brand-turquoise-300: hsl(168, 59%, 64%);
+  --color-brand-turquoise-400: hsl(170, 51%, 50%);
+  --color-brand-turquoise-500: hsl(171, 62%, 40%);
+  --color-brand-turquoise-600: hsl(172, 65%, 32%);
+  --color-brand-turquoise-700: hsl(173, 59%, 26%);
+  --color-brand-turquoise-800: hsl(174, 53%, 22%);
+  --color-brand-turquoise-900: hsl(173, 46%, 19%);
+  --color-brand-turquoise-950: hsl(176, 65%, 10%);
+
+  --color-brand-purple-50: hsl(232, 88%, 97%);
+  --color-brand-purple-100: hsl(232, 94%, 94%);
+  --color-brand-purple-200: hsl(234, 89%, 89%);
+  --color-brand-purple-300: hsl(236, 87%, 82%);
+  --color-brand-purple-400: hsl(241, 83%, 74%);
+  --color-brand-purple-500: hsl(245, 78%, 67%);
+  --color-brand-purple-600: hsl(250, 71%, 59%);
+  --color-brand-purple-700: hsl(250, 54%, 51%);
+  --color-brand-purple-800: hsl(249, 51%, 41%);
+  --color-brand-purple-900: hsl(249, 44%, 34%);
+  --color-brand-purple-950: hsl(250, 44%, 11%);
+
+  --color-brand-blue-50: hsl(212, 100%, 96%);
+  --color-brand-blue-100: hsl(214, 100%, 93%);
+  --color-brand-blue-200: hsl(215, 100%, 88%);
+  --color-brand-blue-300: hsl(217, 100%, 80%);
+  --color-brand-blue-400: hsl(223, 100%, 72%);
+  --color-brand-blue-500: hsl(215, 89%, 54%);
+  --color-brand-blue-600: hsl(232, 94%, 59%);
+  --color-brand-blue-700: hsl(233, 72%, 51%);
+  --color-brand-blue-800: hsl(232, 68%, 41%);
+  --color-brand-blue-900: hsl(231, 59%, 34%);
+  --color-brand-blue-950: hsl(233, 59%, 19%);
+
+  --color-brand-pink-50: hsl(323, 87%, 97%);
+  --color-brand-pink-100: hsl(318, 85%, 95%);
+  --color-brand-pink-200: hsl(320, 92%, 90%);
+  --color-brand-pink-300: hsl(321, 98%, 82%);
+  --color-brand-pink-400: hsl(322, 95%, 70%);
+  --color-brand-pink-500: hsl(324, 90%, 60%);
+  --color-brand-pink-600: hsl(327, 79%, 48%);
+  --color-brand-pink-700: hsl(329, 86%, 42%);
+  --color-brand-pink-800: hsl(329, 82%, 35%);
+  --color-brand-pink-900: hsl(329, 77%, 30%);
+  --color-brand-pink-950: hsl(330, 93%, 17%);
+}
