@@ -72,6 +72,7 @@ export function useEventHubReceiver() {
   const visibleLimit = useState("event-hub-visible-limit", () => DEFAULT_BUFFER_SIZE);
   const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
   const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize);
+  const logHistoryPersistence = useLogHistoryPersistence();
   const paused = computed(() => status.value === "paused");
   let nextRecordIndex = receivedCount.value;
   const batcher = createLogBatcher<FirewallLogRecord>({
@@ -79,11 +80,14 @@ export function useEventHubReceiver() {
       buffer.pushMany(records);
       receivedCount.value += records.length;
       lastReceivedAt.value = records.at(-1)?.enqueuedTimeUtc ?? new Date().toISOString();
+      logHistoryPersistence.queueRecords(records);
     },
   });
 
   async function disconnect() {
     batcher.flush();
+    await logHistoryPersistence.flush();
+    logHistoryPersistence.clearQueueIfDisabled();
 
     if (subscription) {
       await subscription.close();
@@ -170,6 +174,7 @@ export function useEventHubReceiver() {
 
   function clear() {
     batcher.clear();
+    logHistoryPersistence.clearQueueIfDisabled();
     buffer.clear();
     receivedCount.value = 0;
     nextRecordIndex = 0;
