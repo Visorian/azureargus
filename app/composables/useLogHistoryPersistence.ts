@@ -7,6 +7,7 @@ import type { PersistedFirewallLogRecord } from "~/utils/logHistoryRecord";
 import type { FirewallLogRecord } from "~/types/firewall";
 
 let sharedQueue: LogHistoryPersistenceQueue | null = null;
+let startupCleanupPromise: Promise<void> | null = null;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown log history persistence error.";
@@ -68,13 +69,33 @@ export function useLogHistoryPersistence() {
   const store = createBrowserLogHistoryStore();
 
   if (sharedQueue === null) {
+    if (!enabled.value) {
+      startupCleanupPromise = store
+        .clearLogHistory()
+        .then(() => {
+          historyResults.value = [];
+        })
+        .catch((error: unknown) => {
+          lastError.value = getErrorMessage(error);
+        })
+        .finally(() => {
+          startupCleanupPromise = null;
+        });
+    }
+
     sharedQueue = createLogHistoryPersistenceQueue({
       enabled: enabled.value,
       onError: (error) => {
         enabled.value = false;
         lastError.value = getErrorMessage(error);
       },
-      store,
+      store: {
+        ...store,
+        async appendLogHistoryBatch(records, retention) {
+          await startupCleanupPromise;
+          await store.appendLogHistoryBatch(records, retention);
+        },
+      },
     });
   }
 
@@ -87,6 +108,24 @@ export function useLogHistoryPersistence() {
   function disable() {
     enabled.value = false;
     sharedQueue?.disable();
+  }
+
+  async function clearStoredHistory() {
+    await store.clearLogHistory();
+    historyResults.value = [];
+  }
+
+  async function disableAndClearHistory() {
+    enabled.value = false;
+    sharedQueue?.disable();
+    lastError.value = null;
+
+    try {
+      await sharedQueue?.waitForIdle();
+      await clearStoredHistory();
+    } catch (error: unknown) {
+      lastError.value = getErrorMessage(error);
+    }
   }
 
   function queueRecords(records: readonly FirewallLogRecord[]) {
@@ -122,8 +161,7 @@ export function useLogHistoryPersistence() {
     lastError.value = null;
 
     try {
-      await store.clearLogHistory();
-      historyResults.value = [];
+      await clearStoredHistory();
     } catch (error: unknown) {
       lastError.value = getErrorMessage(error);
     }
@@ -133,6 +171,7 @@ export function useLogHistoryPersistence() {
     clearHistory,
     clearQueueIfDisabled,
     disable,
+    disableAndClearHistory,
     enable,
     enabled,
     flush,

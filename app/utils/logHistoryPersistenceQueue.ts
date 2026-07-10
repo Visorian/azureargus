@@ -43,6 +43,7 @@ export interface LogHistoryPersistenceQueue {
   isEnabled(): boolean;
   pendingCount(): number;
   queueRecords(records: readonly FirewallLogRecord[]): void;
+  waitForIdle(): Promise<void>;
 }
 
 function createDefaultScheduler(): LogHistoryPersistenceScheduler {
@@ -67,6 +68,7 @@ export function createLogHistoryPersistenceQueue({
 }: LogHistoryPersistenceQueueOptions): LogHistoryPersistenceQueue {
   let isEnabled = enabled;
   let isFlushing = false;
+  let activeFlushPromise: Promise<void> | null = null;
   let idleHandle: number | undefined;
   let pendingRecords: PersistedFirewallLogRecord[] = [];
   let timerHandle: ReturnType<typeof setTimeout> | undefined;
@@ -108,27 +110,36 @@ export function createLogHistoryPersistenceQueue({
   async function flush() {
     cancelScheduledFlush();
 
-    if (!isEnabled || pendingRecords.length === 0 || isFlushing) {
+    if (activeFlushPromise !== null) {
+      return activeFlushPromise;
+    }
+
+    if (!isEnabled || pendingRecords.length === 0) {
       return;
     }
 
     const records = pendingRecords;
     pendingRecords = [];
-    isFlushing = true;
 
-    try {
-      await store.appendLogHistoryBatch(records, retention);
-    } catch (error: unknown) {
-      isEnabled = false;
-      pendingRecords = [];
-      onError?.(error);
-    } finally {
-      isFlushing = false;
-    }
+    activeFlushPromise = (async () => {
+      isFlushing = true;
+      try {
+        await store.appendLogHistoryBatch(records, retention);
+      } catch (error: unknown) {
+        isEnabled = false;
+        pendingRecords = [];
+        onError?.(error);
+      } finally {
+        isFlushing = false;
+        activeFlushPromise = null;
+      }
 
-    if (isEnabled && pendingRecords.length > 0) {
-      scheduleFlush();
-    }
+      if (isEnabled && pendingRecords.length > 0) {
+        scheduleFlush();
+      }
+    })();
+
+    return activeFlushPromise;
   }
 
   function clearQueue() {
@@ -172,6 +183,9 @@ export function createLogHistoryPersistenceQueue({
       }
 
       scheduleFlush();
+    },
+    async waitForIdle() {
+      await activeFlushPromise;
     },
   };
 }

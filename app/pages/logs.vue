@@ -48,6 +48,10 @@ const sidebarCollapsed = ref(false);
 const detailOpen = ref(false);
 const selectedLog = ref<FirewallLogRecord | null>(null);
 const toast = useToast();
+const logHistory = useLogHistoryPersistence();
+const clearingLogHistory = ref(false);
+const logHistoryEnabled = computed(() => logHistory.enabled.value);
+const logHistoryError = computed(() => logHistory.lastError.value);
 const { filters, filteredLogs, resetFilters } = useLogQuery(receiver.logs, receiver.visibleLimit);
 const { sortedLogs, setSort, getSortIcon, getAriaSort } = useLogSorting(filteredLogs);
 const actionLabels: Record<string, string> = {
@@ -126,6 +130,20 @@ async function connect() {
     await receiver.connect(connectionForm);
   } finally {
     connecting.value = false;
+  }
+}
+
+async function updateLogRetention(enabled: boolean) {
+  if (enabled) {
+    logHistory.enable();
+    return;
+  }
+
+  clearingLogHistory.value = true;
+  try {
+    await logHistory.disableAndClearHistory();
+  } finally {
+    clearingLogHistory.value = false;
   }
 }
 
@@ -311,6 +329,23 @@ function statusColor(status: string) {
             />
           </div>
         </UForm>
+
+        <div class="border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800">
+          <USwitch
+            label="Local log retention"
+            :model-value="logHistoryEnabled"
+            :disabled="clearingLogHistory"
+            :loading="clearingLogHistory"
+            @update:model-value="updateLogRetention"
+          />
+          <p
+            v-if="logHistoryError"
+            role="alert"
+            class="mt-2 text-xs text-red-600 dark:text-red-400"
+          >
+            {{ logHistoryError }}
+          </p>
+        </div>
       </section>
 
       <footer

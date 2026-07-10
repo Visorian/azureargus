@@ -147,8 +147,8 @@ describe("log history persistence queue", () => {
     expect(errors).toHaveLength(1);
   });
 
-  it("supports destructured control methods", () => {
-    const { store } = createStore();
+  it("supports destructured control methods and prevents future writes", async () => {
+    const { batches, store } = createStore();
     const queue = createLogHistoryPersistenceQueue({
       enabled: true,
       store,
@@ -159,6 +159,48 @@ describe("log history persistence queue", () => {
     disable();
 
     expect(queue.isEnabled()).toBe(false);
+    expect(queue.pendingCount()).toBe(0);
+
+    queue.queueRecords([createLog("after-disable")]);
+    await queue.flush();
+
+    expect(batches).toEqual([]);
+  });
+
+  it("waits for an active write before reporting idle", async () => {
+    let resolveAppend: (() => void) | undefined;
+    const startedBatches: string[][] = [];
+    const { store } = createStore({
+      async appendLogHistoryBatch(records) {
+        startedBatches.push(records.map((record) => record.id));
+        await new Promise<void>((resolve) => {
+          resolveAppend = resolve;
+        });
+      },
+    });
+    const queue = createLogHistoryPersistenceQueue({
+      enabled: true,
+      maxBatchSize: 1,
+      store,
+    });
+
+    queue.queueRecords([createLog("active")]);
+    expect(startedBatches).toEqual([["active"]]);
+    expect(resolveAppend).toBeDefined();
+
+    queue.disable();
+    let idleResolved = false;
+    const idlePromise = queue.waitForIdle().then(() => {
+      idleResolved = true;
+    });
+
+    await flushPromises();
+    expect(idleResolved).toBe(false);
+
+    resolveAppend?.();
+    await idlePromise;
+
+    expect(idleResolved).toBe(true);
     expect(queue.pendingCount()).toBe(0);
   });
 });
