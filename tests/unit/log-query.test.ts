@@ -80,6 +80,18 @@ describe("log query", () => {
     expect(result.map((log) => log.id)).toEqual(["inside"]);
   });
 
+  it("returns newest visible rows directly when no filters are active", () => {
+    const filters = createDefaultLogFilters();
+
+    const result = queryFirewallLogs(
+      [createLog({ id: "newest" }), createLog({ id: "middle" }), createLog({ id: "oldest" })],
+      filters,
+      2,
+    );
+
+    expect(result.map((log) => log.id)).toEqual(["newest", "middle"]);
+  });
+
   it("applies the visible limit after filtering", () => {
     const filters = createDefaultLogFilters();
     filters.protocol = "tcp";

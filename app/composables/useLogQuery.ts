@@ -105,6 +105,10 @@ export function queryFirewallLogs(
   filters: FirewallLogFilters,
   visibleLimit: number,
 ) {
+  if (!hasActiveLogFilters(filters)) {
+    return trimToBufferSize(logs, visibleLimit);
+  }
+
   return trimToBufferSize(filterFirewallLogs(logs, filters), visibleLimit);
 }
 

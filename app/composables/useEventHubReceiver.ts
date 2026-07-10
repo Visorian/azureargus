@@ -1,9 +1,25 @@
-import type { EventHubConsumerClient, ReceivedEventData } from "@azure/event-hubs";
+import type { EventHubConsumerClient } from "@azure/event-hubs";
 
+import {
+  DEFAULT_BUFFER_SIZE,
+  getEventHubLookbackStart,
+  getEventHubName,
+  getRawLogBufferSize,
+  parseEventHubConnectionString,
+  validateEventHubConnectionForm,
+  type EventHubConnectionForm,
+} from "./useEventHubConnection";
+import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFirewallLogParser";
+import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "~/types/firewall";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
 type ReceiverSubscription = { close(): Promise<void> };
+export interface EventHubLogEvent {
+  body: unknown;
+  enqueuedTimeUtc?: Date | string;
+  sequenceNumber?: number | string;
+}
 
 let client: EventHubConsumerClient | null = null;
 let subscription: ReceiverSubscription | null = null;
@@ -13,7 +29,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function eventToFirewallLogs(
-  event: ReceivedEventData,
+  event: EventHubLogEvent,
   partitionId: string,
   baseIndex: number,
 ): FirewallLogRecord[] {
@@ -28,6 +44,26 @@ function eventToFirewallLogs(
   );
 }
 
+export function eventsToFirewallLogs(
+  events: readonly EventHubLogEvent[],
+  partitionId: string,
+  startIndex: number,
+) {
+  const records: FirewallLogRecord[] = [];
+  let nextIndex = startIndex;
+
+  for (const event of events) {
+    const eventRecords = eventToFirewallLogs(event, partitionId, nextIndex);
+    nextIndex += eventRecords.length;
+    records.push(...eventRecords);
+  }
+
+  return {
+    nextIndex,
+    records,
+  };
+}
+
 export function useEventHubReceiver() {
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
   const errors = useState<string[]>("event-hub-errors", () => []);
@@ -37,8 +73,18 @@ export function useEventHubReceiver() {
   const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
   const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize);
   const paused = computed(() => status.value === "paused");
+  let nextRecordIndex = receivedCount.value;
+  const batcher = createLogBatcher<FirewallLogRecord>({
+    onFlush: (records) => {
+      buffer.pushMany(records);
+      receivedCount.value += records.length;
+      lastReceivedAt.value = records.at(-1)?.enqueuedTimeUtc ?? new Date().toISOString();
+    },
+  });
 
   async function disconnect() {
+    batcher.flush();
+
     if (subscription) {
       await subscription.close();
       subscription = null;
@@ -85,12 +131,9 @@ export function useEventHubReceiver() {
               return;
             }
 
-            const records = events.flatMap((event, index) =>
-              eventToFirewallLogs(event, context.partitionId, receivedCount.value + index),
-            );
-            buffer.pushMany(records);
-            receivedCount.value += records.length;
-            lastReceivedAt.value = records.at(-1)?.enqueuedTimeUtc ?? new Date().toISOString();
+            const result = eventsToFirewallLogs(events, context.partitionId, nextRecordIndex);
+            nextRecordIndex = result.nextIndex;
+            batcher.pushMany(result.records);
           },
           processError: async (error) => {
             errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
@@ -126,8 +169,10 @@ export function useEventHubReceiver() {
   }
 
   function clear() {
+    batcher.clear();
     buffer.clear();
     receivedCount.value = 0;
+    nextRecordIndex = 0;
     lastReceivedAt.value = null;
   }
 
