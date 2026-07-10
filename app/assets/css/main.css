@@ -3,17 +3,17 @@
 @import "vue-virtual-scroller/index.css";
 
 @theme static {
-  --color-brand-gray-50: hsl(0, 0%, 97%);
-  --color-brand-gray-100: hsl(0, 0%, 93%);
-  --color-brand-gray-200: hsl(0, 0%, 87%);
-  --color-brand-gray-300: hsl(0, 0%, 78%);
-  --color-brand-gray-400: hsl(0, 0%, 68%);
-  --color-brand-gray-500: hsl(0, 0%, 62%);
-  --color-brand-gray-600: hsl(0, 0%, 48%);
-  --color-brand-gray-700: hsl(0, 0%, 43%);
-  --color-brand-gray-800: hsl(0, 0%, 35%);
-  --color-brand-gray-900: hsl(0, 0%, 27%);
-  --color-brand-gray-950: hsl(0, 0%, 12%);
+  --color-brand-gray-50: hsl(216, 24%, 97%);
+  --color-brand-gray-100: hsl(216, 22%, 94%);
+  --color-brand-gray-200: hsl(216, 18%, 88%);
+  --color-brand-gray-300: hsl(217, 16%, 76%);
+  --color-brand-gray-400: hsl(218, 13%, 61%);
+  --color-brand-gray-500: hsl(219, 12%, 49%);
+  --color-brand-gray-600: hsl(220, 15%, 39%);
+  --color-brand-gray-700: hsl(221, 17%, 31%);
+  --color-brand-gray-800: hsl(222, 20%, 23%);
+  --color-brand-gray-900: hsl(223, 24%, 16%);
+  --color-brand-gray-950: hsl(224, 28%, 10%);
 
   --color-brand-orange-50: hsl(38, 100%, 96%);
   --color-brand-orange-100: hsl(40, 100%, 91%);

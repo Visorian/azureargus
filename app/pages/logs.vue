@@ -50,6 +50,8 @@ const receiver = useEventHubReceiver();
 const connectionForm = reactive<EventHubConnectionForm>(
   createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
 );
+const { enabled: rememberConnectionString, lastError: connectionStringPersistenceError } =
+  useEventHubConnectionPersistence(toRef(connectionForm, "connectionString"));
 const connecting = ref(false);
 const sidebarCollapsed = ref(false);
 const detailOpen = ref(false);
@@ -440,33 +442,33 @@ function statusColor(status: string) {
       'relative grid h-full min-h-0 overflow-hidden bg-white text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50',
       sidebarCollapsed
         ? 'grid-cols-1 grid-rows-1'
-        : 'grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-[23rem_1fr] lg:grid-rows-1',
+        : 'grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-[1fr_23rem] lg:grid-rows-1',
     ]"
   >
     <UButton
       v-if="sidebarCollapsed"
-      icon="i-lucide-panel-left-open"
+      icon="i-lucide-panel-right-open"
       aria-label="Expand sidebar"
       color="neutral"
       variant="outline"
       square
       size="xs"
-      class="absolute top-1/2 left-0 z-20 -translate-y-1/2 rounded-l-none border-l-0 bg-white dark:bg-brand-gray-950"
+      class="absolute top-1/2 right-0 z-20 -translate-y-1/2 rounded-r-none border-r-0 bg-white dark:bg-brand-gray-950"
       @click="expandSidebar"
     />
 
     <aside
       v-show="!sidebarCollapsed"
-      class="relative flex max-h-80 min-h-0 flex-col border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:max-h-none lg:border-b-0 lg:border-r"
+      class="relative flex max-h-80 min-h-0 flex-col border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:order-2 lg:max-h-none lg:border-b-0 lg:border-l"
     >
       <UButton
-        icon="i-lucide-panel-left-close"
+        icon="i-lucide-panel-right-close"
         aria-label="Collapse sidebar"
         color="neutral"
         variant="outline"
         square
         size="xs"
-        class="absolute top-1/2 right-0 z-20 translate-x-1/2 -translate-y-1/2 rounded-full bg-white dark:bg-brand-gray-950"
+        class="absolute top-3 right-3 z-20 rounded-full bg-white dark:bg-brand-gray-950 lg:top-1/2 lg:right-auto lg:left-0 lg:-translate-x-1/2 lg:-translate-y-1/2"
         @click="collapseSidebar"
       />
 
@@ -475,7 +477,7 @@ function statusColor(status: string) {
           <div>
             <h2 class="text-sm font-semibold">Event Hub connection</h2>
             <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-              Use a Listen-only SAS policy. Values stay in memory.
+              Use a Listen-only SAS policy. Credentials stay in memory unless remembered.
             </p>
           </div>
 
@@ -488,6 +490,18 @@ function statusColor(status: string) {
                 placeholder="Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=..."
               />
             </UFormField>
+            <UCheckbox
+              v-model="rememberConnectionString"
+              label="Remember connection string"
+              description="Stores this SAS credential unencrypted in browser storage. Avoid shared devices."
+            />
+            <p
+              v-if="connectionStringPersistenceError"
+              role="alert"
+              class="text-xs text-red-600 dark:text-red-400"
+            >
+              {{ connectionStringPersistenceError }}
+            </p>
             <UFormField label="Consumer group" name="consumerGroup" required>
               <UInput v-model="connectionForm.consumerGroup" class="w-full" />
             </UFormField>
@@ -535,13 +549,32 @@ function statusColor(status: string) {
           </UForm>
 
           <div class="border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800">
-            <USwitch
-              label="Local log retention"
-              :model-value="logHistoryEnabled"
-              :disabled="clearingLogHistory"
-              :loading="clearingLogHistory"
-              @update:model-value="updateLogRetention"
-            />
+            <div class="flex items-center gap-1">
+              <USwitch
+                label="Local log retention"
+                :model-value="logHistoryEnabled"
+                :disabled="clearingLogHistory"
+                :loading="clearingLogHistory"
+                @update:model-value="updateLogRetention"
+              />
+              <UTooltip :content="{ side: 'bottom' }" :ui="{ content: 'h-auto max-w-72 p-3' }">
+                <UButton
+                  icon="i-lucide-info"
+                  aria-label="About local log retention"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  square
+                />
+                <template #content>
+                  <p class="text-xs leading-5 whitespace-normal">
+                    Keeps up to 20,000 parsed Real-time records in this browser for 24 hours. Raw
+                    payloads are excluded. Turning retention off or starting a new session clears
+                    saved records.
+                  </p>
+                </template>
+              </UTooltip>
+            </div>
             <p
               v-if="logHistoryError"
               role="alert"
@@ -618,7 +651,9 @@ function statusColor(status: string) {
       </footer>
     </aside>
 
-    <section class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950">
+    <section
+      class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950 lg:order-1"
+    >
       <div
         class="shrink-0 border-b border-brand-gray-300 bg-white p-4 dark:border-brand-gray-700 dark:bg-brand-gray-950"
       >

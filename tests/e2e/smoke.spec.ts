@@ -9,6 +9,7 @@ import {
   LOG_HISTORY_STORE_NAME,
   LOG_HISTORY_TIMESTAMP_INDEX,
 } from "../../app/utils/logHistoryRecord";
+import { EVENT_HUB_CONNECTION_STRING_STORAGE_KEY } from "../../app/utils/eventHubConnectionStorage";
 
 async function seedLogHistory(page: Page) {
   await page.evaluate(
@@ -112,6 +113,16 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Real-time analysis" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Log analysis" })).toBeDisabled();
 
+  const sidebar = page.locator("aside");
+  const logTable = page.getByRole("table", { name: "Firewall logs" });
+  await expect
+    .poll(async () => {
+      const sidebarBox = await sidebar.boundingBox();
+      const tableBox = await logTable.boundingBox();
+      return Boolean(sidebarBox && tableBox && sidebarBox.x > tableBox.x);
+    })
+    .toBe(true);
+
   const lookbackSelect = page.getByRole("combobox", { name: "Lookback" });
   await lookbackSelect.click();
   await expect(page.getByRole("option")).toHaveText([
@@ -124,7 +135,12 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await page.keyboard.press("Escape");
 
   const logRetentionSwitch = page.getByRole("switch", { name: "Local log retention" });
+  const logRetentionInfo = page.getByRole("button", { name: "About local log retention" });
   await expect(logRetentionSwitch).toBeVisible();
+  await logRetentionInfo.hover();
+  await expect(
+    page.getByRole("paragraph").filter({ hasText: "Keeps up to 20,000 parsed Real-time records" }),
+  ).toBeVisible();
   await expect(logRetentionSwitch).not.toBeChecked();
   await seedLogHistory(page);
   await expect.poll(() => countLogHistory(page)).toBe(1);
@@ -144,6 +160,48 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(logRetentionSwitch).not.toBeChecked();
   await expect.poll(() => countLogHistory(page)).toBe(0);
   await expect(page.getByText("No logs received")).toBeVisible();
+});
+
+test("connection string persistence is explicit and reversible", async ({ page }) => {
+  const connectionString =
+    "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=fw-logs";
+
+  await page.goto("/login");
+  await page.getByRole("button", { name: "Use without login" }).click();
+
+  const connectionStringInput = page.getByRole("textbox", { name: "Connection string*" });
+  const rememberConnectionString = page.getByRole("checkbox", {
+    name: "Remember connection string",
+  });
+
+  await expect(connectionStringInput).toHaveValue("");
+  await expect(rememberConnectionString).not.toBeChecked();
+  await connectionStringInput.fill(connectionString);
+  await rememberConnectionString.check();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) => window.localStorage.getItem(key),
+        EVENT_HUB_CONNECTION_STRING_STORAGE_KEY,
+      ),
+    )
+    .toBe(connectionString);
+
+  await page.reload();
+  await expect(page).toHaveURL(/\/login/);
+  await page.getByRole("button", { name: "Use without login" }).click();
+  await expect(connectionStringInput).toHaveValue(connectionString);
+  await expect(rememberConnectionString).toBeChecked();
+
+  await rememberConnectionString.uncheck();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) => window.localStorage.getItem(key),
+        EVENT_HUB_CONNECTION_STRING_STORAGE_KEY,
+      ),
+    )
+    .toBeNull();
 });
 
 test("anonymous request cannot query Log Analytics", async ({ request }) => {

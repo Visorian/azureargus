@@ -2,11 +2,13 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = process.env.PLAYWRIGHT_PORT || "3000";
 const baseURL = `http://127.0.0.1:${port}`;
+const executablePath = process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH;
 
 export default defineConfig({
   testDir: "./tests/e2e",
   use: {
     baseURL,
+    launchOptions: executablePath ? { executablePath } : undefined,
     trace: "on-first-retry",
   },
   webServer: {
