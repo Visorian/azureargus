@@ -1,7 +1,23 @@
+import { effectScope, isReactive, isRef, ref, type Ref } from "vue";
+
 import {
   prependToBoundedBuffer,
   trimToBufferSize,
+  useBoundedLogBuffer,
 } from "../../app/composables/useBoundedLogBuffer";
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubGlobal("useState", <T>(_key: string, initialize: () => T | Ref<T>) => {
+    const initial = initialize();
+    return isRef(initial) ? initial : ref(initial);
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("bounded log buffer helpers", () => {
   it("keeps newest-first items at the front of the buffer", () => {
@@ -42,5 +58,53 @@ describe("bounded log buffer helpers", () => {
 
   it("keeps current items when prepending an empty batch", () => {
     expect(prependToBoundedBuffer(["newest", "oldest"], [], 5)).toEqual(["newest", "oldest"]);
+  });
+
+  it("keeps the raw buffer plain and publishes only visible rows on the coalesced interval", () => {
+    const buffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
+      publishedSize: ref(2),
+    });
+    const records = [{ id: 1 }, { id: 2 }, { id: 3 }];
+
+    buffer.pushMany(records);
+
+    expect(buffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1]);
+    expect(buffer.items.value).toEqual([]);
+    vi.advanceTimersByTime(249);
+    expect(buffer.items.value).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+    expect(buffer.items.value.map((record) => record.id)).toEqual([3, 2]);
+    expect(isReactive(buffer.items.value[0])).toBe(false);
+    expect(buffer.version.value).toBe(1);
+  });
+
+  it("flushes a pending publication immediately and cancels its timer", () => {
+    const buffer = useBoundedLogBuffer<string>("test", ref(5), {
+      publishedSize: ref(2),
+    });
+
+    buffer.pushMany(["old", "new"]);
+    buffer.flush();
+
+    expect(buffer.items.value).toEqual(["new", "old"]);
+    expect(buffer.version.value).toBe(1);
+    vi.advanceTimersByTime(250);
+    expect(buffer.version.value).toBe(1);
+  });
+
+  it("cancels pending publication when its reactive scope is disposed", () => {
+    const scope = effectScope();
+    const buffer = scope.run(() => useBoundedLogBuffer<string>("test", ref(5)));
+    if (!buffer) {
+      throw new Error("Buffer was not created.");
+    }
+
+    buffer.pushMany(["pending"]);
+    scope.stop();
+    vi.advanceTimersByTime(250);
+
+    expect(buffer.items.value).toEqual([]);
+    expect(buffer.version.value).toBe(0);
   });
 });

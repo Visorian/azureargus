@@ -45,6 +45,4 @@ export interface FirewallLogFilters {
   protocol: string;
   source: string;
   destination: string;
-  from: string;
-  to: string;
 }

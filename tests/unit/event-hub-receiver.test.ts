@@ -1,4 +1,93 @@
-import { eventsToFirewallLogs } from "../../app/composables/useEventHubReceiver";
+import { computed, shallowRef, type Ref } from "vue";
+
+import {
+  createInitialEventHubConnectionForm,
+  type EventHubConnectionForm,
+} from "../../app/composables/useEventHubConnection";
+import {
+  eventsToFirewallLogs,
+  type CreateEventHubReceiverClient,
+  type EventHubReceiverClient,
+} from "../../app/composables/useEventHubReceiver";
+import type { FirewallLogRecord } from "../../app/types/firewall";
+
+type ReceiverHandlers = Parameters<EventHubReceiverClient["subscribe"]>[0];
+
+function createDeferred<T>() {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+
+  return {
+    promise,
+    resolve: resolvePromise,
+  };
+}
+
+function createValidForm(): EventHubConnectionForm {
+  const form = createInitialEventHubConnectionForm();
+  form.connectionString =
+    "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=fw-logs";
+  return form;
+}
+
+function installNuxtMocks(order: string[] = []) {
+  const logs = shallowRef<FirewallLogRecord[]>([]);
+  const snapshotVersion = shallowRef(0);
+  const pushMany = vi.fn((records: readonly FirewallLogRecord[]) => {
+    order.push("batch-flush");
+    logs.value = [...records, ...logs.value];
+  });
+  const historyFlush = vi.fn(async () => {
+    order.push("history-flush");
+  });
+  const queueRecords = vi.fn();
+
+  vi.stubGlobal(
+    "useState",
+    <T>(_key: string, initializer: () => T): Ref<T> => shallowRef(initializer()),
+  );
+  vi.stubGlobal("computed", computed);
+  vi.stubGlobal("useBoundedLogBuffer", () => ({
+    items: logs,
+    pushMany,
+    flush: vi.fn(),
+    getRawItems: () => logs.value,
+    version: snapshotVersion,
+    clear: () => {
+      logs.value = [];
+      snapshotVersion.value += 1;
+    },
+  }));
+  vi.stubGlobal("useLogHistoryPersistence", () => ({
+    clearQueueIfDisabled: vi.fn(),
+    flush: historyFlush,
+    queueRecords,
+  }));
+
+  return {
+    historyFlush,
+    logs,
+    pushMany,
+    queueRecords,
+  };
+}
+
+function requireHandlers(handlers: ReceiverHandlers | undefined) {
+  if (!handlers) {
+    throw new Error("Receiver handlers were not registered.");
+  }
+
+  return handlers;
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.resetModules();
+});
 
 describe("Event Hub receiver helpers", () => {
   it("allocates unique record indexes across expanded queued events", () => {
@@ -31,5 +120,234 @@ describe("Event Hub receiver helpers", () => {
       "0:10:8:2026-07-09T12:00:01.000Z",
       "0:11:9:2026-07-09T12:00:02.000Z",
     ]);
+  });
+
+  it("does not create or subscribe a client after connect is invalidated", async () => {
+    installNuxtMocks();
+    const factory = createDeferred<CreateEventHubReceiverClient>();
+    const createClient = vi.fn<CreateEventHubReceiverClient>();
+    const loadClientFactory = vi.fn(() => factory.promise);
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory });
+
+    const connectPromise = receiver.connect(createValidForm());
+    await vi.waitFor(() => expect(loadClientFactory).toHaveBeenCalledOnce());
+
+    await receiver.disconnect();
+    factory.resolve(createClient);
+
+    await expect(connectPromise).resolves.toBe(false);
+    expect(createClient).not.toHaveBeenCalled();
+    expect(receiver.status.value).toBe("idle");
+  });
+
+  it("allows only latest competing connect to create a client", async () => {
+    installNuxtMocks();
+    const firstFactory = createDeferred<CreateEventHubReceiverClient>();
+    const firstCreateClient = vi.fn<CreateEventHubReceiverClient>();
+    const secondSubscribe = vi.fn(() => ({ close: vi.fn(async () => undefined) }));
+    const secondClient: EventHubReceiverClient = {
+      close: vi.fn(async () => undefined),
+      subscribe: secondSubscribe,
+    };
+    const secondCreateClient = vi.fn(() => secondClient);
+    const loadClientFactory = vi
+      .fn<() => Promise<CreateEventHubReceiverClient>>()
+      .mockReturnValueOnce(firstFactory.promise)
+      .mockResolvedValueOnce(secondCreateClient);
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory });
+
+    const firstConnect = receiver.connect(createValidForm());
+    await vi.waitFor(() => expect(loadClientFactory).toHaveBeenCalledOnce());
+    const secondConnect = receiver.connect(createValidForm());
+
+    await expect(secondConnect).resolves.toBe(true);
+    firstFactory.resolve(firstCreateClient);
+
+    await expect(firstConnect).resolves.toBe(false);
+    expect(firstCreateClient).not.toHaveBeenCalled();
+    expect(secondCreateClient).toHaveBeenCalledOnce();
+    expect(secondSubscribe).toHaveBeenCalledOnce();
+    expect(receiver.status.value).toBe("connected");
+
+    await receiver.disconnect();
+  });
+
+  it("uses selected lookback for subscription start position", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    installNuxtMocks();
+    const subscribe = vi.fn<EventHubReceiverClient["subscribe"]>(() => ({
+      close: vi.fn(async () => undefined),
+    }));
+    const client: EventHubReceiverClient = {
+      close: vi.fn(async () => undefined),
+      subscribe,
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    const form = createValidForm();
+    form.lookbackMinutes = 3;
+
+    await expect(receiver.connect(form)).resolves.toBe(true);
+
+    expect(subscribe.mock.calls[0]?.[1].startPosition.enqueuedOn.toISOString()).toBe(
+      "2026-07-10T11:57:00.000Z",
+    );
+
+    await receiver.disconnect();
+  });
+
+  it("collects filter options incrementally and resets them on clear", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents(
+      [
+        {
+          body: {
+            records: [
+              { category: "AZFWNetworkRule", action: "Allow", protocol: "TCP" },
+              { category: "AZFWApplicationRule", action: "allow", protocol: "HTTPS" },
+            ],
+          },
+        },
+      ],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(receiver.categoryOptions.value).toEqual(["AZFWApplicationRule", "AZFWNetworkRule"]);
+    expect(receiver.actionOptions.value).toEqual(["Allow"]);
+    expect(receiver.protocolOptions.value).toEqual(["HTTPS", "TCP"]);
+
+    receiver.clear();
+    expect(receiver.categoryOptions.value).toEqual([]);
+    expect(receiver.actionOptions.value).toEqual([]);
+    expect(receiver.protocolOptions.value).toEqual([]);
+    await receiver.disconnect();
+  });
+
+  it("closes resources before flushing and ignores teardown callbacks", async () => {
+    const order: string[] = [];
+    const mocks = installNuxtMocks(order);
+    let handlers: ReceiverHandlers | undefined;
+    const subscriptionClose = vi.fn(async () => {
+      order.push("subscription-close");
+      const registeredHandlers = requireHandlers(handlers);
+      await registeredHandlers.processEvents(
+        [{ body: { msg: "late", time: "2026-07-09T12:01:00.000Z" } }],
+        { partitionId: "0" },
+      );
+      await registeredHandlers.processError(new Error("late receiver error"));
+    });
+    const clientClose = vi.fn(async () => {
+      order.push("client-close");
+    });
+    const client: EventHubReceiverClient = {
+      close: clientClose,
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: subscriptionClose };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+
+    await expect(receiver.connect(createValidForm())).resolves.toBe(true);
+    order.length = 0;
+    await requireHandlers(handlers).processEvents(
+      [{ body: { msg: "pending", time: "2026-07-09T12:00:00.000Z" } }],
+      { partitionId: "0" },
+    );
+
+    await receiver.disconnect();
+
+    expect(order).toEqual(["subscription-close", "client-close", "batch-flush", "history-flush"]);
+    expect(mocks.logs.value).toHaveLength(1);
+    expect(mocks.queueRecords).toHaveBeenCalledOnce();
+    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.errors.value).toEqual([]);
+    expect(receiver.status.value).toBe("idle");
+  });
+
+  it("serializes overlapping disconnect calls", async () => {
+    installNuxtMocks();
+    const closeBarrier = createDeferred<void>();
+    const subscriptionClose = vi.fn(() => closeBarrier.promise);
+    const clientClose = vi.fn(async () => undefined);
+    const client: EventHubReceiverClient = {
+      close: clientClose,
+      subscribe: () => ({ close: subscriptionClose }),
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    await receiver.connect(createValidForm());
+
+    const firstDisconnect = receiver.disconnect();
+    const secondDisconnect = receiver.disconnect();
+
+    expect(secondDisconnect).toBe(firstDisconnect);
+    expect(receiver.status.value).toBe("idle");
+    expect(subscriptionClose).toHaveBeenCalledOnce();
+
+    closeBarrier.resolve();
+    await Promise.all([firstDisconnect, secondDisconnect]);
+
+    expect(subscriptionClose).toHaveBeenCalledOnce();
+    expect(clientClose).toHaveBeenCalledOnce();
+    expect(receiver.status.value).toBe("idle");
+  });
+
+  it("attempts both closes, reports failures, and clears resource references", async () => {
+    installNuxtMocks();
+    const subscriptionClose = vi.fn(async () => {
+      throw new Error("subscription close failed");
+    });
+    const clientClose = vi.fn(async () => {
+      throw new Error("client close failed");
+    });
+    const client: EventHubReceiverClient = {
+      close: clientClose,
+      subscribe: () => ({ close: subscriptionClose }),
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    await receiver.connect(createValidForm());
+
+    await expect(receiver.disconnect()).rejects.toThrow(
+      "subscription close failed client close failed",
+    );
+
+    expect(subscriptionClose).toHaveBeenCalledOnce();
+    expect(clientClose).toHaveBeenCalledOnce();
+    expect(receiver.errors.value).toEqual(["subscription close failed", "client close failed"]);
+    expect(receiver.status.value).toBe("idle");
+
+    await expect(receiver.disconnect()).resolves.toBeUndefined();
+    expect(subscriptionClose).toHaveBeenCalledOnce();
+    expect(clientClose).toHaveBeenCalledOnce();
   });
 });

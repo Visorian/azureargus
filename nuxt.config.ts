@@ -11,6 +11,12 @@ export default defineNuxtConfig({
     versionNumber: process.env.VERSION_NUMBER || process.env.npm_package_version || "dev",
   },
   runtimeConfig: {
+    logAnalytics: {
+      tenantId: process.env.NUXT_LOG_ANALYTICS_TENANT_ID || "",
+      clientId: process.env.NUXT_LOG_ANALYTICS_CLIENT_ID || "",
+      clientSecret: process.env.NUXT_LOG_ANALYTICS_CLIENT_SECRET || "",
+      workspaceId: process.env.NUXT_LOG_ANALYTICS_WORKSPACE_ID || "",
+    },
     public: {
       allowAnonymousMode: process.env.NUXT_PUBLIC_ALLOW_ANONYMOUS_MODE !== "false",
       defaultLookbackMinutes: Number(process.env.NUXT_PUBLIC_DEFAULT_LOOKBACK_MINUTES || 15),
@@ -80,7 +86,14 @@ export default defineNuxtConfig({
         state: true,
         scope: ["openid", "profile", "email", "offline_access"],
         responseType: "code id_token",
-        optionalClaims: ["preferred_username", "family_name", "given_name", "groups"],
+        optionalClaims: [
+          "preferred_username",
+          "family_name",
+          "given_name",
+          "groups",
+          "tid",
+          "roles",
+        ],
       },
     },
     session: {

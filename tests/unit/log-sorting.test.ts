@@ -41,6 +41,17 @@ describe("log sorting", () => {
     expect(logs.map((log) => log.id)).toEqual(["deny", "allow"]);
   });
 
+  it("sorts Log snapshots by date even when input has another server order", () => {
+    const logs = [
+      createLog({ id: "oldest", timestamp: "2026-07-09T12:00:00.000Z" }),
+      createLog({ id: "newest", timestamp: "2026-07-09T12:00:01.000Z" }),
+    ];
+
+    const result = sortFirewallLogs(logs, createDefaultLogSort(), false);
+
+    expect(result.map((log) => log.id)).toEqual(["newest", "oldest"]);
+  });
+
   it("toggles active columns and defaults date to descending", () => {
     expect(getNextSortDirection({ key: "action", direction: "asc" }, "action")).toBe("desc");
     expect(getNextSortDirection({ key: "action", direction: "asc" }, "timestamp")).toBe("desc");

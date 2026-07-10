@@ -1,5 +1,13 @@
 export const DEFAULT_CONSUMER_GROUP = "$Default";
-export const DEFAULT_LOOKBACK_MINUTES = 15;
+export type EventHubLookbackMinutes = 1 | 3 | 5 | 10 | 15;
+export const EVENT_HUB_LOOKBACK_OPTIONS = [
+  { label: "Last 1 minute", value: 1 },
+  { label: "Last 3 minutes", value: 3 },
+  { label: "Last 5 minutes", value: 5 },
+  { label: "Last 10 minutes", value: 10 },
+  { label: "Last 15 minutes", value: 15 },
+] satisfies Array<{ label: string; value: EventHubLookbackMinutes }>;
+export const DEFAULT_LOOKBACK_MINUTES: EventHubLookbackMinutes = 15;
 export const DEFAULT_BUFFER_SIZE = 5_000;
 export const RAW_BUFFER_MULTIPLIER = 10;
 export const MAX_RAW_BUFFER_SIZE = 50_000;
@@ -16,18 +24,26 @@ export interface EventHubConnectionForm {
   connectionString: string;
   consumerGroup: string;
   eventHubName: string;
-  lookbackMinutes: number;
+  lookbackMinutes: EventHubLookbackMinutes;
   bufferSize: number;
 }
 
+export function isEventHubLookbackMinutes(value: number): value is EventHubLookbackMinutes {
+  return value === 1 || value === 3 || value === 5 || value === 10 || value === 15;
+}
+
+export function normalizeEventHubLookbackMinutes(value: number): EventHubLookbackMinutes {
+  return isEventHubLookbackMinutes(value) ? value : DEFAULT_LOOKBACK_MINUTES;
+}
+
 export function createInitialEventHubConnectionForm(
-  defaultLookbackMinutes = DEFAULT_LOOKBACK_MINUTES,
+  defaultLookbackMinutes: number = DEFAULT_LOOKBACK_MINUTES,
 ): EventHubConnectionForm {
   return {
     connectionString: "",
     consumerGroup: DEFAULT_CONSUMER_GROUP,
     eventHubName: "",
-    lookbackMinutes: defaultLookbackMinutes,
+    lookbackMinutes: normalizeEventHubLookbackMinutes(defaultLookbackMinutes),
     bufferSize: DEFAULT_BUFFER_SIZE,
   };
 }
@@ -89,8 +105,8 @@ export function validateEventHubConnectionForm(form: EventHubConnectionForm) {
     errors.push("Consumer group is required.");
   }
 
-  if (!Number.isFinite(form.lookbackMinutes) || form.lookbackMinutes < 0) {
-    errors.push("Lookback window must be zero or more minutes.");
+  if (!isEventHubLookbackMinutes(form.lookbackMinutes)) {
+    errors.push("Lookback window must be 1, 3, 5, 10, or 15 minutes.");
   }
 
   if (!Number.isInteger(form.bufferSize) || form.bufferSize < 100) {

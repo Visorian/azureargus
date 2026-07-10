@@ -1,5 +1,3 @@
-import type { EventHubConsumerClient } from "@azure/event-hubs";
-
 import {
   DEFAULT_BUFFER_SIZE,
   getEventHubLookbackStart,
@@ -14,18 +12,85 @@ import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "~/types/firewall";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
-type ReceiverSubscription = { close(): Promise<void> };
+export interface ReceiverSubscription {
+  close(): Promise<void>;
+}
 export interface EventHubLogEvent {
   body: unknown;
   enqueuedTimeUtc?: Date | string;
   sequenceNumber?: number | string;
 }
 
-let client: EventHubConsumerClient | null = null;
+interface ReceiverPartitionContext {
+  partitionId: string;
+}
+
+export interface EventHubReceiverClient {
+  close(): Promise<void>;
+  subscribe(
+    handlers: {
+      processEvents(
+        events: readonly EventHubLogEvent[],
+        context: ReceiverPartitionContext,
+      ): Promise<void>;
+      processError(error: unknown): Promise<void>;
+    },
+    options: { startPosition: { enqueuedOn: Date } },
+  ): ReceiverSubscription;
+}
+
+export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => EventHubReceiverClient;
+
+export interface EventHubReceiverOptions {
+  loadClientFactory?: () => Promise<CreateEventHubReceiverClient>;
+}
+
+let client: EventHubReceiverClient | null = null;
 let subscription: ReceiverSubscription | null = null;
+let connectionGeneration = 0;
+let disconnectPromise: Promise<void> | null = null;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Event Hub receiver error.";
+}
+
+function addFilterOption(options: string[], seen: Set<string>, value: string) {
+  const trimmed = value.trim();
+  const key = trimmed.toLowerCase();
+  if (!trimmed || seen.has(key)) {
+    return false;
+  }
+
+  seen.add(key);
+  options.push(trimmed);
+  return true;
+}
+
+function sortFilterOptions(options: string[]) {
+  return options.sort((left, right) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" }),
+  );
+}
+
+async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient> {
+  const { EventHubConsumerClient } = await import("@azure/event-hubs");
+
+  return (form) => {
+    const eventHubName = getEventHubName(form);
+    const eventHubClient =
+      eventHubName && !parseEventHubConnectionString(form.connectionString).has("entitypath")
+        ? new EventHubConsumerClient(
+            form.consumerGroup.trim(),
+            form.connectionString.trim(),
+            eventHubName,
+          )
+        : new EventHubConsumerClient(form.consumerGroup.trim(), form.connectionString.trim());
+
+    return {
+      close: () => eventHubClient.close(),
+      subscribe: (handlers, options) => eventHubClient.subscribe(handlers, options),
+    };
+  };
 }
 
 function eventToFirewallLogs(
@@ -64,44 +129,134 @@ export function eventsToFirewallLogs(
   };
 }
 
-export function useEventHubReceiver() {
+export function useEventHubReceiver({
+  loadClientFactory = loadEventHubClientFactory,
+}: EventHubReceiverOptions = {}) {
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
   const errors = useState<string[]>("event-hub-errors", () => []);
   const receivedCount = useState("event-hub-received-count", () => 0);
   const lastReceivedAt = useState<string | null>("event-hub-last-received-at", () => null);
   const visibleLimit = useState("event-hub-visible-limit", () => DEFAULT_BUFFER_SIZE);
   const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
-  const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize);
+  const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize, {
+    publishedSize: visibleLimit,
+  });
+  const categoryOptions = useState<string[]>("event-hub-category-options", () => []);
+  const actionOptions = useState<string[]>("event-hub-action-options", () => []);
+  const protocolOptions = useState<string[]>("event-hub-protocol-options", () => []);
+  const categoryKeys = new Set(categoryOptions.value.map((value) => value.toLowerCase()));
+  const actionKeys = new Set(actionOptions.value.map((value) => value.toLowerCase()));
+  const protocolKeys = new Set(protocolOptions.value.map((value) => value.toLowerCase()));
   const logHistoryPersistence = useLogHistoryPersistence();
   const paused = computed(() => status.value === "paused");
   let nextRecordIndex = receivedCount.value;
   const batcher = createLogBatcher<FirewallLogRecord>({
     onFlush: (records) => {
       buffer.pushMany(records);
+      const nextCategories = [...categoryOptions.value];
+      const nextActions = [...actionOptions.value];
+      const nextProtocols = [...protocolOptions.value];
+      let categoriesChanged = false;
+      let actionsChanged = false;
+      let protocolsChanged = false;
+
+      for (const record of records) {
+        categoriesChanged =
+          addFilterOption(nextCategories, categoryKeys, record.category) || categoriesChanged;
+        actionsChanged = addFilterOption(nextActions, actionKeys, record.action) || actionsChanged;
+        protocolsChanged =
+          addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged;
+      }
+
+      if (categoriesChanged) {
+        categoryOptions.value = sortFilterOptions(nextCategories);
+      }
+      if (actionsChanged) {
+        actionOptions.value = sortFilterOptions(nextActions);
+      }
+      if (protocolsChanged) {
+        protocolOptions.value = sortFilterOptions(nextProtocols);
+      }
       receivedCount.value += records.length;
       lastReceivedAt.value = records.at(-1)?.enqueuedTimeUtc ?? new Date().toISOString();
       logHistoryPersistence.queueRecords(records);
     },
   });
 
-  async function disconnect() {
-    batcher.flush();
-    await logHistoryPersistence.flush();
-    logHistoryPersistence.clearQueueIfDisabled();
+  function teardown() {
+    status.value = "idle";
 
-    if (subscription) {
-      await subscription.close();
-      subscription = null;
+    if (disconnectPromise) {
+      return disconnectPromise;
     }
 
-    if (client) {
-      await client.close();
-      client = null;
-    }
+    const activeSubscription = subscription;
+    const activeClient = client;
+    subscription = null;
+    client = null;
 
-    if (status.value !== "error") {
-      status.value = "idle";
-    }
+    const teardownPromise = (async () => {
+      const failures: unknown[] = [];
+
+      if (activeSubscription) {
+        try {
+          await activeSubscription.close();
+        } catch (error: unknown) {
+          failures.push(error);
+        }
+      }
+
+      if (activeClient) {
+        try {
+          await activeClient.close();
+        } catch (error: unknown) {
+          failures.push(error);
+        }
+      }
+
+      try {
+        batcher.flush();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+
+      try {
+        buffer.flush();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+
+      try {
+        await logHistoryPersistence.flush();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+
+      try {
+        logHistoryPersistence.clearQueueIfDisabled();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+
+      if (failures.length > 0) {
+        const messages = failures.map(getErrorMessage);
+        errors.value = [...messages, ...errors.value].slice(0, 5);
+        throw new AggregateError(failures, messages.join(" "));
+      }
+    })();
+
+    const serializedPromise = teardownPromise.finally(() => {
+      if (disconnectPromise === serializedPromise) {
+        disconnectPromise = null;
+      }
+    });
+    disconnectPromise = serializedPromise;
+    return serializedPromise;
+  }
+
+  function disconnect() {
+    connectionGeneration += 1;
+    return teardown();
   }
 
   async function connect(form: EventHubConnectionForm) {
@@ -111,27 +266,35 @@ export function useEventHubReceiver() {
       return false;
     }
 
-    await disconnect();
+    const generation = ++connectionGeneration;
+
+    try {
+      await teardown();
+    } catch {
+      return false;
+    }
+
+    if (generation !== connectionGeneration) {
+      return false;
+    }
+
     status.value = "connecting";
     errors.value = [];
     visibleLimit.value = form.bufferSize;
 
     try {
-      const { EventHubConsumerClient } = await import("@azure/event-hubs");
-      const eventHubName = getEventHubName(form);
-      client =
-        eventHubName && !parseEventHubConnectionString(form.connectionString).has("entitypath")
-          ? new EventHubConsumerClient(
-              form.consumerGroup.trim(),
-              form.connectionString.trim(),
-              eventHubName,
-            )
-          : new EventHubConsumerClient(form.consumerGroup.trim(), form.connectionString.trim());
+      const createClient = await loadClientFactory();
+
+      if (generation !== connectionGeneration) {
+        return false;
+      }
+
+      client = createClient(form);
 
       subscription = client.subscribe(
         {
           processEvents: async (events, context) => {
-            if (status.value === "paused") {
+            if (generation !== connectionGeneration || status.value !== "connected") {
               return;
             }
 
@@ -140,6 +303,10 @@ export function useEventHubReceiver() {
             batcher.pushMany(result.records);
           },
           processError: async (error) => {
+            if (generation !== connectionGeneration || status.value !== "connected") {
+              return;
+            }
+
             errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
             status.value = "error";
           },
@@ -154,8 +321,19 @@ export function useEventHubReceiver() {
       status.value = "connected";
       return true;
     } catch (error: unknown) {
-      errors.value = [getErrorMessage(error)];
-      status.value = "error";
+      if (generation !== connectionGeneration) {
+        return false;
+      }
+
+      const connectionError = getErrorMessage(error);
+
+      await teardown().catch(() => undefined);
+
+      if (generation === connectionGeneration) {
+        errors.value = [connectionError, ...errors.value].slice(0, 5);
+        status.value = "error";
+      }
+
       return false;
     }
   }
@@ -176,6 +354,12 @@ export function useEventHubReceiver() {
     batcher.clear();
     logHistoryPersistence.clearQueueIfDisabled();
     buffer.clear();
+    categoryOptions.value = [];
+    actionOptions.value = [];
+    protocolOptions.value = [];
+    categoryKeys.clear();
+    actionKeys.clear();
+    protocolKeys.clear();
     receivedCount.value = 0;
     nextRecordIndex = 0;
     lastReceivedAt.value = null;
@@ -183,8 +367,13 @@ export function useEventHubReceiver() {
 
   return {
     status,
+    actionOptions,
+    categoryOptions,
     errors,
+    getRawLogs: buffer.getRawItems,
     logs: buffer.items,
+    protocolOptions,
+    snapshotVersion: buffer.version,
     visibleLimit,
     receivedCount,
     lastReceivedAt,

@@ -109,6 +109,20 @@ test("anonymous mode can reach logs page", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/logs/);
   await expect(page.getByText("Event Hub connection")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Real-time analysis" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Log analysis" })).toBeDisabled();
+
+  const lookbackSelect = page.getByRole("combobox", { name: "Lookback" });
+  await lookbackSelect.click();
+  await expect(page.getByRole("option")).toHaveText([
+    "Last 1 minute",
+    "Last 3 minutes",
+    "Last 5 minutes",
+    "Last 10 minutes",
+    "Last 15 minutes",
+  ]);
+  await page.keyboard.press("Escape");
+
   const logRetentionSwitch = page.getByRole("switch", { name: "Local log retention" });
   await expect(logRetentionSwitch).toBeVisible();
   await expect(logRetentionSwitch).not.toBeChecked();
@@ -130,4 +144,24 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(logRetentionSwitch).not.toBeChecked();
   await expect.poll(() => countLogHistory(page)).toBe(0);
   await expect(page.getByText("No logs received")).toBeVisible();
+});
+
+test("anonymous request cannot query Log Analytics", async ({ request }) => {
+  const response = await request.post("/api/log-analytics/query", {
+    data: {
+      filters: {
+        action: "",
+        category: "",
+        destination: "",
+        protocol: "",
+        search: "",
+        source: "",
+      },
+      from: "2026-07-10T10:00:00.000Z",
+      sort: { direction: "desc", key: "timestamp" },
+      to: "2026-07-10T10:15:00.000Z",
+    },
+  });
+
+  expect(response.status()).toBe(401);
 });

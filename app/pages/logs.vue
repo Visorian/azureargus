@@ -3,7 +3,14 @@ import { RecycleScroller } from "vue-virtual-scroller";
 
 import visorianNegative from "~/assets/img/visorian-negative.svg";
 import visorianPositive from "~/assets/img/visorian-positive.svg";
-import type { EventHubConnectionForm } from "~/composables/useEventHubConnection";
+import {
+  EVENT_HUB_LOOKBACK_OPTIONS,
+  type EventHubConnectionForm,
+} from "~/composables/useEventHubConnection";
+import type { AnalysisMode } from "~/composables/useAnalysisMode";
+import { createDefaultLogFilters } from "~/composables/useLogQuery";
+import { createDefaultLogSort } from "~/composables/useLogSorting";
+import { hasLogAnalysisRole, LOG_ANALYSIS_CATEGORIES } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
 
 definePageMeta({
@@ -48,12 +55,65 @@ const sidebarCollapsed = ref(false);
 const detailOpen = ref(false);
 const selectedLog = ref<FirewallLogRecord | null>(null);
 const toast = useToast();
+const anonymousMode = useAnonymousMode();
+const { loggedIn, user } = useOidcAuth();
 const logHistory = useLogHistoryPersistence();
 const clearingLogHistory = ref(false);
 const logHistoryEnabled = computed(() => logHistory.enabled.value);
 const logHistoryError = computed(() => logHistory.lastError.value);
-const { filters, filteredLogs, resetFilters } = useLogQuery(receiver.logs, receiver.visibleLimit);
-const { sortedLogs, setSort, getSortIcon, getAriaSort } = useLogSorting(filteredLogs);
+const analysisMode = ref<AnalysisMode>("real-time-analysis");
+const logAnalysisActive = computed(() => analysisMode.value === "log-analysis");
+const canUseLogAnalysis = computed(
+  () => loggedIn.value && !anonymousMode.enabled.value && hasLogAnalysisRole(user.value),
+);
+const realTimeQuery = useLogQuery(receiver.logs, {
+  rawSource: {
+    getRecords: receiver.getRawLogs,
+    version: receiver.snapshotVersion,
+  },
+  visibleLimit: receiver.visibleLimit,
+});
+const realTimeSorting = useLogSorting(realTimeQuery.filteredLogs);
+const logFilters = reactive(createDefaultLogFilters());
+const logSort = reactive(createDefaultLogSort());
+const logQuery = useLogAnalyticsQuery({
+  active: logAnalysisActive,
+  filters: logFilters,
+  onBeforeReplace: closeDetail,
+  onError: (message) => {
+    toast.add({
+      title: message,
+      color: "error",
+      icon: "i-lucide-circle-alert",
+    });
+  },
+  sort: logSort,
+});
+const {
+  canApplyFilters: logCanApplyFilters,
+  draftRange: logDraftRange,
+  hasRun: logHasRun,
+  appliedRange: logAppliedRange,
+  rangeDirty: logRangeDirty,
+  rangeError: logRangeError,
+  refinementPending: logRefinementPending,
+  status: logQueryStatus,
+  truncated: logResultsTruncated,
+} = logQuery;
+const logResultQuery = useLogQuery(logQuery.records, {
+  datasetKey: logQuery.datasetVersion,
+  filters: logFilters,
+  visibleLimit: logQuery.visibleLimit,
+});
+const logResultSorting = useLogSorting(logResultQuery.filteredLogs, false, logSort);
+const modeState = useAnalysisMode({
+  abortLogAnalysis: logQuery.abort,
+  canUseLogAnalysis,
+  closeDetail,
+  disconnectRealTime: receiver.disconnect,
+  mode: analysisMode,
+});
+const modeTransitioning = modeState.transitioning;
 const actionLabels: Record<string, string> = {
   allow: "Allow",
   deny: "Deny",
@@ -61,20 +121,45 @@ const actionLabels: Record<string, string> = {
   snat: "SNAT",
 };
 
-const categories = computed(() => {
-  return [...new Set(receiver.logs.value.map((log) => log.category).filter(Boolean))].sort();
-});
-const actions = computed(() => {
+const realTimeActions = computed(() => {
   return createCaseInsensitiveFilterOptions(
-    receiver.logs.value.map((log) => log.action),
+    receiver.actionOptions.value,
     (value) => actionLabels[value.toLowerCase()] ?? value,
   );
 });
-const protocols = computed(() => {
-  return createCaseInsensitiveFilterOptions(
-    receiver.logs.value.map((log) => log.protocol),
-    (value) => value.toUpperCase(),
+const realTimeProtocols = computed(() => {
+  return createCaseInsensitiveFilterOptions(receiver.protocolOptions.value, (value) =>
+    value.toUpperCase(),
   );
+});
+const activeFilters = computed(() =>
+  logAnalysisActive.value ? logResultQuery.filters : realTimeQuery.filters,
+);
+const sortedLogs = computed(() =>
+  logAnalysisActive.value ? logResultSorting.sortedLogs.value : realTimeSorting.sortedLogs.value,
+);
+const categories = computed(() =>
+  logAnalysisActive.value ? [...LOG_ANALYSIS_CATEGORIES] : receiver.categoryOptions.value,
+);
+const actions = computed(() =>
+  logAnalysisActive.value ? logQuery.actionOptions.value : realTimeActions.value,
+);
+const protocols = computed(() =>
+  logAnalysisActive.value ? logQuery.protocolOptions.value : realTimeProtocols.value,
+);
+const activeStatus = computed(() =>
+  logAnalysisActive.value ? logQuery.status.value : receiver.status.value,
+);
+const countLabel = computed(() => {
+  if (!logAnalysisActive.value) {
+    return `${sortedLogs.value.length} visible / ${receiver.receivedCount.value} received`;
+  }
+
+  const updating = logQuery.status.value === "refreshing" || logQuery.refinementPending.value;
+  const suffix = logQuery.truncated.value
+    ? ` / first ${logQuery.limit.value?.toLocaleString() ?? ""}`
+    : "";
+  return `${sortedLogs.value.length} visible${suffix}${updating ? " / updating" : ""}`;
 });
 const parsedDetailFields = computed<DetailField[]>(() => {
   const log = selectedLog.value;
@@ -82,7 +167,7 @@ const parsedDetailFields = computed<DetailField[]>(() => {
     return [];
   }
 
-  return [
+  const fields: DetailField[] = [
     { label: "Timestamp", value: formatTime(log.timestamp), mono: true },
     { label: "Category", value: log.category },
     { label: "Action", value: log.action },
@@ -93,14 +178,21 @@ const parsedDetailFields = computed<DetailField[]>(() => {
     { label: "Source port", value: log.sourcePort, mono: true },
     { label: "Destination IP", value: log.destinationIp, mono: true },
     { label: "Destination port", value: log.destinationPort, mono: true },
-    { label: "Partition", value: log.partitionId, mono: true },
-    { label: "Sequence", value: log.sequenceNumber, mono: true },
-    {
-      label: "Enqueued",
-      value: log.enqueuedTimeUtc ? formatTime(log.enqueuedTimeUtc) : undefined,
-      mono: true,
-    },
   ];
+
+  if (!logAnalysisActive.value) {
+    fields.push(
+      { label: "Partition", value: log.partitionId, mono: true },
+      { label: "Sequence", value: log.sequenceNumber, mono: true },
+      {
+        label: "Enqueued",
+        value: log.enqueuedTimeUtc ? formatTime(log.enqueuedTimeUtc) : undefined,
+        mono: true,
+      },
+    );
+  }
+
+  return fields;
 });
 const rawLogJson = computed(() => {
   if (selectedLog.value === null) {
@@ -108,6 +200,43 @@ const rawLogJson = computed(() => {
   }
 
   return JSON.stringify(selectedLog.value.raw, null, 2);
+});
+const emptyState = computed(() => {
+  if (!logAnalysisActive.value) {
+    return receiver.logs.value.length > 0
+      ? {
+          title: "No matching logs",
+          description: "Adjust or reset the active filters.",
+        }
+      : {
+          title: "No logs received",
+          description: "Connect to an Event Hub with a Listen-only SAS connection string.",
+        };
+  }
+
+  if (!logQuery.hasRun.value) {
+    return {
+      title: "No query run",
+      description: "Choose an absolute time range and run Log Analytics query.",
+    };
+  }
+  if (logQuery.status.value === "refreshing" || logQuery.refinementPending.value) {
+    return {
+      title: "Updating results",
+      description: "Current filters are being applied in Log Analytics.",
+    };
+  }
+  if (logQuery.records.value.length > 0) {
+    return {
+      title: "No matching logs",
+      description: "No records match active filters.",
+    };
+  }
+
+  return {
+    title: "No logs in range",
+    description: "No Azure Firewall records were returned for applied time range.",
+  };
 });
 
 watch(receiver.errors, (errors) => {
@@ -124,7 +253,17 @@ watch(receiver.errors, (errors) => {
   });
 });
 
+watch(modeState.lastError, (error) => {
+  if (error) {
+    toast.add({ title: error, color: "error", icon: "i-lucide-circle-alert" });
+  }
+});
+
 async function connect() {
+  if (modeTransitioning.value || logAnalysisActive.value) {
+    return;
+  }
+
   connecting.value = true;
   try {
     await receiver.connect(connectionForm);
@@ -145,6 +284,67 @@ async function updateLogRetention(enabled: boolean) {
   } finally {
     clearingLogHistory.value = false;
   }
+}
+
+async function updateAnalysisMode(mode: AnalysisMode) {
+  await modeState.setMode(mode);
+}
+
+function closeDetail() {
+  detailOpen.value = false;
+  selectedLog.value = null;
+}
+
+function resetActiveFilters() {
+  if (logAnalysisActive.value) {
+    logResultQuery.resetFilters();
+    return;
+  }
+  realTimeQuery.resetFilters();
+}
+
+function setSort(key: FirewallLogSortKey) {
+  if (logAnalysisActive.value) {
+    logResultSorting.setSort(key);
+    return;
+  }
+  realTimeSorting.setSort(key);
+}
+
+function getSortIcon(key: FirewallLogSortKey) {
+  return logAnalysisActive.value
+    ? logResultSorting.getSortIcon(key)
+    : realTimeSorting.getSortIcon(key);
+}
+
+function getAriaSort(key: FirewallLogSortKey) {
+  return logAnalysisActive.value
+    ? logResultSorting.getAriaSort(key)
+    : realTimeSorting.getAriaSort(key);
+}
+
+function createAction(value: string) {
+  activeFilters.value.action = value;
+}
+
+function createProtocol(value: string) {
+  activeFilters.value.protocol = value;
+}
+
+function clearActiveResults() {
+  if (logAnalysisActive.value) {
+    logQuery.clear();
+    return;
+  }
+  receiver.clear();
+}
+
+async function runLogAnalysis() {
+  await logQuery.run();
+}
+
+function applyLogFilters() {
+  logQuery.scheduleRefinement(true);
 }
 
 function displayValue(value: string | undefined) {
@@ -218,14 +418,17 @@ function rowTitle(log: FirewallLogRecord) {
 }
 
 function statusColor(status: string) {
-  if (status === "connected") {
+  if (status === "connected" || status === "success") {
     return "success";
   }
-  if (status === "paused") {
+  if (status === "paused" || status === "refreshing") {
     return "warning";
   }
   if (status === "error") {
     return "error";
+  }
+  if (status === "loading" || status === "connecting") {
+    return "info";
   }
   return "neutral";
 }
@@ -268,84 +471,127 @@ function statusColor(status: string) {
       />
 
       <section class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-        <div>
-          <h2 class="text-sm font-semibold">Event Hub connection</h2>
-          <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-            Use a Listen-only SAS policy. Values stay in memory.
-          </p>
-        </div>
+        <template v-if="!logAnalysisActive">
+          <div>
+            <h2 class="text-sm font-semibold">Event Hub connection</h2>
+            <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+              Use a Listen-only SAS policy. Values stay in memory.
+            </p>
+          </div>
 
-        <UForm :state="connectionForm" class="space-y-3" @submit="connect">
-          <UFormField label="Connection string" name="connectionString" required>
-            <UTextarea
-              v-model="connectionForm.connectionString"
-              :rows="4"
-              class="w-full"
-              placeholder="Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=..."
+          <UForm :state="connectionForm" class="space-y-3" @submit="connect">
+            <UFormField label="Connection string" name="connectionString" required>
+              <UTextarea
+                v-model="connectionForm.connectionString"
+                :rows="4"
+                class="w-full"
+                placeholder="Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=..."
+              />
+            </UFormField>
+            <UFormField label="Consumer group" name="consumerGroup" required>
+              <UInput v-model="connectionForm.consumerGroup" class="w-full" />
+            </UFormField>
+            <UFormField label="Event Hub name" name="eventHubName">
+              <UInput
+                v-model="connectionForm.eventHubName"
+                class="w-full"
+                placeholder="Only needed without EntityPath"
+              />
+            </UFormField>
+            <UFormField label="Lookback" name="lookbackMinutes">
+              <USelect
+                v-model="connectionForm.lookbackMinutes"
+                :items="EVENT_HUB_LOOKBACK_OPTIONS"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Visible rows" name="bufferSize">
+              <UInput
+                v-model.number="connectionForm.bufferSize"
+                type="number"
+                min="100"
+                step="100"
+                class="w-full"
+              />
+            </UFormField>
+            <div class="flex gap-2">
+              <UButton
+                type="submit"
+                color="primary"
+                variant="solid"
+                icon="i-lucide-radio-receiver"
+                label="Connect"
+                :disabled="modeTransitioning"
+                :loading="connecting"
+              />
+              <UButton
+                variant="outline"
+                color="neutral"
+                icon="i-lucide-unplug"
+                label="Disconnect"
+                @click="receiver.disconnect"
+              />
+            </div>
+          </UForm>
+
+          <div class="border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800">
+            <USwitch
+              label="Local log retention"
+              :model-value="logHistoryEnabled"
+              :disabled="clearingLogHistory"
+              :loading="clearingLogHistory"
+              @update:model-value="updateLogRetention"
             />
-          </UFormField>
-          <UFormField label="Consumer group" name="consumerGroup" required>
-            <UInput v-model="connectionForm.consumerGroup" class="w-full" />
-          </UFormField>
-          <UFormField label="Event Hub name" name="eventHubName">
-            <UInput
-              v-model="connectionForm.eventHubName"
-              class="w-full"
-              placeholder="Only needed without EntityPath"
-            />
-          </UFormField>
-          <UFormField label="Lookback minutes" name="lookbackMinutes">
-            <UInput
-              v-model.number="connectionForm.lookbackMinutes"
-              type="number"
-              min="0"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField label="Visible rows" name="bufferSize">
-            <UInput
-              v-model.number="connectionForm.bufferSize"
-              type="number"
-              min="100"
-              step="100"
-              class="w-full"
-            />
-          </UFormField>
-          <div class="flex gap-2">
+            <p
+              v-if="logHistoryError"
+              role="alert"
+              class="mt-2 text-xs text-red-600 dark:text-red-400"
+            >
+              {{ logHistoryError }}
+            </p>
+          </div>
+        </template>
+
+        <template v-else>
+          <div>
+            <h2 class="text-sm font-semibold">Log Analytics query</h2>
+            <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+              Query configured Azure Firewall workspace.
+            </p>
+          </div>
+
+          <UForm :state="logDraftRange" class="space-y-3" @submit="runLogAnalysis">
+            <UFormField label="Start" name="from" required>
+              <UInput v-model="logDraftRange.from" type="datetime-local" class="w-full" />
+            </UFormField>
+            <UFormField label="End" name="to" required>
+              <UInput v-model="logDraftRange.to" type="datetime-local" class="w-full" />
+            </UFormField>
             <UButton
               type="submit"
               color="primary"
               variant="solid"
-              icon="i-lucide-radio-receiver"
-              label="Connect"
-              :loading="connecting"
+              icon="i-lucide-search"
+              label="Run query"
+              :loading="logQueryStatus === 'loading'"
             />
-            <UButton
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-unplug"
-              label="Disconnect"
-              @click="receiver.disconnect"
-            />
-          </div>
-        </UForm>
+          </UForm>
 
-        <div class="border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800">
-          <USwitch
-            label="Local log retention"
-            :model-value="logHistoryEnabled"
-            :disabled="clearingLogHistory"
-            :loading="clearingLogHistory"
-            @update:model-value="updateLogRetention"
-          />
-          <p
-            v-if="logHistoryError"
-            role="alert"
-            class="mt-2 text-xs text-red-600 dark:text-red-400"
-          >
-            {{ logHistoryError }}
+          <p v-if="logRangeError" role="alert" class="text-xs text-red-600 dark:text-red-400">
+            {{ logRangeError }}
           </p>
-        </div>
+          <p v-else-if="logRangeDirty" class="text-xs text-amber-700 dark:text-amber-300">
+            Run query to apply date range. Results still show
+            {{ logAppliedRange ? formatTime(logAppliedRange.from) : "" }} to
+            {{ logAppliedRange ? formatTime(logAppliedRange.to) : "" }}.
+          </p>
+          <p
+            v-if="logResultsTruncated"
+            class="border-t border-brand-gray-200 pt-3 text-xs text-brand-gray-600 dark:border-brand-gray-800 dark:text-brand-gray-300"
+          >
+            Result limit reached. Narrow filters or time range for complete results.
+          </p>
+        </template>
       </section>
 
       <footer
@@ -377,17 +623,38 @@ function statusColor(status: string) {
         class="shrink-0 border-b border-brand-gray-300 bg-white p-4 dark:border-brand-gray-700 dark:bg-brand-gray-950"
       >
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <UBadge :color="statusColor(receiver.status.value)" variant="subtle">
-              {{ receiver.status.value }}
+          <div class="flex flex-wrap items-center gap-3">
+            <UFieldGroup size="sm">
+              <UButton
+                icon="i-lucide-radio"
+                label="Real-time analysis"
+                :variant="logAnalysisActive ? 'outline' : 'solid'"
+                :color="logAnalysisActive ? 'neutral' : 'primary'"
+                :disabled="modeTransitioning"
+                :loading="modeTransitioning && logAnalysisActive"
+                @click="updateAnalysisMode('real-time-analysis')"
+              />
+              <UButton
+                icon="i-lucide-chart-no-axes-combined"
+                label="Log analysis"
+                :variant="logAnalysisActive ? 'solid' : 'outline'"
+                :color="logAnalysisActive ? 'primary' : 'neutral'"
+                :disabled="!canUseLogAnalysis || modeTransitioning"
+                :loading="modeTransitioning && !logAnalysisActive"
+                title="Requires an authenticated user with LogAnalysis.Read role"
+                @click="updateAnalysisMode('log-analysis')"
+              />
+            </UFieldGroup>
+            <UBadge :color="statusColor(activeStatus)" variant="subtle">
+              {{ activeStatus }}
             </UBadge>
             <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
-              {{ sortedLogs.length }} visible / {{ receiver.receivedCount.value }} received
+              {{ countLabel }}
             </span>
           </div>
           <div class="flex gap-2">
             <UButton
-              v-if="receiver.status.value === 'connected'"
+              v-if="!logAnalysisActive && receiver.status.value === 'connected'"
               variant="outline"
               color="neutral"
               icon="i-lucide-pause"
@@ -395,7 +662,7 @@ function statusColor(status: string) {
               @click="receiver.pause"
             />
             <UButton
-              v-if="receiver.status.value === 'paused'"
+              v-if="!logAnalysisActive && receiver.status.value === 'paused'"
               variant="outline"
               color="neutral"
               icon="i-lucide-play"
@@ -406,57 +673,70 @@ function statusColor(status: string) {
               variant="outline"
               color="neutral"
               icon="i-lucide-trash-2"
-              label="Clear"
-              @click="receiver.clear"
+              :label="logAnalysisActive ? 'Clear results' : 'Clear'"
+              @click="clearActiveResults"
             />
           </div>
         </div>
 
         <div class="mt-3 flex flex-wrap gap-2">
           <UInput
-            v-model="filters.search"
+            v-model="activeFilters.search"
             icon="i-lucide-search"
             placeholder="Search logs"
             class="min-w-48 flex-1"
+            @keydown.enter="logAnalysisActive && applyLogFilters()"
           />
           <USelectMenu
-            v-model="filters.category"
+            v-model="activeFilters.category"
             :items="categories"
             placeholder="Category"
             class="w-38"
           />
           <USelectMenu
-            v-model="filters.action"
+            v-model="activeFilters.action"
             :items="actions"
+            :create-item="logAnalysisActive"
             placeholder="Action"
             class="w-34"
+            @create="createAction"
           />
           <USelectMenu
-            v-model="filters.protocol"
+            v-model="activeFilters.protocol"
             :items="protocols"
+            :create-item="logAnalysisActive"
             placeholder="Protocol"
             class="w-34"
-          />
-          <UInput v-model="filters.source" placeholder="Source" class="w-40" />
-          <UInput v-model="filters.destination" placeholder="Destination" class="w-40" />
-          <UInput
-            v-model="filters.from"
-            type="datetime-local"
-            aria-label="From timestamp"
-            class="w-48"
+            @create="createProtocol"
           />
           <UInput
-            v-model="filters.to"
-            type="datetime-local"
-            aria-label="To timestamp"
-            class="w-48"
+            v-model="activeFilters.source"
+            placeholder="Source"
+            class="w-40"
+            @keydown.enter="logAnalysisActive && applyLogFilters()"
+          />
+          <UInput
+            v-model="activeFilters.destination"
+            placeholder="Destination"
+            class="w-40"
+            @keydown.enter="logAnalysisActive && applyLogFilters()"
+          />
+          <UButton
+            v-if="logAnalysisActive"
+            variant="outline"
+            color="neutral"
+            icon="i-lucide-filter"
+            label="Apply filters"
+            :disabled="!logCanApplyFilters || logRangeDirty"
+            :loading="logQueryStatus === 'refreshing'"
+            @click="applyLogFilters"
           />
           <UButton
             variant="ghost"
             color="neutral"
             icon="i-lucide-rotate-ccw"
             label="Reset"
-            @click="resetFilters"
+            @click="resetActiveFilters"
           />
         </div>
       </div>
@@ -528,9 +808,9 @@ function statusColor(status: string) {
             <div v-else class="grid min-h-0 flex-1 place-items-center p-8 text-center">
               <div class="max-w-sm space-y-2">
                 <UIcon name="i-lucide-list-filter" class="mx-auto size-8 text-brand-gray-400" />
-                <h2 class="text-sm font-semibold">No logs received</h2>
+                <h2 class="text-sm font-semibold">{{ emptyState.title }}</h2>
                 <p class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
-                  Connect to an Event Hub with a Listen-only SAS connection string.
+                  {{ emptyState.description }}
                 </p>
               </div>
             </div>

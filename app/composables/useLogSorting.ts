@@ -39,8 +39,12 @@ export function compareFirewallLogs(
   return result === 0 ? left.id.localeCompare(right.id) : result;
 }
 
-export function sortFirewallLogs(logs: FirewallLogRecord[], sort: FirewallLogSortState) {
-  if (sort.key === "timestamp" && sort.direction === "desc") {
+export function sortFirewallLogs(
+  logs: FirewallLogRecord[],
+  sort: FirewallLogSortState,
+  assumeTimestampDescending = true,
+) {
+  if (assumeTimestampDescending && sort.key === "timestamp" && sort.direction === "desc") {
     return logs;
   }
 
@@ -59,9 +63,13 @@ export function getNextSortDirection(
   return key === "timestamp" ? "desc" : "asc";
 }
 
-export function useLogSorting(logs: Readonly<Ref<FirewallLogRecord[]>>) {
-  const sort = reactive(createDefaultLogSort());
-  const sortedLogs = computed(() => sortFirewallLogs(logs.value, sort));
+export function useLogSorting(
+  logs: Readonly<Ref<FirewallLogRecord[]>>,
+  assumeTimestampDescending = true,
+  providedSort?: FirewallLogSortState,
+) {
+  const sort = providedSort ?? reactive(createDefaultLogSort());
+  const sortedLogs = computed(() => sortFirewallLogs(logs.value, sort, assumeTimestampDescending));
 
   function setSort(key: FirewallLogSortKey) {
     sort.direction = getNextSortDirection(sort, key);

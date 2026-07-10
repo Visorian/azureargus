@@ -1,10 +1,12 @@
 import type { FirewallLogRecord } from "../../app/types/firewall";
+import { nextTick, ref } from "vue";
 import {
   createCaseInsensitiveFilterOptions,
   createDefaultLogFilters,
   filterFirewallLogs,
   mergeFilteredLogCache,
   queryFirewallLogs,
+  useLogQuery,
 } from "../../app/composables/useLogQuery";
 
 function createLog(overrides: Partial<FirewallLogRecord>): FirewallLogRecord {
@@ -64,22 +66,6 @@ describe("log query", () => {
     expect(result.map((log) => log.id)).toEqual(["1"]);
   });
 
-  it("filters by time range", () => {
-    const filters = createDefaultLogFilters();
-    filters.from = "2026-07-09T11:00:00.000Z";
-    filters.to = "2026-07-09T13:00:00.000Z";
-
-    const result = filterFirewallLogs(
-      [
-        createLog({ id: "inside", timestamp: "2026-07-09T12:00:00.000Z" }),
-        createLog({ id: "outside", timestamp: "2026-07-09T14:00:00.000Z" }),
-      ],
-      filters,
-    );
-
-    expect(result.map((log) => log.id)).toEqual(["inside"]);
-  });
-
   it("returns newest visible rows directly when no filters are active", () => {
     const filters = createDefaultLogFilters();
 
@@ -110,6 +96,23 @@ describe("log query", () => {
     expect(result.map((log) => log.id)).toEqual(["tcp-1", "tcp-2"]);
   });
 
+  it("stops collecting filtered matches at the visible limit", () => {
+    const filters = createDefaultLogFilters();
+    filters.protocol = "tcp";
+
+    const result = filterFirewallLogs(
+      [
+        createLog({ id: "tcp-1", protocol: "TCP", searchableText: "tcp" }),
+        createLog({ id: "tcp-2", protocol: "TCP", searchableText: "tcp" }),
+        createLog({ id: "tcp-3", protocol: "TCP", searchableText: "tcp" }),
+      ],
+      filters,
+      2,
+    );
+
+    expect(result.map((log) => log.id)).toEqual(["tcp-1", "tcp-2"]);
+  });
+
   it("preserves active filtered matches across nonmatching stream batches", () => {
     const cached = [
       createLog({ id: "tcp-1", protocol: "TCP", searchableText: "tcp" }),
@@ -121,5 +124,47 @@ describe("log query", () => {
 
     expect(result.map((log) => log.id)).toEqual(["tcp-new", "tcp-1"]);
     expect(mergeFilteredLogCache([], cached, 2).map((log) => log.id)).toEqual(["tcp-1", "tcp-2"]);
+  });
+
+  it("rebuilds filtered matches when dataset identity changes", async () => {
+    const logs = ref([createLog({ id: "old", protocol: "TCP", searchableText: "tcp" })]);
+    const datasetKey = ref(0);
+    const { filteredLogs, filters } = useLogQuery(logs, {
+      datasetKey,
+      visibleLimit: ref(10),
+    });
+
+    filters.protocol = "tcp";
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["old"]);
+
+    logs.value = [createLog({ id: "new", protocol: "TCP", searchableText: "tcp" })];
+    datasetKey.value += 1;
+    await nextTick();
+
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["new"]);
+  });
+
+  it("reads the plain raw source only while filters are active", async () => {
+    const logs = ref([createLog({ id: "visible-udp", protocol: "UDP", searchableText: "udp" })]);
+    const rawRecords = [
+      ...logs.value,
+      createLog({ id: "raw-tcp", protocol: "TCP", searchableText: "tcp" }),
+    ];
+    const rawVersion = ref(0);
+    const getRecords = vi.fn(() => rawRecords);
+    const { filteredLogs, filters } = useLogQuery(logs, {
+      rawSource: { getRecords, version: rawVersion },
+      visibleLimit: ref(10),
+    });
+
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["visible-udp"]);
+    expect(getRecords).not.toHaveBeenCalled();
+
+    filters.protocol = "tcp";
+    await nextTick();
+
+    expect(getRecords).toHaveBeenCalledOnce();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["raw-tcp"]);
   });
 });
