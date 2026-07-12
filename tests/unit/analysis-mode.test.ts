@@ -54,7 +54,7 @@ describe("analysis mode orchestration", () => {
     await expect(state.setMode("log-analysis")).resolves.toBe(false);
     expect(disconnectRealTime).not.toHaveBeenCalled();
     expect(mode.value).toBe("real-time-analysis");
-    expect(state.lastError.value).toBe("Log analysis requires sign-in.");
+    expect(state.lastError.value).toBe("Log Analytics requires sign-in.");
   });
 
   it("aborts Log Analysis work before returning to Real-time", async () => {

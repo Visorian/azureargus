@@ -13,7 +13,7 @@ import {
 } from "~/utils/logAnalysis";
 import type { FirewallLogFilters, FirewallLogRecord, FirewallLogSortState } from "~/types/firewall";
 
-type QueryStatus = "idle" | "loading" | "success" | "refreshing" | "error";
+export type LogAnalyticsQueryStatus = "idle" | "loading" | "success" | "refreshing" | "error";
 type QueryRequest = (
   body: LogAnalyticsQueryRequest,
   signal: AbortSignal,
@@ -74,7 +74,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
       });
     });
   const records = shallowRef<FirewallLogRecord[]>([]);
-  const status = ref<QueryStatus>("idle");
+  const status = ref<LogAnalyticsQueryStatus>("idle");
   const lastError = ref<string | null>(null);
   const truncated = ref(false);
   const limit = ref<number | null>(null);

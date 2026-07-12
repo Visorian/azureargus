@@ -57,7 +57,7 @@ export function parseLogAnalysisDateRange(range: LogAnalysisDateRange): LogAnaly
     return { error: "Start date must be before end date.", ok: false };
   }
   if (toTimestamp - fromTimestamp > LOG_ANALYSIS_MAX_RANGE_MS) {
-    return { error: "Log analysis range cannot exceed 24 hours.", ok: false };
+    return { error: "Log Analytics range cannot exceed 24 hours.", ok: false };
   }
 
   return {

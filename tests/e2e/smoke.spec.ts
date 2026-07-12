@@ -99,17 +99,51 @@ test("protected logs require a session and leaving anonymous mode ends it", asyn
 test("anonymous mode can reach logs page", async ({ page }) => {
   await enterAnonymousMode(page);
 
-  await expect(page.getByText("Event Hub connection")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Real-time analysis" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Log analysis" })).toBeDisabled();
+  await expect(page.getByText("Live Event Hub settings")).toBeVisible();
+  const dataSource = page.getByRole("group", { name: "Data source" });
+  await expect(dataSource).toBeVisible();
+  await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeDisabled();
+  await expect(page.getByText("Log Analytics requires sign-in.")).toBeVisible();
+  await expect(dataSource.getByText(/visible \/ .*received/)).toHaveCount(0);
+  await expect(dataSource.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/visible \/ .*received/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear", exact: true })).toBeVisible();
   await expect(page.getByRole("table", { name: "Firewall logs" })).toBeVisible();
   await expect
     .poll(() =>
-      page.evaluate(
-        () => document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-      ),
+      page.evaluate(() => ({
+        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+      })),
     )
-    .toBe(true);
+    .toEqual({ horizontal: true, vertical: true });
+
+  const liveEventHubButton = dataSource.getByRole("button", {
+    name: "Live Event Hub",
+  });
+  await liveEventHubButton.focus();
+  await expect(liveEventHubButton).toBeFocused();
+  await liveEventHubButton.press("Enter");
+  await expect(liveEventHubButton).toBeFocused();
+
+  const collapseSidebar = page.getByRole("button", {
+    name: "Collapse sidebar",
+  });
+  await collapseSidebar.focus();
+  await expect(collapseSidebar).toBeFocused();
+  await collapseSidebar.press("Enter");
+  await expect(dataSource).toBeVisible();
+  const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+  await expect(expandSidebar).toBeVisible();
+  await expandSidebar.focus();
+  await expect(expandSidebar).toBeFocused();
+  await expandSidebar.press("Enter");
+  await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+
   const filterDropdowns = page.getByRole("button", { name: "Show popup" });
   await expect(filterDropdowns.filter({ hasText: "Category" })).toBeVisible();
   await expect(filterDropdowns.filter({ hasText: "Action" })).toBeVisible();
@@ -126,14 +160,41 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   ]);
   await page.keyboard.press("Escape");
 
-  const logRetentionSwitch = page.getByRole("switch", { name: "Local log retention" });
-  const logRetentionInfo = page.getByRole("button", { name: "About local log retention" });
+  const logRetentionSwitch = page.getByRole("switch", {
+    name: "Local log retention",
+  });
+  const logRetentionInfo = page.getByRole("button", {
+    name: "About local log retention",
+  });
   await expect(logRetentionSwitch).toBeVisible();
   await logRetentionInfo.hover();
   await expect(
-    page.getByRole("paragraph").filter({ hasText: "Keeps up to 100,000 parsed Real-time records" }),
+    page
+      .getByRole("paragraph")
+      .filter({ hasText: "Keeps up to 100,000 parsed Live Event Hub records" }),
   ).toBeVisible();
 });
+
+test("data source rail remains bounded at narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ height: 812, width: 375 });
+  await enterAnonymousMode(page);
+
+  const dataSource = page.getByRole("group", { name: "Data source" });
+  await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toBeVisible();
+  await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(dataSource).toBeVisible();
+  await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+      })),
+    )
+    .toEqual({ horizontal: true, vertical: true });
+});
+
 
 test("destination country flag follows a recycled visible row", async ({ page }) => {
   let releaseFirstLookup: (() => void) | undefined;
@@ -170,7 +231,9 @@ test("destination country flag follows a recycled visible row", async ({ page })
   await expect(destinationCell.getByRole("img")).toHaveCount(0);
   releaseFirstLookup?.();
   await expect(
-    destinationCell.getByRole("img", { name: "GeoIP country: United States (US)" }),
+    destinationCell.getByRole("img", {
+      name: "GeoIP country: United States (US)",
+    }),
   ).toBeVisible();
   await expect(destinationCell).toContainText("🇺🇸");
 });
@@ -178,7 +241,9 @@ test("destination country flag follows a recycled visible row", async ({ page })
 test("local log retention is opt-in and clearing is persistent", async ({ page }) => {
   await enterAnonymousMode(page);
 
-  const logRetentionSwitch = page.getByRole("switch", { name: "Local log retention" });
+  const logRetentionSwitch = page.getByRole("switch", {
+    name: "Local log retention",
+  });
   await expect(logRetentionSwitch).not.toBeChecked();
   await appendLogHistory(page, [createPersistedLog("first-seed")]);
   await expect.poll(() => queryLogHistoryIds(page)).toEqual(["first-seed"]);
@@ -235,7 +300,10 @@ test("browser log history store queries, limits, deletes, and clears records", a
         limitedRange: limitedRange.map((record: PersistedFirewallLogRecord) => record.id),
       };
     },
-    { moduleUrl: LOG_HISTORY_STORE_MODULE_URL, records: [oldest, middle, newest] },
+    {
+      moduleUrl: LOG_HISTORY_STORE_MODULE_URL,
+      records: [oldest, middle, newest],
+    },
   );
 
   expect(result).toEqual({
@@ -253,7 +321,7 @@ test("invalid Event Hub settings stay idle and show validation errors", async ({
   await page
     .getByRole("textbox", { name: "Connection string*" })
     .fill("Endpoint=sb://example.servicebus.windows.net/;");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.getByRole("textbox", { name: "Consumer group*" }).press("Enter");
 
   const notification = page.getByRole("listitem");
   await expect(notification).toContainText("Connection string must include SharedAccessKeyName.");
@@ -270,7 +338,9 @@ test("connection string persistence is explicit and reversible", async ({ page }
 
   await enterAnonymousMode(page);
 
-  const connectionStringInput = page.getByRole("textbox", { name: "Connection string*" });
+  const connectionStringInput = page.getByRole("textbox", {
+    name: "Connection string*",
+  });
   const rememberConnectionString = page.getByRole("checkbox", {
     name: "Remember connection string",
   });
@@ -299,7 +369,9 @@ test("connection string remains opted in when browser storage removal fails", as
 
   await enterAnonymousMode(page);
 
-  const connectionStringInput = page.getByRole("textbox", { name: "Connection string*" });
+  const connectionStringInput = page.getByRole("textbox", {
+    name: "Connection string*",
+  });
   const rememberConnectionString = page.getByRole("checkbox", {
     name: "Remember connection string",
   });
@@ -328,7 +400,9 @@ test("connection string stays opted out when browser storage saving fails", asyn
     "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=fw-logs";
   await enterAnonymousMode(page);
 
-  const connectionStringInput = page.getByRole("textbox", { name: "Connection string*" });
+  const connectionStringInput = page.getByRole("textbox", {
+    name: "Connection string*",
+  });
   const rememberConnectionString = page.getByRole("checkbox", {
     name: "Remember connection string",
   });

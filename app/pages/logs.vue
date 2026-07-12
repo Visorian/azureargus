@@ -3,10 +3,7 @@ import { RecycleScroller } from "vue-virtual-scroller";
 
 import visorianNegative from "~/assets/img/visorian-negative.svg";
 import visorianPositive from "~/assets/img/visorian-positive.svg";
-import {
-  EVENT_HUB_LOOKBACK_OPTIONS,
-  type EventHubConnectionForm,
-} from "~/composables/useEventHubConnection";
+import type { EventHubConnectionForm } from "~/composables/useEventHubConnection";
 import type { AnalysisMode } from "~/composables/useAnalysisMode";
 import {
   createDefaultLogFilters,
@@ -14,7 +11,7 @@ import {
   toggleLogFilterValue,
 } from "~/composables/useLogQuery";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
-import { LOG_ANALYSIS_CATEGORIES } from "~/utils/logAnalysis";
+import { LOG_ANALYSIS_CATEGORIES, type LogAnalysisDateRange } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
 
 definePageMeta({
@@ -187,6 +184,13 @@ const countLabel = computed(() => {
     : "";
   return `${sortedLogs.value.length} visible${suffix}${updating ? " / updating" : ""}`;
 });
+const logAppliedRangeLabel = computed(() => {
+  if (logAppliedRange.value === null) {
+    return "";
+  }
+
+  return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)}`;
+});
 const parsedDetailFields = computed<DetailField[]>(() => {
   const log = selectedLog.value;
   if (log === null) {
@@ -299,6 +303,14 @@ async function connect() {
   }
 }
 
+function updateConnectionForm(value: EventHubConnectionForm) {
+  Object.assign(connectionForm, value);
+}
+
+function updateLogDraftRange(value: LogAnalysisDateRange) {
+  Object.assign(logDraftRange, value);
+}
+
 async function updateLogRetention(enabled: boolean) {
   if (enabled) {
     logHistory.enable();
@@ -313,8 +325,13 @@ async function updateLogRetention(enabled: boolean) {
   }
 }
 
-async function updateAnalysisMode(mode: AnalysisMode) {
+async function updateAnalysisMode(mode: AnalysisMode, event: MouseEvent) {
+  const control = event.currentTarget;
   await modeState.setMode(mode);
+  await nextTick();
+  if (control instanceof HTMLElement && control.isConnected) {
+    control.focus();
+  }
 }
 
 function closeDetail() {
@@ -478,578 +495,503 @@ function statusColor(status: string) {
 
 <template>
   <div
-    :class="[
-      'relative grid h-full min-h-0 overflow-hidden bg-white text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50',
-      sidebarCollapsed
-        ? 'grid-cols-1 grid-rows-1'
-        : 'grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-[1fr_23rem] lg:grid-rows-1',
-    ]"
+    class="flex h-full min-h-0 flex-col overflow-hidden bg-white text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50"
   >
-    <UButton
-      v-if="sidebarCollapsed"
-      icon="i-lucide-panel-right-open"
-      aria-label="Expand sidebar"
-      color="neutral"
-      variant="outline"
-      square
-      size="xs"
-      class="absolute top-1/2 right-0 z-20 -translate-y-1/2 rounded-r-none border-r-0 bg-white dark:bg-brand-gray-950"
-      @click="expandSidebar"
-    />
+    <section
+      class="shrink-0 border-b border-brand-gray-300 bg-brand-gray-50 px-4 py-3 dark:border-brand-gray-700 dark:bg-brand-gray-900"
+      aria-labelledby="data-source-label"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-3">
+          <span
+            id="data-source-label"
+            class="text-xs font-semibold tracking-wide text-brand-gray-600 uppercase dark:text-brand-gray-300"
+          >
+            Data source
+          </span>
+          <div role="group" aria-labelledby="data-source-label" class="shrink-0">
+            <UFieldGroup size="sm">
+              <UButton
+                icon="i-lucide-radio"
+                :variant="logAnalysisActive ? 'outline' : 'solid'"
+                :color="logAnalysisActive ? 'neutral' : 'primary'"
+                :aria-pressed="!logAnalysisActive"
+                :disabled="modeTransitioning"
+                :loading="modeTransitioning && logAnalysisActive"
+                @click="updateAnalysisMode('real-time-analysis', $event)"
+              >
+                <span>Live Event Hub</span>
+                <span aria-hidden="true" class="inline-grid size-4 place-items-center">
+                  <UIcon v-if="!logAnalysisActive" name="i-lucide-check" class="size-3.5" />
+                </span>
+              </UButton>
+              <UButton
+                icon="i-lucide-chart-no-axes-combined"
+                :variant="logAnalysisActive ? 'solid' : 'outline'"
+                :color="logAnalysisActive ? 'primary' : 'neutral'"
+                :aria-pressed="logAnalysisActive"
+                :aria-describedby="!canUseLogAnalysis ? 'log-analytics-requirement' : undefined"
+                :disabled="!canUseLogAnalysis || modeTransitioning"
+                :loading="modeTransitioning && !logAnalysisActive"
+                @click="updateAnalysisMode('log-analysis', $event)"
+              >
+                <span>Log Analytics</span>
+                <span aria-hidden="true" class="inline-grid size-4 place-items-center">
+                  <UIcon v-if="logAnalysisActive" name="i-lucide-check" class="size-3.5" />
+                </span>
+              </UButton>
+            </UFieldGroup>
+          </div>
+          <p
+            v-if="!canUseLogAnalysis"
+            id="log-analytics-requirement"
+            class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
+          >
+            Log Analytics requires sign-in.
+          </p>
+        </div>
 
-    <aside
-      v-show="!sidebarCollapsed"
-      class="relative flex max-h-80 min-h-0 flex-col border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:order-2 lg:max-h-none lg:border-b-0 lg:border-l"
+        <div class="flex flex-wrap items-center gap-2">
+          <UBadge
+            :color="statusColor(activeStatus)"
+            variant="subtle"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {{ activeStatus }}
+          </UBadge>
+          <UBadge v-if="showRealTimeLag" icon="i-lucide-clock-3" color="neutral" variant="outline">
+            <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
+            <NuxtTime
+              :datetime="receiver.latestSourceTimestamp.value!"
+              relative
+              relative-style="narrow"
+              numeric="always"
+              :title="true"
+            />
+          </UBadge>
+        </div>
+      </div>
+    </section>
+
+    <div
+      :class="[
+        'relative grid min-h-0 flex-1 overflow-hidden',
+        sidebarCollapsed
+          ? 'grid-cols-1 grid-rows-1'
+          : 'grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-[1fr_23rem] lg:grid-rows-1',
+      ]"
     >
       <UButton
-        icon="i-lucide-panel-right-close"
-        aria-label="Collapse sidebar"
+        v-if="sidebarCollapsed"
+        icon="i-lucide-panel-right-open"
+        aria-label="Expand sidebar"
         color="neutral"
         variant="outline"
         square
-        size="xs"
-        class="absolute top-3 right-3 z-20 rounded-full bg-white dark:bg-brand-gray-950 lg:top-1/2 lg:right-auto lg:left-0 lg:-translate-x-1/2 lg:-translate-y-1/2"
-        @click="collapseSidebar"
+        size="sm"
+        class="absolute top-1/2 right-2 z-20 -translate-y-1/2 rounded-full bg-white dark:bg-brand-gray-950"
+        @click="expandSidebar"
       />
 
-      <section class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-        <template v-if="!logAnalysisActive">
-          <div>
-            <h2 class="text-sm font-semibold">Event Hub connection</h2>
-            <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-              Use a Listen-only SAS policy. Credentials stay in memory unless remembered.
-            </p>
-          </div>
+      <aside
+        v-show="!sidebarCollapsed"
+        class="relative flex max-h-80 min-h-0 flex-col border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:order-2 lg:max-h-none lg:border-b-0 lg:border-l"
+      >
+        <UButton
+          icon="i-lucide-panel-right-close"
+          aria-label="Collapse sidebar"
+          color="neutral"
+          variant="outline"
+          square
+          size="sm"
+          class="absolute top-3 right-3 z-20 rounded-full bg-white dark:bg-brand-gray-950 lg:top-1/2 lg:right-auto lg:left-0 lg:-translate-x-1/2 lg:-translate-y-1/2"
+          @click="collapseSidebar"
+        />
 
-          <UForm :state="connectionForm" class="space-y-3" @submit="connect">
-            <UFormField label="Connection string" name="connectionString" required>
-              <UTextarea
-                v-model="connectionForm.connectionString"
-                :rows="4"
-                class="w-full"
-                placeholder="Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=..."
-              />
-            </UFormField>
-            <UCheckbox
-              v-model="rememberConnectionString"
-              label="Remember connection string"
-              description="Stores this SAS credential unencrypted in browser storage. Avoid shared devices."
-            />
-            <p
-              v-if="connectionStringPersistenceError"
-              role="alert"
-              class="text-xs text-red-600 dark:text-red-400"
+        <section class="min-h-0 flex-1 overflow-y-auto p-4">
+          <LogsEventHubSettingsPanel
+            v-if="!logAnalysisActive"
+            v-model:remember-connection-string="rememberConnectionString"
+            :connection-form="connectionForm"
+            :clearing-log-history="clearingLogHistory"
+            :connecting="connecting"
+            :connection-string-persistence-error="connectionStringPersistenceError"
+            :log-history-enabled="logHistoryEnabled"
+            :log-history-error="logHistoryError"
+            :mode-transitioning="modeTransitioning"
+            @update:connection-form="updateConnectionForm"
+            @connect="connect"
+            @disconnect="receiver.disconnect"
+            @update-log-retention="updateLogRetention"
+          />
+          <LogsLogAnalyticsSettingsPanel
+            v-else
+            :draft-range="logDraftRange"
+            :applied-range-label="logAppliedRangeLabel"
+            :query-status="logQueryStatus"
+            :range-dirty="logRangeDirty"
+            :range-error="logRangeError"
+            :results-truncated="logResultsTruncated"
+            @update:draft-range="updateLogDraftRange"
+            @run="runLogAnalysis"
+          />
+        </section>
+
+        <footer
+          class="space-y-1 border-t border-brand-gray-200 px-4 py-3 text-xs font-mono text-brand-gray-500 dark:border-brand-gray-800 dark:text-brand-gray-500"
+        >
+          <span class="block select-none">
+            Version: {{ versionNumber }} by
+            <a
+              href="https://www.visorian.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
             >
-              {{ connectionStringPersistenceError }}
-            </p>
-            <UFormField label="Consumer group" name="consumerGroup" required>
-              <UInput v-model="connectionForm.consumerGroup" class="w-full" />
-            </UFormField>
-            <UFormField label="Event Hub name" name="eventHubName">
-              <UInput
-                v-model="connectionForm.eventHubName"
-                class="w-full"
-                placeholder="Only needed without EntityPath"
+              <img
+                :src="visorianPositive"
+                alt=""
+                aria-hidden="true"
+                class="h-3 w-auto dark:hidden"
               />
-            </UFormField>
-            <UFormField label="Lookback" name="lookbackMinutes">
-              <USelect
-                v-model="connectionForm.lookbackMinutes"
-                :items="EVENT_HUB_LOOKBACK_OPTIONS"
-                class="w-full"
+              <img
+                :src="visorianNegative"
+                alt=""
+                aria-hidden="true"
+                class="hidden h-3 w-auto dark:inline"
               />
-            </UFormField>
-            <UFormField label="Visible rows" name="bufferSize">
-              <UInput
-                v-model.number="connectionForm.bufferSize"
-                type="number"
-                min="100"
-                step="100"
-                class="w-full"
-              />
-            </UFormField>
+              Visorian
+            </a>
+          </span>
+          <span class="block select-none">
+            IP geolocation by
+            <a
+              href="https://db-ip.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
+            >
+              DB-IP
+            </a>
+          </span>
+        </footer>
+      </aside>
+
+      <section
+        class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950 lg:order-1"
+      >
+        <div
+          class="shrink-0 border-b border-brand-gray-300 bg-white p-4 dark:border-brand-gray-700 dark:bg-brand-gray-950"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
+                {{ countLabel }}
+              </span>
+            </div>
             <div class="flex gap-2">
               <UButton
-                type="submit"
-                color="primary"
-                variant="solid"
-                icon="i-lucide-radio-receiver"
-                label="Connect"
-                :disabled="modeTransitioning"
-                :loading="connecting"
+                v-if="!logAnalysisActive && receiver.status.value === 'connected'"
+                variant="outline"
+                color="neutral"
+                icon="i-lucide-pause"
+                label="Pause"
+                @click="receiver.pause"
+              />
+              <UButton
+                v-if="!logAnalysisActive && receiver.status.value === 'paused'"
+                variant="outline"
+                color="neutral"
+                icon="i-lucide-play"
+                label="Resume"
+                @click="receiver.resume"
               />
               <UButton
                 variant="outline"
                 color="neutral"
-                icon="i-lucide-unplug"
-                label="Disconnect"
-                @click="receiver.disconnect"
+                icon="i-lucide-trash-2"
+                :label="logAnalysisActive ? 'Clear results' : 'Clear'"
+                @click="clearActiveResults"
               />
             </div>
-          </UForm>
-
-          <div class="border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800">
-            <div class="flex items-center gap-1">
-              <USwitch
-                label="Local log retention"
-                :model-value="logHistoryEnabled"
-                :disabled="clearingLogHistory"
-                :loading="clearingLogHistory"
-                @update:model-value="updateLogRetention"
-              />
-              <UTooltip :content="{ side: 'bottom' }" :ui="{ content: 'h-auto max-w-72 p-3' }">
-                <UButton
-                  icon="i-lucide-info"
-                  aria-label="About local log retention"
-                  color="neutral"
-                  variant="ghost"
-                  size="xs"
-                  square
-                />
-                <template #content>
-                  <p class="text-xs leading-5 whitespace-normal">
-                    Keeps up to 100,000 parsed Real-time records in this browser for up to 24 hours.
-                    Raw payloads are excluded. Turning retention off or starting a new session
-                    clears saved records.
-                  </p>
-                </template>
-              </UTooltip>
-            </div>
-            <p
-              v-if="logHistoryError"
-              role="alert"
-              class="mt-2 text-xs text-red-600 dark:text-red-400"
-            >
-              {{ logHistoryError }}
-            </p>
-          </div>
-        </template>
-
-        <template v-else>
-          <div>
-            <h2 class="text-sm font-semibold">Log Analytics query</h2>
-            <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-              Query configured Azure Firewall workspace.
-            </p>
           </div>
 
-          <UForm :state="logDraftRange" class="space-y-3" @submit="runLogAnalysis">
-            <UFormField label="Start" name="from" required>
-              <UInput v-model="logDraftRange.from" type="datetime-local" class="w-full" />
-            </UFormField>
-            <UFormField label="End" name="to" required>
-              <UInput v-model="logDraftRange.to" type="datetime-local" class="w-full" />
-            </UFormField>
-            <UButton
-              type="submit"
-              color="primary"
-              variant="solid"
+          <div class="mt-3 flex flex-wrap gap-2">
+            <UInput
+              v-model="activeFilters.search"
               icon="i-lucide-search"
-              label="Run query"
-              :loading="logQueryStatus === 'loading'"
+              placeholder="Search logs"
+              class="min-w-48 flex-1"
+              @keydown.enter="logAnalysisActive && applyLogFilters()"
             />
-          </UForm>
-
-          <p v-if="logRangeError" role="alert" class="text-xs text-red-600 dark:text-red-400">
-            {{ logRangeError }}
-          </p>
-          <p v-else-if="logRangeDirty" class="text-xs text-amber-700 dark:text-amber-300">
-            Run query to apply date range. Results still show
-            {{ logAppliedRange ? formatTime(logAppliedRange.from) : "" }} to
-            {{ logAppliedRange ? formatTime(logAppliedRange.to) : "" }}.
-          </p>
-          <p
-            v-if="logResultsTruncated"
-            class="border-t border-brand-gray-200 pt-3 text-xs text-brand-gray-600 dark:border-brand-gray-800 dark:text-brand-gray-300"
-          >
-            Result limit reached. Narrow filters or time range for complete results.
-          </p>
-        </template>
-      </section>
-
-      <footer
-        class="space-y-1 border-t border-brand-gray-200 px-4 py-3 text-xs font-mono text-brand-gray-500 dark:border-brand-gray-800 dark:text-brand-gray-500"
-      >
-        <span class="block select-none">
-          Version: {{ versionNumber }} by
-          <a
-            href="https://www.visorian.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-1 underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
-          >
-            <img :src="visorianPositive" alt="" aria-hidden="true" class="h-3 w-auto dark:hidden" />
-            <img
-              :src="visorianNegative"
-              alt=""
-              aria-hidden="true"
-              class="hidden h-3 w-auto dark:inline"
+            <USelectMenu
+              v-model="categoryFilter"
+              :items="categories"
+              clear
+              placeholder="Category"
+              class="w-38"
             />
-            Visorian
-          </a>
-        </span>
-        <span class="block select-none">
-          IP geolocation by
-          <a
-            href="https://db-ip.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
-          >
-            DB-IP
-          </a>
-        </span>
-      </footer>
-    </aside>
-
-    <section
-      class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950 lg:order-1"
-    >
-      <div
-        class="shrink-0 border-b border-brand-gray-300 bg-white p-4 dark:border-brand-gray-700 dark:bg-brand-gray-950"
-      >
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <UFieldGroup size="sm">
-              <UButton
-                icon="i-lucide-radio"
-                label="Real-time analysis"
-                :variant="logAnalysisActive ? 'outline' : 'solid'"
-                :color="logAnalysisActive ? 'neutral' : 'primary'"
-                :disabled="modeTransitioning"
-                :loading="modeTransitioning && logAnalysisActive"
-                @click="updateAnalysisMode('real-time-analysis')"
-              />
-              <UButton
-                icon="i-lucide-chart-no-axes-combined"
-                label="Log analysis"
-                :variant="logAnalysisActive ? 'solid' : 'outline'"
-                :color="logAnalysisActive ? 'primary' : 'neutral'"
-                :disabled="!canUseLogAnalysis || modeTransitioning"
-                :loading="modeTransitioning && !logAnalysisActive"
-                title="Requires sign-in"
-                @click="updateAnalysisMode('log-analysis')"
-              />
-            </UFieldGroup>
-            <UBadge :color="statusColor(activeStatus)" variant="subtle">
-              {{ activeStatus }}
-            </UBadge>
-            <UBadge
-              v-if="showRealTimeLag"
-              icon="i-lucide-clock-3"
-              color="neutral"
-              variant="outline"
-            >
-              <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
-              <NuxtTime
-                :datetime="receiver.latestSourceTimestamp.value!"
-                relative
-                relative-style="narrow"
-                numeric="always"
-                :title="true"
-              />
-            </UBadge>
-            <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
-              {{ countLabel }}
-            </span>
-          </div>
-          <div class="flex gap-2">
-            <UButton
-              v-if="!logAnalysisActive && receiver.status.value === 'connected'"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-pause"
-              label="Pause"
-              @click="receiver.pause"
+            <USelectMenu
+              v-model="actionFilter"
+              :items="actions"
+              :create-item="logAnalysisActive"
+              clear
+              placeholder="Action"
+              class="w-34"
+              @create="createAction"
+            />
+            <USelectMenu
+              v-model="protocolFilter"
+              :items="protocols"
+              :create-item="logAnalysisActive"
+              clear
+              placeholder="Protocol"
+              class="w-34"
+              @create="createProtocol"
+            />
+            <UInput
+              v-model="activeFilters.source"
+              placeholder="Source"
+              class="w-40"
+              @keydown.enter="logAnalysisActive && applyLogFilters()"
+            />
+            <UInput
+              v-model="activeFilters.destination"
+              placeholder="Destination"
+              class="w-40"
+              @keydown.enter="logAnalysisActive && applyLogFilters()"
             />
             <UButton
-              v-if="!logAnalysisActive && receiver.status.value === 'paused'"
+              v-if="logAnalysisActive"
               variant="outline"
               color="neutral"
-              icon="i-lucide-play"
-              label="Resume"
-              @click="receiver.resume"
+              icon="i-lucide-filter"
+              label="Apply filters"
+              :disabled="!logCanApplyFilters || logRangeDirty"
+              :loading="logQueryStatus === 'refreshing'"
+              @click="applyLogFilters"
             />
             <UButton
-              variant="outline"
+              variant="ghost"
               color="neutral"
-              icon="i-lucide-trash-2"
-              :label="logAnalysisActive ? 'Clear results' : 'Clear'"
-              @click="clearActiveResults"
+              icon="i-lucide-rotate-ccw"
+              label="Reset"
+              @click="resetActiveFilters"
             />
           </div>
         </div>
 
-        <div class="mt-3 flex flex-wrap gap-2">
-          <UInput
-            v-model="activeFilters.search"
-            icon="i-lucide-search"
-            placeholder="Search logs"
-            class="min-w-48 flex-1"
-            @keydown.enter="logAnalysisActive && applyLogFilters()"
-          />
-          <USelectMenu
-            v-model="categoryFilter"
-            :items="categories"
-            clear
-            placeholder="Category"
-            class="w-38"
-          />
-          <USelectMenu
-            v-model="actionFilter"
-            :items="actions"
-            :create-item="logAnalysisActive"
-            clear
-            placeholder="Action"
-            class="w-34"
-            @create="createAction"
-          />
-          <USelectMenu
-            v-model="protocolFilter"
-            :items="protocols"
-            :create-item="logAnalysisActive"
-            clear
-            placeholder="Protocol"
-            class="w-34"
-            @create="createProtocol"
-          />
-          <UInput
-            v-model="activeFilters.source"
-            placeholder="Source"
-            class="w-40"
-            @keydown.enter="logAnalysisActive && applyLogFilters()"
-          />
-          <UInput
-            v-model="activeFilters.destination"
-            placeholder="Destination"
-            class="w-40"
-            @keydown.enter="logAnalysisActive && applyLogFilters()"
-          />
-          <UButton
-            v-if="logAnalysisActive"
-            variant="outline"
-            color="neutral"
-            icon="i-lucide-filter"
-            label="Apply filters"
-            :disabled="!logCanApplyFilters || logRangeDirty"
-            :loading="logQueryStatus === 'refreshing'"
-            @click="applyLogFilters"
-          />
-          <UButton
-            variant="ghost"
-            color="neutral"
-            icon="i-lucide-rotate-ccw"
-            label="Reset"
-            @click="resetActiveFilters"
-          />
-        </div>
-      </div>
-
-      <div class="min-h-0 flex-1 overflow-hidden bg-white dark:bg-brand-gray-950">
-        <div
-          role="table"
-          aria-label="Firewall logs"
-          class="flex h-full min-h-0 flex-col overflow-hidden"
-        >
+        <div class="min-h-0 flex-1 overflow-hidden bg-white dark:bg-brand-gray-950">
           <div
-            role="row"
-            :class="[
-              'grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100',
-              logTableGridClass,
-            ]"
+            role="table"
+            aria-label="Firewall logs"
+            class="flex h-full min-h-0 flex-col overflow-hidden"
           >
-            <button
-              v-for="column in logTableColumns"
-              :key="column.key"
-              type="button"
-              role="columnheader"
-              :aria-sort="getAriaSort(column.key)"
-              class="flex min-w-0 items-center gap-1 px-2 text-left"
-              @click="setSort(column.key)"
+            <div
+              role="row"
+              :class="[
+                'grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100',
+                logTableGridClass,
+              ]"
             >
-              <span class="truncate">{{ column.label }}</span>
-              <UIcon :name="getSortIcon(column.key)" class="size-3 shrink-0 text-brand-gray-500" />
-            </button>
-          </div>
-
-          <ClientOnly>
-            <RecycleScroller
-              v-if="sortedLogs.length > 0"
-              v-slot="{ item }"
-              :items="sortedLogs"
-              :item-size="64"
-              :emit-update="false"
-              key-field="id"
-              class="min-h-0 flex-1"
-            >
-              <div
-                role="row"
-                tabindex="0"
-                :title="rowTitle(item)"
-                :class="[
-                  'grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900',
-                  logTableGridClass,
-                ]"
-                @click="selectLog(item)"
-                @keydown.enter.self="selectLog(item)"
-                @keydown.space.self.prevent="selectLog(item)"
+              <button
+                v-for="column in logTableColumns"
+                :key="column.key"
+                type="button"
+                role="columnheader"
+                :aria-sort="getAriaSort(column.key)"
+                class="flex min-w-0 items-center gap-1 px-2 text-left"
+                @click="setSort(column.key)"
               >
-                <span
-                  role="cell"
-                  class="min-w-0 truncate px-2 font-mono text-xs whitespace-nowrap text-brand-gray-700 dark:text-brand-gray-200"
-                  :title="formatTime(item.timestamp)"
-                >
-                  <NuxtTime
-                    :datetime="item.timestamp"
-                    date-style="medium"
-                    time-style="medium"
-                    time-zone="UTC"
-                    hour-cycle="h23"
-                  />
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
-                  <span class="truncate">{{ displayValue(item.category) }}</span>
-                  <button
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('category', item.category) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('category', item.category)"
-                    :aria-pressed="isQuickFilterActive('category', item.category)"
-                    :title="quickFilterLabel('category', item.category)"
-                    @click.stop="toggleQuickFilter('category', item.category)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-medium">
-                  <span class="truncate">{{ displayValue(item.action) }}</span>
-                  <button
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('action', item.action) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('action', item.action)"
-                    :aria-pressed="isQuickFilterActive('action', item.action)"
-                    :title="quickFilterLabel('action', item.action)"
-                    @click.stop="toggleQuickFilter('action', item.action)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
-                  <span class="truncate">{{ displayValue(item.protocol) }}</span>
-                  <button
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('protocol', item.protocol) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('protocol', item.protocol)"
-                    :aria-pressed="isQuickFilterActive('protocol', item.protocol)"
-                    :title="quickFilterLabel('protocol', item.protocol)"
-                    @click.stop="toggleQuickFilter('protocol', item.protocol)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
-                  <span class="truncate">{{ displayValue(item.sourceIp) }}</span>
-                  <button
-                    v-if="item.sourceIp"
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('source', item.sourceIp) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('source', item.sourceIp)"
-                    :aria-pressed="isQuickFilterActive('source', item.sourceIp)"
-                    :title="quickFilterLabel('source', item.sourceIp)"
-                    @click.stop="toggleQuickFilter('source', item.sourceIp)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
-                  <span class="truncate">{{ displayValue(item.sourcePort) }}</span>
-                  <button
-                    v-if="item.sourcePort"
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('source', item.sourcePort) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('source', item.sourcePort)"
-                    :aria-pressed="isQuickFilterActive('source', item.sourcePort)"
-                    :title="quickFilterLabel('source', item.sourcePort)"
-                    @click.stop="toggleQuickFilter('source', item.sourcePort)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
-                  <DestinationCountryFlag
-                    :destination="item.destinationIp"
-                    :lookup="ipCountryLookup"
-                  />
-                  <span class="truncate">{{ displayValue(item.destinationIp) }}</span>
-                  <button
-                    v-if="item.destinationIp"
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('destination', item.destinationIp) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('destination', item.destinationIp)"
-                    :aria-pressed="isQuickFilterActive('destination', item.destinationIp)"
-                    :title="quickFilterLabel('destination', item.destinationIp)"
-                    @click.stop="toggleQuickFilter('destination', item.destinationIp)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
-                  <span class="truncate">{{ displayValue(item.destinationPort) }}</span>
-                  <button
-                    v-if="item.destinationPort"
-                    type="button"
-                    :class="[
-                      quickFilterButtonClass,
-                      isQuickFilterActive('destination', item.destinationPort) &&
-                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                    ]"
-                    :aria-label="quickFilterLabel('destination', item.destinationPort)"
-                    :aria-pressed="isQuickFilterActive('destination', item.destinationPort)"
-                    :title="quickFilterLabel('destination', item.destinationPort)"
-                    @click.stop="toggleQuickFilter('destination', item.destinationPort)"
-                  >
-                    <UIcon name="i-lucide-filter" class="size-3.5" />
-                  </button>
-                </span>
-                <span role="cell" class="truncate px-2">{{ displayValue(item.rule) }}</span>
-              </div>
-            </RecycleScroller>
-            <div v-else class="grid min-h-0 flex-1 place-items-center p-8 text-center">
-              <div class="max-w-sm space-y-2">
-                <UIcon name="i-lucide-list-filter" class="mx-auto size-8 text-brand-gray-400" />
-                <h2 class="text-sm font-semibold">{{ emptyState.title }}</h2>
-                <p class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
-                  {{ emptyState.description }}
-                </p>
-              </div>
+                <span class="truncate">{{ column.label }}</span>
+                <UIcon
+                  :name="getSortIcon(column.key)"
+                  class="size-3 shrink-0 text-brand-gray-500"
+                />
+              </button>
             </div>
-          </ClientOnly>
+
+            <ClientOnly>
+              <RecycleScroller
+                v-if="sortedLogs.length > 0"
+                v-slot="{ item }"
+                :items="sortedLogs"
+                :item-size="64"
+                :emit-update="false"
+                key-field="id"
+                class="min-h-0 flex-1"
+              >
+                <div
+                  role="row"
+                  tabindex="0"
+                  :title="rowTitle(item)"
+                  :class="[
+                    'grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900',
+                    logTableGridClass,
+                  ]"
+                  @click="selectLog(item)"
+                  @keydown.enter.self="selectLog(item)"
+                  @keydown.space.self.prevent="selectLog(item)"
+                >
+                  <span
+                    role="cell"
+                    class="min-w-0 truncate px-2 font-mono text-xs whitespace-nowrap text-brand-gray-700 dark:text-brand-gray-200"
+                    :title="formatTime(item.timestamp)"
+                  >
+                    <NuxtTime
+                      :datetime="item.timestamp"
+                      date-style="medium"
+                      time-style="medium"
+                      time-zone="UTC"
+                      hour-cycle="h23"
+                    />
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                    <span class="truncate">{{ displayValue(item.category) }}</span>
+                    <button
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('category', item.category) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('category', item.category)"
+                      :aria-pressed="isQuickFilterActive('category', item.category)"
+                      :title="quickFilterLabel('category', item.category)"
+                      @click.stop="toggleQuickFilter('category', item.category)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-medium">
+                    <span class="truncate">{{ displayValue(item.action) }}</span>
+                    <button
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('action', item.action) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('action', item.action)"
+                      :aria-pressed="isQuickFilterActive('action', item.action)"
+                      :title="quickFilterLabel('action', item.action)"
+                      @click.stop="toggleQuickFilter('action', item.action)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                    <span class="truncate">{{ displayValue(item.protocol) }}</span>
+                    <button
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('protocol', item.protocol) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('protocol', item.protocol)"
+                      :aria-pressed="isQuickFilterActive('protocol', item.protocol)"
+                      :title="quickFilterLabel('protocol', item.protocol)"
+                      @click.stop="toggleQuickFilter('protocol', item.protocol)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                    <span class="truncate">{{ displayValue(item.sourceIp) }}</span>
+                    <button
+                      v-if="item.sourceIp"
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('source', item.sourceIp) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('source', item.sourceIp)"
+                      :aria-pressed="isQuickFilterActive('source', item.sourceIp)"
+                      :title="quickFilterLabel('source', item.sourceIp)"
+                      @click.stop="toggleQuickFilter('source', item.sourceIp)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
+                    <span class="truncate">{{ displayValue(item.sourcePort) }}</span>
+                    <button
+                      v-if="item.sourcePort"
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('source', item.sourcePort) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('source', item.sourcePort)"
+                      :aria-pressed="isQuickFilterActive('source', item.sourcePort)"
+                      :title="quickFilterLabel('source', item.sourcePort)"
+                      @click.stop="toggleQuickFilter('source', item.sourcePort)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                    <DestinationCountryFlag
+                      :destination="item.destinationIp"
+                      :lookup="ipCountryLookup"
+                    />
+                    <span class="truncate">{{ displayValue(item.destinationIp) }}</span>
+                    <button
+                      v-if="item.destinationIp"
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('destination', item.destinationIp) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('destination', item.destinationIp)"
+                      :aria-pressed="isQuickFilterActive('destination', item.destinationIp)"
+                      :title="quickFilterLabel('destination', item.destinationIp)"
+                      @click.stop="toggleQuickFilter('destination', item.destinationIp)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
+                    <span class="truncate">{{ displayValue(item.destinationPort) }}</span>
+                    <button
+                      v-if="item.destinationPort"
+                      type="button"
+                      :class="[
+                        quickFilterButtonClass,
+                        isQuickFilterActive('destination', item.destinationPort) &&
+                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                      ]"
+                      :aria-label="quickFilterLabel('destination', item.destinationPort)"
+                      :aria-pressed="isQuickFilterActive('destination', item.destinationPort)"
+                      :title="quickFilterLabel('destination', item.destinationPort)"
+                      @click.stop="toggleQuickFilter('destination', item.destinationPort)"
+                    >
+                      <UIcon name="i-lucide-filter" class="size-3.5" />
+                    </button>
+                  </span>
+                  <span role="cell" class="truncate px-2">{{ displayValue(item.rule) }}</span>
+                </div>
+              </RecycleScroller>
+              <div v-else class="grid min-h-0 flex-1 place-items-center p-8 text-center">
+                <div class="max-w-sm space-y-2">
+                  <UIcon name="i-lucide-list-filter" class="mx-auto size-8 text-brand-gray-400" />
+                  <h2 class="text-sm font-semibold">{{ emptyState.title }}</h2>
+                  <p class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
+                    {{ emptyState.description }}
+                  </p>
+                </div>
+              </div>
+            </ClientOnly>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
     <UModal
       v-model:open="detailOpen"

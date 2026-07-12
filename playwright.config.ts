@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = process.env.PLAYWRIGHT_PORT || "3000";
 const baseURL = `http://127.0.0.1:${port}`;
-const executablePath = process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH;
+const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 
 export default defineConfig({
