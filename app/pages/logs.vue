@@ -47,7 +47,9 @@ const logTableColumns: LogTableColumn[] = [
   { key: "rule", label: "Rule" },
 ];
 const logTableGridClass =
-  "grid-cols-[7.5rem_13rem_6rem_8rem_9rem_5.5rem_9rem_5.5rem_minmax(16rem,1fr)]";
+  "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_9rem_5.5rem_minmax(16rem,1fr)]";
+const quickFilterButtonClass =
+  "inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100";
 
 const runtimeConfig = useRuntimeConfig();
 const appConfig = useAppConfig();
@@ -226,6 +228,7 @@ const rawLogJson = computed(() => {
 
   return JSON.stringify(selectedLog.value.raw, null, 2);
 });
+const rawLogRows = computed(() => Math.min(Math.max(rawLogJson.value.split("\n").length, 6), 24));
 const emptyState = computed(() => {
   if (!logAnalysisActive.value) {
     return receiver.logs.value.length > 0
@@ -883,12 +886,12 @@ function statusColor(status: string) {
               >
                 <span
                   role="cell"
-                  class="flex min-w-0 flex-col px-2 font-mono text-xs leading-4 text-brand-gray-700 dark:text-brand-gray-200"
+                  class="min-w-0 truncate px-2 font-mono text-xs whitespace-nowrap text-brand-gray-700 dark:text-brand-gray-200"
                   :title="formatTime(item.timestamp)"
                 >
-                  <NuxtTime :datetime="item.timestamp" date-style="medium" time-zone="UTC" />
                   <NuxtTime
                     :datetime="item.timestamp"
+                    date-style="medium"
                     time-style="medium"
                     time-zone="UTC"
                     hour-cycle="h23"
@@ -896,129 +899,126 @@ function statusColor(status: string) {
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
                   <span class="truncate">{{ displayValue(item.category) }}</span>
-                  <UButton
-                    square
-                    size="xs"
-                    :variant="isQuickFilterActive('category', item.category) ? 'soft' : 'ghost'"
-                    :color="isQuickFilterActive('category', item.category) ? 'primary' : 'neutral'"
-                    :icon="
-                      isQuickFilterActive('category', item.category)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                  <button
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('category', item.category) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('category', item.category)"
+                    :aria-pressed="isQuickFilterActive('category', item.category)"
+                    :title="quickFilterLabel('category', item.category)"
                     @click.stop="toggleQuickFilter('category', item.category)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-medium">
                   <span class="truncate">{{ displayValue(item.action) }}</span>
-                  <UButton
-                    square
-                    size="xs"
-                    :variant="isQuickFilterActive('action', item.action) ? 'soft' : 'ghost'"
-                    :color="isQuickFilterActive('action', item.action) ? 'primary' : 'neutral'"
-                    :icon="
-                      isQuickFilterActive('action', item.action)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                  <button
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('action', item.action) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('action', item.action)"
+                    :aria-pressed="isQuickFilterActive('action', item.action)"
+                    :title="quickFilterLabel('action', item.action)"
                     @click.stop="toggleQuickFilter('action', item.action)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
                   <span class="truncate">{{ displayValue(item.protocol) }}</span>
-                  <UButton
-                    square
-                    size="xs"
-                    :variant="isQuickFilterActive('protocol', item.protocol) ? 'soft' : 'ghost'"
-                    :color="isQuickFilterActive('protocol', item.protocol) ? 'primary' : 'neutral'"
-                    :icon="
-                      isQuickFilterActive('protocol', item.protocol)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                  <button
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('protocol', item.protocol) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('protocol', item.protocol)"
+                    :aria-pressed="isQuickFilterActive('protocol', item.protocol)"
+                    :title="quickFilterLabel('protocol', item.protocol)"
                     @click.stop="toggleQuickFilter('protocol', item.protocol)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
                   <span class="truncate">{{ displayValue(item.sourceIp) }}</span>
-                  <UButton
+                  <button
                     v-if="item.sourceIp"
-                    square
-                    size="xs"
-                    :variant="isQuickFilterActive('source', item.sourceIp) ? 'soft' : 'ghost'"
-                    :color="isQuickFilterActive('source', item.sourceIp) ? 'primary' : 'neutral'"
-                    :icon="
-                      isQuickFilterActive('source', item.sourceIp)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('source', item.sourceIp) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('source', item.sourceIp)"
+                    :aria-pressed="isQuickFilterActive('source', item.sourceIp)"
+                    :title="quickFilterLabel('source', item.sourceIp)"
                     @click.stop="toggleQuickFilter('source', item.sourceIp)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
                   <span class="truncate">{{ displayValue(item.sourcePort) }}</span>
-                  <UButton
+                  <button
                     v-if="item.sourcePort"
-                    square
-                    size="xs"
-                    :variant="isQuickFilterActive('source', item.sourcePort) ? 'soft' : 'ghost'"
-                    :color="isQuickFilterActive('source', item.sourcePort) ? 'primary' : 'neutral'"
-                    :icon="
-                      isQuickFilterActive('source', item.sourcePort)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('source', item.sourcePort) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('source', item.sourcePort)"
+                    :aria-pressed="isQuickFilterActive('source', item.sourcePort)"
+                    :title="quickFilterLabel('source', item.sourcePort)"
                     @click.stop="toggleQuickFilter('source', item.sourcePort)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
                   <span class="truncate">{{ displayValue(item.destinationIp) }}</span>
-                  <UButton
+                  <button
                     v-if="item.destinationIp"
-                    square
-                    size="xs"
-                    :variant="
-                      isQuickFilterActive('destination', item.destinationIp) ? 'soft' : 'ghost'
-                    "
-                    :color="
-                      isQuickFilterActive('destination', item.destinationIp) ? 'primary' : 'neutral'
-                    "
-                    :icon="
-                      isQuickFilterActive('destination', item.destinationIp)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('destination', item.destinationIp) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('destination', item.destinationIp)"
+                    :aria-pressed="isQuickFilterActive('destination', item.destinationIp)"
+                    :title="quickFilterLabel('destination', item.destinationIp)"
                     @click.stop="toggleQuickFilter('destination', item.destinationIp)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
                   <span class="truncate">{{ displayValue(item.destinationPort) }}</span>
-                  <UButton
+                  <button
                     v-if="item.destinationPort"
-                    square
-                    size="xs"
-                    :variant="
-                      isQuickFilterActive('destination', item.destinationPort) ? 'soft' : 'ghost'
-                    "
-                    :color="
-                      isQuickFilterActive('destination', item.destinationPort)
-                        ? 'primary'
-                        : 'neutral'
-                    "
-                    :icon="
-                      isQuickFilterActive('destination', item.destinationPort)
-                        ? 'i-lucide-filter-x'
-                        : 'i-lucide-filter'
-                    "
+                    type="button"
+                    :class="[
+                      quickFilterButtonClass,
+                      isQuickFilterActive('destination', item.destinationPort) &&
+                        'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
+                    ]"
                     :aria-label="quickFilterLabel('destination', item.destinationPort)"
+                    :aria-pressed="isQuickFilterActive('destination', item.destinationPort)"
+                    :title="quickFilterLabel('destination', item.destinationPort)"
                     @click.stop="toggleQuickFilter('destination', item.destinationPort)"
-                  />
+                  >
+                    <UIcon name="i-lucide-filter" class="size-3.5" />
+                  </button>
                 </span>
                 <span role="cell" class="truncate px-2">{{ displayValue(item.rule) }}</span>
               </div>
@@ -1037,20 +1037,31 @@ function statusColor(status: string) {
       </div>
     </section>
 
-    <UModal v-model:open="detailOpen" title="Log detail" @after:leave="clearClosedDetail">
+    <UModal
+      v-model:open="detailOpen"
+      title="Log detail"
+      :ui="{ content: 'select-none', body: 'select-none' }"
+      @after:leave="clearClosedDetail"
+    >
       <template #body>
-        <div v-if="selectedLog" class="space-y-4 select-text">
-          <dl class="grid grid-cols-1 gap-3 text-sm select-text sm:grid-cols-2">
+        <div v-if="selectedLog" class="space-y-4">
+          <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div
               v-for="field in parsedDetailFields"
               :key="field.label"
               :class="field.wide ? 'sm:col-span-2' : ''"
             >
-              <dt
-                class="flex items-center gap-2 text-xs text-brand-gray-600 dark:text-brand-gray-300"
+              <dt class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+                {{ field.label }}
+              </dt>
+              <dd
+                class="mt-1 flex min-w-0 items-start gap-2 text-brand-gray-950 dark:text-brand-gray-50"
               >
-                <span class="min-w-0">{{ field.label }}</span>
+                <span :class="['min-w-0 break-words', field.mono ? 'font-mono text-xs' : '']">
+                  {{ displayValue(field.value) }}
+                </span>
                 <UButton
+                  class="shrink-0"
                   variant="ghost"
                   color="neutral"
                   size="xs"
@@ -1059,14 +1070,6 @@ function statusColor(status: string) {
                   :disabled="!field.value"
                   @click.stop="copyValue(field.label, field.value)"
                 />
-              </dt>
-              <dd
-                :class="[
-                  'mt-1 break-words text-brand-gray-950 dark:text-brand-gray-50',
-                  field.mono ? 'font-mono text-xs' : '',
-                ]"
-              >
-                {{ displayValue(field.value) }}
               </dd>
             </div>
           </dl>
@@ -1088,9 +1091,15 @@ function statusColor(status: string) {
                 @click="copyValue('Raw message', rawLogJson)"
               />
             </div>
-            <pre
-              class="max-h-96 overflow-auto p-3 text-xs select-text text-brand-gray-950 dark:text-brand-gray-50"
-              >{{ rawLogJson }}</pre>
+            <textarea
+              :value="rawLogJson"
+              :rows="rawLogRows"
+              aria-label="Raw message"
+              readonly
+              spellcheck="false"
+              wrap="off"
+              class="block max-h-96 w-full resize-none overflow-auto border-0 bg-transparent p-3 font-mono text-xs leading-5 select-text text-brand-gray-950 focus:outline-none dark:text-brand-gray-50"
+            />
           </section>
         </div>
       </template>
