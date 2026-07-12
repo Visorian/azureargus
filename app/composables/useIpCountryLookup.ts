@@ -3,8 +3,8 @@ import { onScopeDispose, reactive } from "vue";
 import {
   MAX_IP_COUNTRY_BATCH_SIZE,
   MAX_IP_COUNTRY_VALUE_LENGTH,
+  isIpCountryLookupResponse,
   type IpCountryLookupRequest,
-  type IpCountryLookupResponse,
 } from "#shared/types/ipCountry";
 import { normalizeCountryCode } from "~/utils/countryFlag";
 
@@ -12,10 +12,7 @@ const DEFAULT_BATCH_DELAY_MS = 50;
 const DEFAULT_CACHE_SIZE = 2_048;
 const DEFAULT_FAILURE_COOLDOWN_MS = 60_000;
 
-type LookupRequest = (
-  body: IpCountryLookupRequest,
-  signal: AbortSignal,
-) => Promise<IpCountryLookupResponse>;
+type LookupRequest = (body: IpCountryLookupRequest, signal: AbortSignal) => Promise<unknown>;
 
 interface IpCountryLookupClientOptions {
   batchDelayMs?: number;
@@ -155,6 +152,11 @@ export function createIpCountryLookupClient(
 
     try {
       const response = await request({ ips }, controller.signal);
+      if (!isIpCountryLookupResponse(response)) {
+        disabled = true;
+        queued.clear();
+        return;
+      }
       const results = new Map(
         response.results
           .filter((result) => ips.includes(result.ip))
@@ -233,7 +235,7 @@ export function createIpCountryLookupClient(
 export function useIpCountryLookup() {
   const requestFetch = useRequestFetch();
   const client = createIpCountryLookupClient((body, signal) =>
-    requestFetch<IpCountryLookupResponse>("/api/ip-country", {
+    requestFetch<unknown>("/api/ip-country", {
       body,
       method: "POST",
       signal,

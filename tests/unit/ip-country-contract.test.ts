@@ -1,4 +1,8 @@
-import { isIpCountryLookupRequest, MAX_IP_COUNTRY_BATCH_SIZE } from "../../shared/types/ipCountry";
+import {
+  isIpCountryLookupRequest,
+  isIpCountryLookupResponse,
+  MAX_IP_COUNTRY_BATCH_SIZE,
+} from "../../shared/types/ipCountry";
 
 describe("IP country contract", () => {
   it("accepts a bounded exact request shape", () => {
@@ -9,5 +13,29 @@ describe("IP country contract", () => {
     ).toBe(false);
     expect(isIpCountryLookupRequest({ ips: ["x".repeat(46)] })).toBe(false);
     expect(isIpCountryLookupRequest({ ips: [1] })).toBe(false);
+  });
+
+  it("validates exact bounded response shapes", () => {
+    expect(isIpCountryLookupResponse({ results: [{ ip: "8.8.8.8", countryCode: "US" }] })).toBe(
+      true,
+    );
+    expect(isIpCountryLookupResponse({})).toBe(false);
+    expect(
+      isIpCountryLookupResponse({ results: [{ ip: "8.8.8.8", countryCode: "US", extra: true }] }),
+    ).toBe(false);
+    expect(isIpCountryLookupResponse({ results: [{ ip: 1, countryCode: null }] })).toBe(false);
+    expect(
+      isIpCountryLookupResponse({
+        results: [
+          { ip: "8.8.8.8", countryCode: "DE" },
+          { ip: "8.8.8.8", countryCode: "US" },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isIpCountryLookupResponse({
+        results: Array(MAX_IP_COUNTRY_BATCH_SIZE + 1).fill({ ip: "8.8.8.8", countryCode: null }),
+      }),
+    ).toBe(false);
   });
 });

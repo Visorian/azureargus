@@ -42,10 +42,10 @@ async function leave() {
 
 <template>
   <div
-    class="min-h-screen bg-brand-gray-50 text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50"
+    class="flex h-dvh flex-col overflow-hidden bg-brand-gray-50 text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50"
   >
     <header
-      class="border-b border-brand-gray-200 bg-white dark:border-brand-gray-800 dark:bg-brand-gray-900"
+      class="shrink-0 border-b border-brand-gray-200 bg-white dark:border-brand-gray-800 dark:bg-brand-gray-900"
     >
       <div class="flex h-14 items-center justify-between px-4">
         <div class="flex items-center gap-3">
@@ -73,7 +73,7 @@ async function leave() {
         </div>
       </div>
     </header>
-    <main class="h-[calc(100vh-3.5rem)]">
+    <main class="min-h-0 flex-1">
       <slot />
     </main>
   </div>

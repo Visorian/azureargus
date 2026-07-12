@@ -56,7 +56,7 @@ function mergeOptions(current: readonly string[], values: readonly (string | und
       options.set(trimmed.toLowerCase(), trimmed);
     }
   }
-  return [...options.values()].sort((left, right) => left.localeCompare(right));
+  return [...options.values()].toSorted((left, right) => left.localeCompare(right));
 }
 
 export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {

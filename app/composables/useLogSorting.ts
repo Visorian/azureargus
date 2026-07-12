@@ -49,7 +49,7 @@ export function sortFirewallLogs(
   }
 
   const direction = sort.direction === "asc" ? 1 : -1;
-  return [...logs].sort((left, right) => compareFirewallLogs(left, right, sort.key) * direction);
+  return logs.toSorted((left, right) => compareFirewallLogs(left, right, sort.key) * direction);
 }
 
 export function getNextSortDirection(

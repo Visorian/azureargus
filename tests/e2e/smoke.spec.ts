@@ -52,6 +52,29 @@ async function enterAnonymousMode(page: Page) {
   await expect(page).toHaveURL(/\/logs/);
 }
 
+async function seedVisibleLog(page: Page, destinationIp: string) {
+  await page.evaluate((nextDestinationIp) => {
+    const nuxtApp = window.useNuxtApp?.();
+    if (!nuxtApp) {
+      throw new Error("Nuxt app is unavailable");
+    }
+    nuxtApp.payload.state["$sfirewall-log-records"] = [
+      {
+        action: "Allow",
+        category: "AZFWNetworkRule",
+        destinationIp: nextDestinationIp,
+        id: "geoip-row",
+        message: `Allow TCP to ${nextDestinationIp}`,
+        protocol: "TCP",
+        raw: {},
+        searchableText: `azfwnetworkrule allow tcp ${nextDestinationIp}`,
+        timestamp: "2026-07-12T14:30:00.000Z",
+      },
+    ];
+    nuxtApp.payload.state["$sevent-hub-received-count"] = 1;
+  }, destinationIp);
+}
+
 test("login page offers anonymous mode when enabled", async ({ page }) => {
   await page.goto("/login");
 
@@ -80,6 +103,13 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Real-time analysis" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Log analysis" })).toBeDisabled();
   await expect(page.getByRole("table", { name: "Firewall logs" })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+      ),
+    )
+    .toBe(true);
   const filterDropdowns = page.getByRole("button", { name: "Show popup" });
   await expect(filterDropdowns.filter({ hasText: "Category" })).toBeVisible();
   await expect(filterDropdowns.filter({ hasText: "Action" })).toBeVisible();
@@ -103,6 +133,46 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(
     page.getByRole("paragraph").filter({ hasText: "Keeps up to 100,000 parsed Real-time records" }),
   ).toBeVisible();
+});
+
+test("destination country flag follows a recycled visible row", async ({ page }) => {
+  let releaseFirstLookup: (() => void) | undefined;
+  const firstLookupStarted = new Promise<void>((resolve) => {
+    releaseFirstLookup = resolve;
+  });
+  let firstRequestSeen: (() => void) | undefined;
+  const firstRequest = new Promise<void>((resolve) => {
+    firstRequestSeen = resolve;
+  });
+
+  await page.route("**/api/ip-country", async (route) => {
+    const body = route.request().postDataJSON() as { ips: string[] };
+    if (body.ips.includes("1.1.1.1")) {
+      firstRequestSeen?.();
+      await firstLookupStarted;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        results: body.ips.map((ip) => ({
+          ip,
+          countryCode: ip === "1.1.1.1" ? "AU" : "US",
+        })),
+      }),
+    });
+  });
+  await enterAnonymousMode(page);
+  await seedVisibleLog(page, "1.1.1.1");
+  await firstRequest;
+  await seedVisibleLog(page, "8.8.8.8");
+
+  const destinationCell = page.getByRole("cell", { name: /8\.8\.8\.8/ });
+  await expect(destinationCell.getByRole("img")).toHaveCount(0);
+  releaseFirstLookup?.();
+  await expect(
+    destinationCell.getByRole("img", { name: "GeoIP country: United States (US)" }),
+  ).toBeVisible();
+  await expect(destinationCell).toContainText("🇺🇸");
 });
 
 test("local log retention is opt-in and clearing is persistent", async ({ page }) => {

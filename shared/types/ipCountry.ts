@@ -29,3 +29,30 @@ export function isIpCountryLookupRequest(value: unknown): value is IpCountryLook
     value.ips.every((ip) => typeof ip === "string" && ip.length <= MAX_IP_COUNTRY_VALUE_LENGTH)
   );
 }
+
+export function isIpCountryLookupResponse(value: unknown): value is IpCountryLookupResponse {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value.results)) {
+    return false;
+  }
+
+  if (value.results.length > MAX_IP_COUNTRY_BATCH_SIZE) {
+    return false;
+  }
+
+  const seenIps = new Set<string>();
+  for (const result of value.results) {
+    if (
+      !isRecord(result) ||
+      Object.keys(result).length !== 2 ||
+      typeof result.ip !== "string" ||
+      result.ip.length > MAX_IP_COUNTRY_VALUE_LENGTH ||
+      (result.countryCode !== null && typeof result.countryCode !== "string") ||
+      seenIps.has(result.ip)
+    ) {
+      return false;
+    }
+    seenIps.add(result.ip);
+  }
+
+  return true;
+}

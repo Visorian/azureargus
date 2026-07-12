@@ -153,7 +153,7 @@ export function mergeFilteredLogCache(
   const seen = new Set<string>();
   const merged: FirewallLogRecord[] = [];
 
-  for (const log of currentMatches.concat(cachedMatches)) {
+  for (const log of [...currentMatches, ...cachedMatches]) {
     if (seen.has(log.id)) {
       continue;
     }

@@ -62,7 +62,7 @@ describe("IP country client", () => {
     client.dispose();
   });
 
-  it("keeps late results keyed to their original recycled destination", async () => {
+  it("keeps late results keyed to their original destination", async () => {
     let resolveFirst: ((response: IpCountryLookupResponse) => void) | undefined;
     const request = vi
       .fn<(body: { ips: string[] }, signal: AbortSignal) => Promise<IpCountryLookupResponse>>()
@@ -129,6 +129,39 @@ describe("IP country client", () => {
 
     expect(request).toHaveBeenCalledOnce();
     expect(client.getCountryCode("8.8.8.8")).toBeNull();
+    client.dispose();
+  });
+
+  it("fails closed without retrying malformed successful responses", async () => {
+    const request = vi.fn(async () => ({}));
+    const client = createIpCountryLookupClient(request);
+
+    client.queue("8.8.8.8");
+    await vi.advanceTimersByTimeAsync(50);
+    client.queue("1.1.1.1");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(client.getCountryCode("8.8.8.8")).toBeUndefined();
+    client.dispose();
+  });
+
+  it("ignores unknown results and negatively caches missing or invalid countries", async () => {
+    const request = vi.fn(async () => ({
+      results: [
+        { ip: "203.0.113.1", countryCode: "US" },
+        { ip: "8.8.8.8", countryCode: "invalid" },
+      ],
+    }));
+    const client = createIpCountryLookupClient(request);
+
+    client.queue("8.8.8.8");
+    client.queue("1.1.1.1");
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(client.getCountryCode("8.8.8.8")).toBeNull();
+    expect(client.getCountryCode("1.1.1.1")).toBeNull();
+    expect(client.getCountryCode("203.0.113.1")).toBeUndefined();
     client.dispose();
   });
 
