@@ -3,6 +3,7 @@ import { computed, watch } from "vue";
 
 import type { IpCountryLookupClient } from "~/composables/useIpCountryLookup";
 import { countryCodeToFlag, countryCodeToName } from "~/utils/countryFlag";
+import { isRfc1918Ipv4Address } from "~/utils/ipAddress";
 
 const props = defineProps<{
   destination?: string;
@@ -11,17 +12,24 @@ const props = defineProps<{
 
 watch(
   () => props.destination,
-  (destination) => props.lookup.queue(destination),
+  (destination) => {
+    if (!isRfc1918Ipv4Address(destination)) {
+      props.lookup.queue(destination);
+    }
+  },
   { immediate: true },
 );
 
+const internal = computed(() => isRfc1918Ipv4Address(props.destination));
 const countryCode = computed(() => props.lookup.getCountryCode(props.destination));
 const flag = computed(() => countryCodeToFlag(countryCode.value));
 const countryName = computed(() => countryCodeToName(countryCode.value));
 const accessibleLabel = computed(() =>
-  countryName.value && countryCode.value
-    ? `GeoIP country: ${countryName.value} (${countryCode.value})`
-    : undefined,
+  internal.value
+    ? "Internal address (RFC 1918)"
+    : countryName.value && countryCode.value
+      ? `GeoIP country: ${countryName.value} (${countryCode.value})`
+      : undefined,
 );
 </script>
 
@@ -33,7 +41,8 @@ const accessibleLabel = computed(() =>
     :role="accessibleLabel ? 'img' : undefined"
     :title="accessibleLabel"
   >
-    {{ flag }}
+    <UIcon v-if="internal" name="i-lucide-network" class="size-4" />
+    <template v-else>{{ flag }}</template>
   </span>
 </template>
 

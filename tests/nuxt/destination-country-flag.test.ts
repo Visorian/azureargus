@@ -15,6 +15,25 @@ function createLookup() {
 }
 
 describe("DestinationCountryFlag", () => {
+  it("renders an internal-address icon and skips GeoIP lookup for RFC 1918 destinations", async () => {
+    const { lookup } = createLookup();
+    const wrapper = await mountSuspended(DestinationCountryFlag, {
+      props: { destination: "10.140.16.133", lookup },
+    });
+    const indicator = wrapper.get("span");
+
+    expect(lookup.queue).not.toHaveBeenCalled();
+    expect(indicator.attributes("aria-label")).toBe("Internal address (RFC 1918)");
+    expect(indicator.attributes("title")).toBe("Internal address (RFC 1918)");
+    expect(indicator.attributes("role")).toBe("img");
+    expect(wrapper.getComponent({ name: "UIcon" }).props("name")).toBe("i-lucide-network");
+
+    await wrapper.setProps({ destination: "8.8.8.8" });
+    expect(lookup.queue).toHaveBeenCalledWith("8.8.8.8");
+    expect(indicator.attributes("aria-label")).toBeUndefined();
+    expect(wrapper.findComponent({ name: "UIcon" }).exists()).toBe(false);
+  });
+
   it("reserves space and follows destination prop changes without showing stale flags", async () => {
     const { cache, lookup } = createLookup();
     const wrapper = await mountSuspended(DestinationCountryFlag, {

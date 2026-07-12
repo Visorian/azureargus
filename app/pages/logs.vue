@@ -24,6 +24,7 @@ interface LogTableColumn {
 }
 
 interface DetailField {
+  countryDestination?: string;
   label: string;
   value?: string;
   mono?: boolean;
@@ -206,7 +207,12 @@ const parsedDetailFields = computed<DetailField[]>(() => {
     { label: "Rule", value: log.rule },
     { label: "Source IP", value: log.sourceIp, mono: true },
     { label: "Source port", value: log.sourcePort, mono: true },
-    { label: "Destination IP", value: log.destinationIp, mono: true },
+    {
+      countryDestination: log.destinationIp,
+      label: "Destination IP",
+      value: log.destinationIp,
+      mono: true,
+    },
     { label: "Destination port", value: log.destinationPort, mono: true },
   ];
 
@@ -1013,6 +1019,11 @@ function statusColor(status: string) {
               <dd
                 class="mt-1 flex min-w-0 items-start gap-2 text-brand-gray-950 dark:text-brand-gray-50"
               >
+                <DestinationCountryFlag
+                  v-if="field.countryDestination"
+                  :destination="field.countryDestination"
+                  :lookup="ipCountryLookup"
+                />
                 <span :class="['min-w-0 break-words', field.mono ? 'font-mono text-xs' : '']">
                   {{ displayValue(field.value) }}
                 </span>
