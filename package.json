@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "nuxt dev --host 127.0.0.1",
     "build": "nuxt build",
+    "geoip:update": "bun scripts/update-ip-country-database.ts",
     "preview": "nuxt preview",
     "lint": "oxlint app server shared tests nuxt.config.ts vitest.config.ts playwright.config.ts",
     "fmt": "oxfmt .",
@@ -19,6 +20,7 @@
   },
   "dependencies": {
     "@azure/event-hubs": "^6.0.4",
+    "@maxmind/geoip2-node": "7.0.0",
     "@nuxt/ui": "^4.9.0",
     "buffer": "^6.0.3",
     "nuxt": "^4.4.8",

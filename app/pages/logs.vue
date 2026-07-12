@@ -47,7 +47,7 @@ const logTableColumns: LogTableColumn[] = [
   { key: "rule", label: "Rule" },
 ];
 const logTableGridClass =
-  "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_9rem_5.5rem_minmax(16rem,1fr)]";
+  "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]";
 const quickFilterButtonClass =
   "inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100";
 
@@ -68,6 +68,7 @@ const toast = useToast();
 const anonymousMode = useAnonymousMode();
 const { loggedIn, user } = useOidcAuth();
 const logHistory = useLogHistoryPersistence();
+const ipCountryLookup = useIpCountryLookup();
 const clearingLogHistory = ref(false);
 const logHistoryEnabled = computed(() => logHistory.enabled.value);
 const logHistoryError = computed(() => logHistory.lastError.value);
@@ -669,9 +670,9 @@ function statusColor(status: string) {
       </section>
 
       <footer
-        class="border-t border-brand-gray-200 px-4 py-3 text-xs font-mono text-brand-gray-500 dark:border-brand-gray-800 dark:text-brand-gray-500"
+        class="space-y-1 border-t border-brand-gray-200 px-4 py-3 text-xs font-mono text-brand-gray-500 dark:border-brand-gray-800 dark:text-brand-gray-500"
       >
-        <span class="select-none">
+        <span class="block select-none">
           Version: {{ versionNumber }} by
           <a
             href="https://www.visorian.com"
@@ -687,6 +688,17 @@ function statusColor(status: string) {
               class="hidden h-3 w-auto dark:inline"
             />
             Visorian
+          </a>
+        </span>
+        <span class="block select-none">
+          IP geolocation by
+          <a
+            href="https://db-ip.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
+          >
+            DB-IP
           </a>
         </span>
       </footer>
@@ -985,6 +997,10 @@ function statusColor(status: string) {
                   </button>
                 </span>
                 <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <DestinationCountryFlag
+                    :destination="item.destinationIp"
+                    :lookup="ipCountryLookup"
+                  />
                   <span class="truncate">{{ displayValue(item.destinationIp) }}</span>
                   <button
                     v-if="item.destinationIp"

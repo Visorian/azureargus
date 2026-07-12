@@ -11,6 +11,9 @@ export default defineNuxtConfig({
     versionNumber: process.env.VERSION_NUMBER || process.env.npm_package_version || "dev",
   },
   runtimeConfig: {
+    ipCountry: {
+      databasePath: process.env.NUXT_IP_COUNTRY_DATABASE_PATH || ".data/dbip-country-lite.mmdb",
+    },
     logAnalytics: {
       tenantId: process.env.NUXT_LOG_ANALYTICS_TENANT_ID || "",
       clientId: process.env.NUXT_LOG_ANALYTICS_CLIENT_ID || "",
