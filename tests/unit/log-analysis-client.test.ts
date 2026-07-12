@@ -5,7 +5,6 @@ import { createDefaultLogSort } from "../../app/composables/useLogSorting";
 import { useLogAnalyticsQuery } from "../../app/composables/useLogAnalyticsQuery";
 import {
   createDefaultLogAnalysisDateRange,
-  hasLogAnalysisRole,
   parseLogAnalysisDateRange,
 } from "../../app/utils/logAnalysis";
 import type { FirewallLogRecord } from "../../app/types/firewall";
@@ -59,12 +58,6 @@ describe("Log analysis client", () => {
     expect(parseLogAnalysisDateRange({ from: "2026-07-10T12:00", to: "2026-07-09T12:00" })).toEqual(
       { error: "Start date must be before end date.", ok: false },
     );
-  });
-
-  it("requires the Log Analysis app role", () => {
-    expect(hasLogAnalysisRole({ claims: { roles: ["LogAnalysis.Read"] } })).toBe(true);
-    expect(hasLogAnalysisRole({ claims: { roles: ["Other"] } })).toBe(false);
-    expect(hasLogAnalysisRole(null)).toBe(false);
   });
 
   it("runs explicitly, debounces refinements, and clears state", async () => {

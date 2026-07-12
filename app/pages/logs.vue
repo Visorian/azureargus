@@ -14,7 +14,7 @@ import {
   toggleLogFilterValue,
 } from "~/composables/useLogQuery";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
-import { hasLogAnalysisRole, LOG_ANALYSIS_CATEGORIES } from "~/utils/logAnalysis";
+import { LOG_ANALYSIS_CATEGORIES } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
 
 definePageMeta({
@@ -66,7 +66,7 @@ const detailOpen = ref(false);
 const selectedLog = ref<FirewallLogRecord | null>(null);
 const toast = useToast();
 const anonymousMode = useAnonymousMode();
-const { loggedIn, user } = useOidcAuth();
+const { loggedIn } = useOidcAuth();
 const logHistory = useLogHistoryPersistence();
 const ipCountryLookup = useIpCountryLookup();
 const clearingLogHistory = ref(false);
@@ -74,9 +74,7 @@ const logHistoryEnabled = computed(() => logHistory.enabled.value);
 const logHistoryError = computed(() => logHistory.lastError.value);
 const analysisMode = ref<AnalysisMode>("real-time-analysis");
 const logAnalysisActive = computed(() => analysisMode.value === "log-analysis");
-const canUseLogAnalysis = computed(
-  () => loggedIn.value && !anonymousMode.enabled.value && hasLogAnalysisRole(user.value),
-);
+const canUseLogAnalysis = computed(() => loggedIn.value && !anonymousMode.enabled.value);
 const realTimeQuery = useLogQuery(receiver.logs, {
   rawSource: {
     getRecords: receiver.getRawLogs,
@@ -729,7 +727,7 @@ function statusColor(status: string) {
                 :color="logAnalysisActive ? 'primary' : 'neutral'"
                 :disabled="!canUseLogAnalysis || modeTransitioning"
                 :loading="modeTransitioning && !logAnalysisActive"
-                title="Requires an authenticated user with LogAnalysis.Read role"
+                title="Requires sign-in"
                 @click="updateAnalysisMode('log-analysis')"
               />
             </UFieldGroup>

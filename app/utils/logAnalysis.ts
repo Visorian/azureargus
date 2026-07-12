@@ -1,4 +1,3 @@
-import { LOG_ANALYSIS_ROLE } from "#shared/types/logAnalytics";
 import type { FirewallLogFilters, FirewallLogSortState } from "~/types/firewall";
 
 export const LOG_ANALYSIS_CATEGORIES = [
@@ -83,18 +82,4 @@ export function getLogAnalysisCriteriaKey(filters: FirewallLogFilters, sort: Fir
   ]
     .map((value) => value.trim().toLowerCase())
     .join("\u001F");
-}
-
-export function hasLogAnalysisRole(user: unknown) {
-  if (typeof user !== "object" || user === null) {
-    return false;
-  }
-
-  const claims = "claims" in user ? user.claims : undefined;
-  if (typeof claims !== "object" || claims === null || !("roles" in claims)) {
-    return false;
-  }
-
-  const roles = claims.roles;
-  return Array.isArray(roles) && roles.includes(LOG_ANALYSIS_ROLE);
 }

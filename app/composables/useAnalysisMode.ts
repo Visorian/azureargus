@@ -24,7 +24,7 @@ export function useAnalysisMode(options: UseAnalysisModeOptions) {
       return nextMode === options.mode.value;
     }
     if (nextMode === "log-analysis" && !options.canUseLogAnalysis.value) {
-      lastError.value = "Log analysis requires the LogAnalysis.Read role.";
+      lastError.value = "Log analysis requires sign-in.";
       return false;
     }
 

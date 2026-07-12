@@ -4,8 +4,6 @@ import type {
   FirewallLogSortKey,
 } from "~/types/firewall";
 
-export const LOG_ANALYSIS_ROLE = "LogAnalysis.Read";
-
 export interface LogAnalyticsFilters {
   search: string;
   category: string;

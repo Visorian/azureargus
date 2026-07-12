@@ -1,5 +1,3 @@
-import { LOG_ANALYSIS_ROLE } from "../../shared/types/logAnalytics";
-
 const TOKEN_SCOPE = "https://api.loganalytics.io/.default";
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
 const DEFAULT_TOKEN_TIMEOUT_MS = 15_000;
@@ -42,13 +40,6 @@ export class LogAnalyticsConfigurationError extends Error {
   constructor() {
     super("Log Analytics server configuration is incomplete");
     this.name = "LogAnalyticsConfigurationError";
-  }
-}
-
-export class LogAnalyticsSessionAuthorizationError extends Error {
-  constructor() {
-    super("Log Analytics access is forbidden");
-    this.name = "LogAnalyticsSessionAuthorizationError";
   }
 }
 
@@ -97,40 +88,6 @@ export function parseLogAnalyticsRuntimeConfig(value: unknown): LogAnalyticsRunt
     clientSecret: readRequiredConfigValue(value, "clientSecret"),
     workspaceId: readRequiredConfigValue(value, "workspaceId"),
   };
-}
-
-export function isLogAnalyticsSessionAuthorized(session: unknown, tenantId: string) {
-  if (!isRecord(session) || session.provider !== "entra" || !isRecord(session.claims)) {
-    return false;
-  }
-
-  const claimTenantId = session.claims.tid;
-  const roles = session.claims.roles;
-  return (
-    typeof claimTenantId === "string" &&
-    claimTenantId.toLowerCase() === tenantId.toLowerCase() &&
-    Array.isArray(roles) &&
-    roles.some((role) => role === LOG_ANALYSIS_ROLE)
-  );
-}
-
-export function assertLogAnalyticsSessionAuthorized(session: unknown, tenantId: string) {
-  if (!isLogAnalyticsSessionAuthorized(session, tenantId)) {
-    throw new LogAnalyticsSessionAuthorizationError();
-  }
-}
-
-export function parseAuthorizedLogAnalyticsRuntimeConfig(
-  session: unknown,
-  value: unknown,
-): LogAnalyticsRuntimeConfig {
-  if (!isRecord(value)) {
-    throw new LogAnalyticsConfigurationError();
-  }
-
-  const tenantId = readRequiredConfigValue(value, "tenantId");
-  assertLogAnalyticsSessionAuthorized(session, tenantId);
-  return parseLogAnalyticsRuntimeConfig(value);
 }
 
 function waitForAccessToken(

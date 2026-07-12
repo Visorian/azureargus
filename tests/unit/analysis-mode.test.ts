@@ -40,7 +40,7 @@ describe("analysis mode orchestration", () => {
     expect(mode.value).toBe("log-analysis");
   });
 
-  it("blocks unauthorized Log Analysis without disconnecting", async () => {
+  it("blocks Log Analysis without sign-in", async () => {
     const disconnectRealTime = vi.fn(async () => undefined);
     const mode = ref<"real-time-analysis" | "log-analysis">("real-time-analysis");
     const state = useAnalysisMode({
@@ -54,7 +54,7 @@ describe("analysis mode orchestration", () => {
     await expect(state.setMode("log-analysis")).resolves.toBe(false);
     expect(disconnectRealTime).not.toHaveBeenCalled();
     expect(mode.value).toBe("real-time-analysis");
-    expect(state.lastError.value).toBe("Log analysis requires the LogAnalysis.Read role.");
+    expect(state.lastError.value).toBe("Log analysis requires sign-in.");
   });
 
   it("aborts Log Analysis work before returning to Real-time", async () => {

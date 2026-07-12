@@ -1,6 +1,3 @@
-const entraTenantId = process.env.NUXT_OIDC_ENTRA_TENANT_ID || "organizations";
-const entraBaseUrl = `https://login.microsoftonline.com/${entraTenantId}/oauth2/v2.0`;
-
 export default defineNuxtConfig({
   modules: ["@nuxt/ui", "nuxt-oidc-auth"],
   ssr: false,
@@ -12,17 +9,17 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     ipCountry: {
-      databasePath: process.env.NUXT_IP_COUNTRY_DATABASE_PATH || ".data/dbip-country-lite.mmdb",
+      databasePath: ".data/dbip-country-lite.mmdb",
     },
     logAnalytics: {
-      tenantId: process.env.NUXT_LOG_ANALYTICS_TENANT_ID || "",
-      clientId: process.env.NUXT_LOG_ANALYTICS_CLIENT_ID || "",
-      clientSecret: process.env.NUXT_LOG_ANALYTICS_CLIENT_SECRET || "",
-      workspaceId: process.env.NUXT_LOG_ANALYTICS_WORKSPACE_ID || "",
+      tenantId: "",
+      clientId: "",
+      clientSecret: "",
+      workspaceId: "",
     },
     public: {
-      allowAnonymousMode: process.env.NUXT_PUBLIC_ALLOW_ANONYMOUS_MODE !== "false",
-      defaultLookbackMinutes: Number(process.env.NUXT_PUBLIC_DEFAULT_LOOKBACK_MINUTES || 15),
+      allowAnonymousMode: true,
+      defaultLookbackMinutes: 15,
       siteName: "Azure Argus",
     },
   },
@@ -77,26 +74,18 @@ export default defineNuxtConfig({
     defaultProvider: "entra",
     providers: {
       entra: {
-        clientId: process.env.NUXT_OIDC_ENTRA_CLIENT_ID || "local-client-id",
-        clientSecret: process.env.NUXT_OIDC_ENTRA_CLIENT_SECRET || "local-client-secret",
-        redirectUri:
-          process.env.NUXT_OIDC_ENTRA_REDIRECT_URI || "http://localhost:3000/auth/entra/callback",
-        authorizationUrl: `${entraBaseUrl}/authorize`,
-        tokenUrl: `${entraBaseUrl}/token`,
-        logoutUrl: `${entraBaseUrl}/logout`,
+        clientId: "",
+        clientSecret: "",
+        redirectUri: "",
+        authorizationUrl: "",
+        tokenUrl: "",
+        logoutUrl: "",
         nonce: true,
         pkce: true,
         state: true,
         scope: ["openid", "profile", "email", "offline_access"],
         responseType: "code id_token",
-        optionalClaims: [
-          "preferred_username",
-          "family_name",
-          "given_name",
-          "groups",
-          "tid",
-          "roles",
-        ],
+        optionalClaims: ["preferred_username", "family_name", "given_name"],
       },
     },
     session: {

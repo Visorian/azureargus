@@ -24,11 +24,13 @@ bun run dev
 ```
 
 Open `http://127.0.0.1:3000` and connect with an Event Hub Listen-only SAS connection string.
-Anonymous mode is enabled by default for real-time analysis. Log Analytics requires Entra sign-in and
-server credentials.
+Anonymous mode is enabled by default for real-time analysis. Log Analytics requires any authenticated
+non-anonymous session plus independent server credentials.
 
-Configuration is documented in [`.env.example`](./.env.example). Set the `NUXT_OIDC_*` variables
-for Entra authentication and `NUXT_LOG_ANALYTICS_*` variables for historical queries.
+Configuration is documented in [`.env.example`](./.env.example). Set the
+`NUXT_OIDC_PROVIDERS_ENTRA_*` variables only for login and session authentication. Set the independent
+`NUXT_LOG_ANALYTICS_*` service-principal variables for historical queries; it may belong to a different
+tenant than the login provider.
 
 ## IP Geolocation
 

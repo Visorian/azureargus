@@ -1,11 +1,7 @@
-import { LOG_ANALYSIS_ROLE } from "../../shared/types/logAnalytics";
 import {
   createLogAnalyticsTokenProvider,
-  isLogAnalyticsSessionAuthorized,
   LogAnalyticsConfigurationError,
-  LogAnalyticsSessionAuthorizationError,
   LogAnalyticsTokenError,
-  parseAuthorizedLogAnalyticsRuntimeConfig,
   parseLogAnalyticsRuntimeConfig,
   type LogAnalyticsRuntimeConfig,
 } from "../../server/utils/logAnalyticsAuth";
@@ -16,67 +12,12 @@ const config: LogAnalyticsRuntimeConfig = {
   clientSecret: "secret",
   workspaceId: "33333333-3333-3333-3333-333333333333",
 };
-const authorizedSession = {
-  provider: "entra",
-  claims: {
-    tid: config.tenantId,
-    roles: [LOG_ANALYSIS_ROLE],
-  },
-};
-
-describe("Log Analytics authorization", () => {
-  it("requires Entra provider, configured tenant, and app role", () => {
-    const session = {
-      provider: "entra",
-      claims: {
-        tid: config.tenantId,
-        roles: ["Other.Role", LOG_ANALYSIS_ROLE],
-      },
-    };
-
-    expect(isLogAnalyticsSessionAuthorized(session, config.tenantId)).toBe(true);
-    expect(isLogAnalyticsSessionAuthorized({ ...session, provider: "dev" }, config.tenantId)).toBe(
-      false,
-    );
-    expect(
-      isLogAnalyticsSessionAuthorized(
-        { ...session, claims: { ...session.claims, tid: "another-tenant" } },
-        config.tenantId,
-      ),
-    ).toBe(false);
-    expect(
-      isLogAnalyticsSessionAuthorized(
-        { ...session, claims: { ...session.claims, roles: ["Other.Role"] } },
-        config.tenantId,
-      ),
-    ).toBe(false);
-    expect(
-      isLogAnalyticsSessionAuthorized(
-        { ...session, claims: { ...session.claims, roles: LOG_ANALYSIS_ROLE } },
-        config.tenantId,
-      ),
-    ).toBe(false);
-  });
-
+describe("Log Analytics configuration", () => {
   it("rejects incomplete private runtime config", () => {
     expect(parseLogAnalyticsRuntimeConfig(config)).toEqual(config);
     expect(() => parseLogAnalyticsRuntimeConfig({ ...config, clientSecret: "" })).toThrow(
       LogAnalyticsConfigurationError,
     );
-  });
-
-  it("authorizes tenant and role before validating remaining private config", () => {
-    const incompleteConfig = { ...config, clientSecret: "" };
-
-    expect(() =>
-      parseAuthorizedLogAnalyticsRuntimeConfig(
-        { ...authorizedSession, claims: { ...authorizedSession.claims, roles: ["Other.Role"] } },
-        incompleteConfig,
-      ),
-    ).toThrow(LogAnalyticsSessionAuthorizationError);
-    expect(() =>
-      parseAuthorizedLogAnalyticsRuntimeConfig(authorizedSession, incompleteConfig),
-    ).toThrow(LogAnalyticsConfigurationError);
   });
 });
 

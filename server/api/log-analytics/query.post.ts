@@ -5,9 +5,8 @@ import type { LogAnalyticsQueryRequest } from "../../../shared/types/logAnalytic
 import {
   getLogAnalyticsAccessToken,
   LogAnalyticsConfigurationError,
-  LogAnalyticsSessionAuthorizationError,
   LogAnalyticsTokenError,
-  parseAuthorizedLogAnalyticsRuntimeConfig,
+  parseLogAnalyticsRuntimeConfig,
 } from "../../utils/logAnalyticsAuth";
 import {
   executeLogAnalyticsQuery,
@@ -63,13 +62,6 @@ function throwUpstreamError(event: H3Event, error: unknown): never {
     });
   }
 
-  if (error instanceof LogAnalyticsSessionAuthorizationError) {
-    throw createError({
-      statusCode: 403,
-      message: "Log Analytics access is forbidden",
-    });
-  }
-
   if (error instanceof LogAnalyticsTokenError) {
     if (error.kind === "authorization") {
       throw createError({
@@ -112,12 +104,12 @@ function throwUpstreamError(event: H3Event, error: unknown): never {
 }
 
 export default defineEventHandler(async (event) => {
-  const session = await requireUserSession(event, { errorBehavior: "throw" });
+  await requireUserSession(event, { errorBehavior: "throw" });
   const runtimeConfig = useRuntimeConfig(event);
 
   let config;
   try {
-    config = parseAuthorizedLogAnalyticsRuntimeConfig(session, runtimeConfig.logAnalytics);
+    config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics);
   } catch (error) {
     throwUpstreamError(event, error);
   }
