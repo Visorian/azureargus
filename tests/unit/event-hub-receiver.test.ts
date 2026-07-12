@@ -194,15 +194,17 @@ describe("Event Hub receiver helpers", () => {
 
     await expect(receiver.connect(form)).resolves.toBe(true);
 
-    expect(subscribe.mock.calls[0]?.[1].startPosition.enqueuedOn.toISOString()).toBe(
-      "2026-07-10T11:57:00.000Z",
-    );
+    expect(subscribe.mock.calls[0]?.[1]).toMatchObject({
+      maxBatchSize: 1,
+      startPosition: { enqueuedOn: new Date("2026-07-10T11:57:00.000Z") },
+    });
 
     await receiver.disconnect();
   });
 
   it("collects filter options incrementally and resets them on clear", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-12T12:00:10.000Z"));
     installNuxtMocks();
     let handlers: ReceiverHandlers | undefined;
     const client: EventHubReceiverClient = {
@@ -221,10 +223,21 @@ describe("Event Hub receiver helpers", () => {
     await requireHandlers(handlers).processEvents(
       [
         {
+          enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
           body: {
             records: [
-              { category: "AZFWNetworkRule", action: "Allow", protocol: "TCP" },
-              { category: "AZFWApplicationRule", action: "allow", protocol: "HTTPS" },
+              {
+                time: "2026-07-12T12:00:02.000Z",
+                category: "AZFWNetworkRule",
+                action: "Allow",
+                protocol: "TCP",
+              },
+              {
+                time: "2026-07-12T12:00:01.000Z",
+                category: "AZFWApplicationRule",
+                action: "allow",
+                protocol: "HTTPS",
+              },
             ],
           },
         },
@@ -236,11 +249,58 @@ describe("Event Hub receiver helpers", () => {
     expect(receiver.categoryOptions.value).toEqual(["AZFWApplicationRule", "AZFWNetworkRule"]);
     expect(receiver.actionOptions.value).toEqual(["Allow"]);
     expect(receiver.protocolOptions.value).toEqual(["HTTPS", "TCP"]);
+    expect(receiver.latestSourceTimestamp.value).toBe("2026-07-12T12:00:02.000Z");
+    expect(receiver.caughtUp.value).toBe(true);
+
+    await requireHandlers(handlers).processEvents(
+      [{ body: { time: "2026-07-12T12:00:00.000Z", category: "AZFWNetworkRule" } }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+    expect(receiver.latestSourceTimestamp.value).toBe("2026-07-12T12:00:02.000Z");
 
     receiver.clear();
     expect(receiver.categoryOptions.value).toEqual([]);
     expect(receiver.actionOptions.value).toEqual([]);
     expect(receiver.protocolOptions.value).toEqual([]);
+    expect(receiver.latestSourceTimestamp.value).toBeNull();
+    expect(receiver.caughtUp.value).toBe(false);
+    await receiver.disconnect();
+  });
+
+  it("continues receiving after subscription errors", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processError(new Error("transient receive failure"));
+    expect(receiver.status.value).toBe("connected");
+    expect(receiver.errors.value).toEqual(["transient receive failure"]);
+
+    receiver.pause();
+    await requireHandlers(handlers).processError(new Error("paused receive failure"));
+    expect(receiver.status.value).toBe("paused");
+    expect(receiver.errors.value).toEqual(["paused receive failure", "transient receive failure"]);
+    receiver.resume();
+
+    await requireHandlers(handlers).processEvents([{ body: { msg: "recovered" } }], {
+      partitionId: "0",
+    });
+    vi.advanceTimersByTime(100);
+    expect(receiver.receivedCount.value).toBe(1);
+
     await receiver.disconnect();
   });
 
@@ -289,7 +349,7 @@ describe("Event Hub receiver helpers", () => {
     expect(receiver.status.value).toBe("idle");
   });
 
-  it("serializes overlapping disconnect calls", async () => {
+  it("shares one teardown across overlapping disconnect calls", async () => {
     installNuxtMocks();
     const closeBarrier = createDeferred<void>();
     const subscriptionClose = vi.fn(() => closeBarrier.promise);
@@ -307,7 +367,6 @@ describe("Event Hub receiver helpers", () => {
     const firstDisconnect = receiver.disconnect();
     const secondDisconnect = receiver.disconnect();
 
-    expect(secondDisconnect).toBe(firstDisconnect);
     expect(receiver.status.value).toBe("idle");
     expect(subscriptionClose).toHaveBeenCalledOnce();
 

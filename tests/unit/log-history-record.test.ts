@@ -1,8 +1,5 @@
 import type { FirewallLogRecord } from "../../app/types/firewall";
-import {
-  LOG_HISTORY_INCLUDE_RAW,
-  toPersistedFirewallLogRecord,
-} from "../../app/utils/logHistoryRecord";
+import { toPersistedFirewallLogRecord } from "../../app/utils/logHistoryRecord";
 
 function createLog(overrides: Partial<FirewallLogRecord> = {}): FirewallLogRecord {
   return {
@@ -19,7 +16,7 @@ function createLog(overrides: Partial<FirewallLogRecord> = {}): FirewallLogRecor
 }
 
 describe("log history record mapping", () => {
-  it("maps log records without connection or auth fields", () => {
+  it("persists only the log history contract", () => {
     const logWithExtraFields: FirewallLogRecord & {
       accessToken: string;
       connectionString: string;
@@ -35,16 +32,20 @@ describe("log history record mapping", () => {
 
     const persisted = toPersistedFirewallLogRecord(logWithExtraFields);
 
-    expect(Object.hasOwn(persisted, "accessToken")).toBe(false);
-    expect(Object.hasOwn(persisted, "connectionString")).toBe(false);
-    expect(Object.hasOwn(persisted, "consumerGroup")).toBe(false);
-    expect(Object.hasOwn(persisted, "sharedAccessKey")).toBe(false);
+    expect(persisted).toEqual({
+      action: "Allow",
+      category: "AZFWNetworkRule",
+      id: "id",
+      message: "Allow TCP",
+      protocol: "TCP",
+      searchableText: "allow tcp",
+      timestamp: "2026-07-09T12:00:00.000Z",
+    });
   });
 
   it("does not persist raw payloads by default", () => {
     const persisted = toPersistedFirewallLogRecord(createLog());
 
-    expect(LOG_HISTORY_INCLUDE_RAW).toBe(false);
     expect(Object.hasOwn(persisted, "raw")).toBe(false);
   });
 });

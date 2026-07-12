@@ -8,7 +8,11 @@ import {
   type EventHubConnectionForm,
 } from "~/composables/useEventHubConnection";
 import type { AnalysisMode } from "~/composables/useAnalysisMode";
-import { createDefaultLogFilters } from "~/composables/useLogQuery";
+import {
+  createDefaultLogFilters,
+  isLogFilterValueActive,
+  toggleLogFilterValue,
+} from "~/composables/useLogQuery";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
 import { hasLogAnalysisRole, LOG_ANALYSIS_CATEGORIES } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
@@ -29,8 +33,10 @@ interface DetailField {
   wide?: boolean;
 }
 
+type QuickFilterKey = "category" | "action" | "protocol" | "source" | "destination";
+
 const logTableColumns: LogTableColumn[] = [
-  { key: "timestamp", label: "Date" },
+  { key: "timestamp", label: "Date (UTC)" },
   { key: "category", label: "Category" },
   { key: "action", label: "Action" },
   { key: "protocol", label: "Protocol" },
@@ -137,6 +143,17 @@ const realTimeProtocols = computed(() => {
 const activeFilters = computed(() =>
   logAnalysisActive.value ? logResultQuery.filters : realTimeQuery.filters,
 );
+function createClearableFilterModel(key: "category" | "action" | "protocol") {
+  return computed<string | null>({
+    get: () => activeFilters.value[key] || null,
+    set: (value) => {
+      activeFilters.value[key] = value ?? "";
+    },
+  });
+}
+const categoryFilter = createClearableFilterModel("category");
+const actionFilter = createClearableFilterModel("action");
+const protocolFilter = createClearableFilterModel("protocol");
 const sortedLogs = computed(() =>
   logAnalysisActive.value ? logResultSorting.sortedLogs.value : realTimeSorting.sortedLogs.value,
 );
@@ -151,6 +168,12 @@ const protocols = computed(() =>
 );
 const activeStatus = computed(() =>
   logAnalysisActive.value ? logQuery.status.value : receiver.status.value,
+);
+const showRealTimeLag = computed(
+  () =>
+    !logAnalysisActive.value &&
+    (receiver.status.value === "connected" || receiver.status.value === "paused") &&
+    receiver.latestSourceTimestamp.value !== null,
 );
 const countLabel = computed(() => {
   if (!logAnalysisActive.value) {
@@ -326,11 +349,26 @@ function getAriaSort(key: FirewallLogSortKey) {
 }
 
 function createAction(value: string) {
+  logQuery.addActionOption(value);
   activeFilters.value.action = value;
 }
 
 function createProtocol(value: string) {
+  logQuery.addProtocolOption(value);
   activeFilters.value.protocol = value;
+}
+
+function isQuickFilterActive(key: QuickFilterKey, value: string | undefined) {
+  return isLogFilterValueActive(activeFilters.value[key], value);
+}
+
+function toggleQuickFilter(key: QuickFilterKey, value: string | undefined) {
+  activeFilters.value[key] = toggleLogFilterValue(activeFilters.value[key], value);
+}
+
+function quickFilterLabel(key: QuickFilterKey, value: string | undefined) {
+  const action = isQuickFilterActive(key, value) ? "Remove" : "Filter by";
+  return `${action} ${key}: ${displayValue(value)}`;
 }
 
 function clearActiveResults() {
@@ -568,9 +606,9 @@ function statusColor(status: string) {
                 />
                 <template #content>
                   <p class="text-xs leading-5 whitespace-normal">
-                    Keeps up to 20,000 parsed Real-time records in this browser for 24 hours. Raw
-                    payloads are excluded. Turning retention off or starting a new session clears
-                    saved records.
+                    Keeps up to 100,000 parsed Real-time records in this browser for up to 24 hours.
+                    Raw payloads are excluded. Turning retention off or starting a new session
+                    clears saved records.
                   </p>
                 </template>
               </UTooltip>
@@ -683,6 +721,21 @@ function statusColor(status: string) {
             <UBadge :color="statusColor(activeStatus)" variant="subtle">
               {{ activeStatus }}
             </UBadge>
+            <UBadge
+              v-if="showRealTimeLag"
+              icon="i-lucide-clock-3"
+              color="neutral"
+              variant="outline"
+            >
+              <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
+              <NuxtTime
+                :datetime="receiver.latestSourceTimestamp.value!"
+                relative
+                relative-style="narrow"
+                numeric="always"
+                :title="true"
+              />
+            </UBadge>
             <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
               {{ countLabel }}
             </span>
@@ -723,23 +776,26 @@ function statusColor(status: string) {
             @keydown.enter="logAnalysisActive && applyLogFilters()"
           />
           <USelectMenu
-            v-model="activeFilters.category"
+            v-model="categoryFilter"
             :items="categories"
+            clear
             placeholder="Category"
             class="w-38"
           />
           <USelectMenu
-            v-model="activeFilters.action"
+            v-model="actionFilter"
             :items="actions"
             :create-item="logAnalysisActive"
+            clear
             placeholder="Action"
             class="w-34"
             @create="createAction"
           />
           <USelectMenu
-            v-model="activeFilters.protocol"
+            v-model="protocolFilter"
             :items="protocols"
             :create-item="logAnalysisActive"
+            clear
             placeholder="Protocol"
             class="w-34"
             @create="createProtocol"
@@ -813,32 +869,159 @@ function statusColor(status: string) {
               key-field="id"
               class="min-h-0 flex-1"
             >
-              <button
-                type="button"
+              <div
                 role="row"
+                tabindex="0"
                 :title="rowTitle(item)"
                 :class="[
                   'grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900',
                   logTableGridClass,
                 ]"
                 @click="selectLog(item)"
+                @keydown.enter.self="selectLog(item)"
+                @keydown.space.self.prevent="selectLog(item)"
               >
-                <span class="px-2 font-mono text-xs text-brand-gray-700 dark:text-brand-gray-200">
-                  {{ formatTime(item.timestamp) }}
+                <span
+                  role="cell"
+                  class="flex min-w-0 flex-col px-2 font-mono text-xs leading-4 text-brand-gray-700 dark:text-brand-gray-200"
+                  :title="formatTime(item.timestamp)"
+                >
+                  <NuxtTime :datetime="item.timestamp" date-style="medium" time-zone="UTC" />
+                  <NuxtTime
+                    :datetime="item.timestamp"
+                    time-style="medium"
+                    time-zone="UTC"
+                    hour-cycle="h23"
+                  />
                 </span>
-                <span class="truncate px-2">{{ displayValue(item.category) }}</span>
-                <span class="truncate px-2 font-medium">{{ displayValue(item.action) }}</span>
-                <span class="truncate px-2">{{ displayValue(item.protocol) }}</span>
-                <span class="truncate px-2">{{ displayValue(item.sourceIp) }}</span>
-                <span class="truncate px-2 font-mono text-xs">{{
-                  displayValue(item.sourcePort)
-                }}</span>
-                <span class="truncate px-2">{{ displayValue(item.destinationIp) }}</span>
-                <span class="truncate px-2 font-mono text-xs">
-                  {{ displayValue(item.destinationPort) }}
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span class="truncate">{{ displayValue(item.category) }}</span>
+                  <UButton
+                    square
+                    size="xs"
+                    :variant="isQuickFilterActive('category', item.category) ? 'soft' : 'ghost'"
+                    :color="isQuickFilterActive('category', item.category) ? 'primary' : 'neutral'"
+                    :icon="
+                      isQuickFilterActive('category', item.category)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('category', item.category)"
+                    @click.stop="toggleQuickFilter('category', item.category)"
+                  />
                 </span>
-                <span class="truncate px-2">{{ displayValue(item.rule) }}</span>
-              </button>
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-medium">
+                  <span class="truncate">{{ displayValue(item.action) }}</span>
+                  <UButton
+                    square
+                    size="xs"
+                    :variant="isQuickFilterActive('action', item.action) ? 'soft' : 'ghost'"
+                    :color="isQuickFilterActive('action', item.action) ? 'primary' : 'neutral'"
+                    :icon="
+                      isQuickFilterActive('action', item.action)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('action', item.action)"
+                    @click.stop="toggleQuickFilter('action', item.action)"
+                  />
+                </span>
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span class="truncate">{{ displayValue(item.protocol) }}</span>
+                  <UButton
+                    square
+                    size="xs"
+                    :variant="isQuickFilterActive('protocol', item.protocol) ? 'soft' : 'ghost'"
+                    :color="isQuickFilterActive('protocol', item.protocol) ? 'primary' : 'neutral'"
+                    :icon="
+                      isQuickFilterActive('protocol', item.protocol)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('protocol', item.protocol)"
+                    @click.stop="toggleQuickFilter('protocol', item.protocol)"
+                  />
+                </span>
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span class="truncate">{{ displayValue(item.sourceIp) }}</span>
+                  <UButton
+                    v-if="item.sourceIp"
+                    square
+                    size="xs"
+                    :variant="isQuickFilterActive('source', item.sourceIp) ? 'soft' : 'ghost'"
+                    :color="isQuickFilterActive('source', item.sourceIp) ? 'primary' : 'neutral'"
+                    :icon="
+                      isQuickFilterActive('source', item.sourceIp)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('source', item.sourceIp)"
+                    @click.stop="toggleQuickFilter('source', item.sourceIp)"
+                  />
+                </span>
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
+                  <span class="truncate">{{ displayValue(item.sourcePort) }}</span>
+                  <UButton
+                    v-if="item.sourcePort"
+                    square
+                    size="xs"
+                    :variant="isQuickFilterActive('source', item.sourcePort) ? 'soft' : 'ghost'"
+                    :color="isQuickFilterActive('source', item.sourcePort) ? 'primary' : 'neutral'"
+                    :icon="
+                      isQuickFilterActive('source', item.sourcePort)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('source', item.sourcePort)"
+                    @click.stop="toggleQuickFilter('source', item.sourcePort)"
+                  />
+                </span>
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span class="truncate">{{ displayValue(item.destinationIp) }}</span>
+                  <UButton
+                    v-if="item.destinationIp"
+                    square
+                    size="xs"
+                    :variant="
+                      isQuickFilterActive('destination', item.destinationIp) ? 'soft' : 'ghost'
+                    "
+                    :color="
+                      isQuickFilterActive('destination', item.destinationIp) ? 'primary' : 'neutral'
+                    "
+                    :icon="
+                      isQuickFilterActive('destination', item.destinationIp)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('destination', item.destinationIp)"
+                    @click.stop="toggleQuickFilter('destination', item.destinationIp)"
+                  />
+                </span>
+                <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
+                  <span class="truncate">{{ displayValue(item.destinationPort) }}</span>
+                  <UButton
+                    v-if="item.destinationPort"
+                    square
+                    size="xs"
+                    :variant="
+                      isQuickFilterActive('destination', item.destinationPort) ? 'soft' : 'ghost'
+                    "
+                    :color="
+                      isQuickFilterActive('destination', item.destinationPort)
+                        ? 'primary'
+                        : 'neutral'
+                    "
+                    :icon="
+                      isQuickFilterActive('destination', item.destinationPort)
+                        ? 'i-lucide-filter-x'
+                        : 'i-lucide-filter'
+                    "
+                    :aria-label="quickFilterLabel('destination', item.destinationPort)"
+                    @click.stop="toggleQuickFilter('destination', item.destinationPort)"
+                  />
+                </span>
+                <span role="cell" class="truncate px-2">{{ displayValue(item.rule) }}</span>
+              </div>
             </RecycleScroller>
             <div v-else class="grid min-h-0 flex-1 place-items-center p-8 text-center">
               <div class="max-w-sm space-y-2">

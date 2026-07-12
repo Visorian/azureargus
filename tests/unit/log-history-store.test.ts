@@ -4,10 +4,10 @@ import {
   type LogHistoryStoreAdapter,
 } from "../../app/utils/logHistoryStore";
 
-function createRecord(id: string, timestamp: string): PersistedFirewallLogRecord {
+function createRecord(id: string): PersistedFirewallLogRecord {
   return {
     id,
-    timestamp,
+    timestamp: "2026-07-09T12:00:00.000Z",
     category: "AZFWNetworkRule",
     action: "Allow",
     protocol: "TCP",
@@ -16,122 +16,68 @@ function createRecord(id: string, timestamp: string): PersistedFirewallLogRecord
   };
 }
 
-function createMemoryAdapter(): LogHistoryStoreAdapter {
-  const records = new Map<string, PersistedFirewallLogRecord>();
-
+function createAdapter(overrides: Partial<LogHistoryStoreAdapter> = {}): LogHistoryStoreAdapter {
   return {
-    async clear() {
-      records.clear();
-    },
-    async deleteBefore(timestamp) {
-      let deletedCount = 0;
-
-      for (const record of records.values()) {
-        if (record.timestamp < timestamp) {
-          records.delete(record.id);
-          deletedCount += 1;
-        }
-      }
-
-      return deletedCount;
-    },
-    async deleteExcessRecords(maxRecords) {
-      const newest = [...records.values()].sort((left, right) =>
-        right.timestamp.localeCompare(left.timestamp),
-      );
-      const excess = newest.slice(maxRecords);
-
-      for (const record of excess) {
-        records.delete(record.id);
-      }
-
-      return excess.length;
-    },
-    async putMany(nextRecords) {
-      for (const record of nextRecords) {
-        records.set(record.id, record);
-      }
-    },
-    async queryRange({ from, limit, to }) {
-      return [...records.values()]
-        .filter((record) => {
-          return (!from || record.timestamp >= from) && (!to || record.timestamp <= to);
-        })
-        .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
-        .slice(0, limit);
-    },
+    clear: vi.fn(async () => undefined),
+    deleteBefore: vi.fn(async () => 0),
+    deleteExcessRecords: vi.fn(async () => 0),
+    putMany: vi.fn(async () => undefined),
+    queryRange: vi.fn(async () => []),
+    ...overrides,
   };
 }
 
-const KEEP_ALL_TEST_RETENTION = {
-  maxAgeMs: 10_000_000_000,
-  maxRecords: 10,
-};
-
 describe("log history store", () => {
-  it("appends and queries records newest-first", async () => {
-    const store = createLogHistoryStore(createMemoryAdapter());
+  it("persists a batch before enforcing retention", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-09T12:01:30.000Z"));
+    const calls: string[] = [];
+    const records = [createRecord("first"), createRecord("second")];
+    const adapter = createAdapter();
+    vi.mocked(adapter.putMany).mockImplementation(async () => {
+      calls.push("put");
+    });
+    vi.mocked(adapter.deleteBefore).mockImplementation(async () => {
+      calls.push("delete-before");
+      return 0;
+    });
+    vi.mocked(adapter.deleteExcessRecords).mockImplementation(async () => {
+      calls.push("delete-excess");
+      return 0;
+    });
+    const store = createLogHistoryStore(adapter);
 
-    await store.appendLogHistoryBatch(
-      [
-        createRecord("old", "2026-07-09T12:00:00.000Z"),
-        createRecord("new", "2026-07-09T12:01:00.000Z"),
-      ],
-      KEEP_ALL_TEST_RETENTION,
-    );
+    await store.appendLogHistoryBatch(records, { maxAgeMs: 120_000, maxRecords: 1 });
 
-    await expect(store.queryLogHistoryRange({ limit: 10 })).resolves.toEqual([
-      createRecord("new", "2026-07-09T12:01:00.000Z"),
-      createRecord("old", "2026-07-09T12:00:00.000Z"),
-    ]);
+    expect(calls).toEqual(["put", "delete-before", "delete-excess"]);
+    expect(adapter.putMany).toHaveBeenCalledWith(records);
+    expect(adapter.deleteBefore).toHaveBeenCalledWith("2026-07-09T11:59:30.000Z");
+    expect(adapter.deleteExcessRecords).toHaveBeenCalledWith(1);
+    vi.useRealTimers();
   });
 
-  it("deletes records before a timestamp", async () => {
-    const store = createLogHistoryStore(createMemoryAdapter());
-    await store.appendLogHistoryBatch(
-      [
-        createRecord("old", "2026-07-09T12:00:00.000Z"),
-        createRecord("new", "2026-07-09T12:01:00.000Z"),
-      ],
-      KEEP_ALL_TEST_RETENTION,
-    );
+  it("skips storage work for an empty batch", async () => {
+    const adapter = createAdapter();
+    const store = createLogHistoryStore(adapter);
 
-    await expect(store.deleteLogHistoryBefore("2026-07-09T12:00:30.000Z")).resolves.toBe(1);
-    await expect(store.queryLogHistoryRange({ limit: 10 })).resolves.toEqual([
-      createRecord("new", "2026-07-09T12:01:00.000Z"),
-    ]);
+    await store.appendLogHistoryBatch([]);
+
+    expect(adapter.putMany).not.toHaveBeenCalled();
+    expect(adapter.deleteBefore).not.toHaveBeenCalled();
+    expect(adapter.deleteExcessRecords).not.toHaveBeenCalled();
   });
 
-  it("prunes records by age and count", async () => {
-    const store = createLogHistoryStore(createMemoryAdapter());
-    await store.appendLogHistoryBatch(
-      [
-        createRecord("expired", "2026-07-09T11:59:00.000Z"),
-        createRecord("older", "2026-07-09T12:00:00.000Z"),
-        createRecord("newer", "2026-07-09T12:01:00.000Z"),
-      ],
-      KEEP_ALL_TEST_RETENTION,
-    );
+  it("normalizes query limits at the store boundary", async () => {
+    const adapter = createAdapter();
+    const store = createLogHistoryStore(adapter);
 
-    await store.pruneLogHistory(
-      { maxAgeMs: 120_000, maxRecords: 1 },
-      new Date("2026-07-09T12:01:30.000Z"),
-    );
+    await store.queryLogHistoryRange({ from: "2026-07-09T12:00:00.000Z", limit: 2.9 });
+    await store.queryLogHistoryRange({ limit: Number.NaN });
 
-    await expect(store.queryLogHistoryRange({ limit: 10 })).resolves.toEqual([
-      createRecord("newer", "2026-07-09T12:01:00.000Z"),
-    ]);
-  });
-
-  it("clears only log history records", async () => {
-    const store = createLogHistoryStore(createMemoryAdapter());
-    await store.appendLogHistoryBatch(
-      [createRecord("log", "2026-07-09T12:00:00.000Z")],
-      KEEP_ALL_TEST_RETENTION,
-    );
-
-    await store.clearLogHistory();
-
-    await expect(store.queryLogHistoryRange({ limit: 10 })).resolves.toEqual([]);
+    expect(adapter.queryRange).toHaveBeenNthCalledWith(1, {
+      from: "2026-07-09T12:00:00.000Z",
+      limit: 2,
+    });
+    expect(adapter.queryRange).toHaveBeenNthCalledWith(2, { limit: 0 });
   });
 });

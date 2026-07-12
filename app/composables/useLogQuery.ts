@@ -105,6 +105,21 @@ export function hasActiveLogFilters(filters: FirewallLogFilters) {
   return Object.values(filters).some((value) => value.trim().length > 0);
 }
 
+export function isLogFilterValueActive(currentValue: string, candidateValue: string | undefined) {
+  return Boolean(
+    candidateValue && currentValue.trim().toLowerCase() === candidateValue.trim().toLowerCase(),
+  );
+}
+
+export function toggleLogFilterValue(currentValue: string, candidateValue: string | undefined) {
+  const nextValue = candidateValue?.trim();
+  if (!nextValue) {
+    return currentValue;
+  }
+
+  return isLogFilterValueActive(currentValue, nextValue) ? "" : nextValue;
+}
+
 export function getLogFiltersKey(filters: FirewallLogFilters) {
   return [
     filters.search,

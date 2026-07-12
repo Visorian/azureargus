@@ -12,6 +12,8 @@ import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "~/types/firewall";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
+const LIVE_TAIL_THRESHOLD_MS = 30_000;
+
 export interface ReceiverSubscription {
   close(): Promise<void>;
 }
@@ -35,7 +37,7 @@ export interface EventHubReceiverClient {
       ): Promise<void>;
       processError(error: unknown): Promise<void>;
     },
-    options: { startPosition: { enqueuedOn: Date } },
+    options: { maxBatchSize: number; startPosition: { enqueuedOn: Date } },
   ): ReceiverSubscription;
 }
 
@@ -135,7 +137,11 @@ export function useEventHubReceiver({
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
   const errors = useState<string[]>("event-hub-errors", () => []);
   const receivedCount = useState("event-hub-received-count", () => 0);
-  const lastReceivedAt = useState<string | null>("event-hub-last-received-at", () => null);
+  const latestSourceTimestamp = useState<string | null>(
+    "event-hub-latest-source-timestamp",
+    () => null,
+  );
+  const caughtUp = useState("event-hub-caught-up", () => false);
   const visibleLimit = useState("event-hub-visible-limit", () => DEFAULT_BUFFER_SIZE);
   const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
   const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize, {
@@ -159,6 +165,8 @@ export function useEventHubReceiver({
       let categoriesChanged = false;
       let actionsChanged = false;
       let protocolsChanged = false;
+      let nextLatestSourceTimestamp = latestSourceTimestamp.value;
+      let latestEnqueuedTimestamp: string | null = null;
 
       for (const record of records) {
         categoriesChanged =
@@ -166,6 +174,18 @@ export function useEventHubReceiver({
         actionsChanged = addFilterOption(nextActions, actionKeys, record.action) || actionsChanged;
         protocolsChanged =
           addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged;
+        if (
+          (nextLatestSourceTimestamp === null || record.timestamp > nextLatestSourceTimestamp) &&
+          Date.parse(record.timestamp) > 0
+        ) {
+          nextLatestSourceTimestamp = record.timestamp;
+        }
+        if (
+          record.enqueuedTimeUtc &&
+          (latestEnqueuedTimestamp === null || record.enqueuedTimeUtc > latestEnqueuedTimestamp)
+        ) {
+          latestEnqueuedTimestamp = record.enqueuedTimeUtc;
+        }
       }
 
       if (categoriesChanged) {
@@ -177,8 +197,15 @@ export function useEventHubReceiver({
       if (protocolsChanged) {
         protocolOptions.value = sortFilterOptions(nextProtocols);
       }
+      latestSourceTimestamp.value = nextLatestSourceTimestamp;
+      if (
+        !caughtUp.value &&
+        latestEnqueuedTimestamp !== null &&
+        Date.now() - Date.parse(latestEnqueuedTimestamp) <= LIVE_TAIL_THRESHOLD_MS
+      ) {
+        caughtUp.value = true;
+      }
       receivedCount.value += records.length;
-      lastReceivedAt.value = records.at(-1)?.enqueuedTimeUtc ?? new Date().toISOString();
       logHistoryPersistence.queueRecords(records);
     },
   });
@@ -281,6 +308,8 @@ export function useEventHubReceiver({
     status.value = "connecting";
     errors.value = [];
     visibleLimit.value = form.bufferSize;
+    latestSourceTimestamp.value = null;
+    caughtUp.value = false;
 
     try {
       const createClient = await loadClientFactory();
@@ -303,15 +332,15 @@ export function useEventHubReceiver({
             batcher.pushMany(result.records);
           },
           processError: async (error) => {
-            if (generation !== connectionGeneration || status.value !== "connected") {
+            if (generation !== connectionGeneration) {
               return;
             }
 
             errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-            status.value = "error";
           },
         },
         {
+          maxBatchSize: 1,
           startPosition: {
             enqueuedOn: getEventHubLookbackStart(form.lookbackMinutes),
           },
@@ -362,7 +391,8 @@ export function useEventHubReceiver({
     protocolKeys.clear();
     receivedCount.value = 0;
     nextRecordIndex = 0;
-    lastReceivedAt.value = null;
+    latestSourceTimestamp.value = null;
+    caughtUp.value = false;
   }
 
   return {
@@ -376,7 +406,8 @@ export function useEventHubReceiver({
     snapshotVersion: buffer.version,
     visibleLimit,
     receivedCount,
-    lastReceivedAt,
+    latestSourceTimestamp,
+    caughtUp,
     paused,
     connect,
     disconnect,

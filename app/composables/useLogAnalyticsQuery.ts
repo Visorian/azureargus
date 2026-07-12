@@ -267,6 +267,14 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     datasetVersion.value += 1;
   }
 
+  function addActionOption(value: string) {
+    actionOptions.value = mergeOptions(actionOptions.value, [value]);
+  }
+
+  function addProtocolOption(value: string) {
+    protocolOptions.value = mergeOptions(protocolOptions.value, [value]);
+  }
+
   watch(criteriaKey, () => {
     if (!options.active.value) {
       return;
@@ -300,6 +308,8 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
   onScopeDispose(abort);
 
   return {
+    addActionOption,
+    addProtocolOption,
     actionOptions,
     appliedRange,
     abort,

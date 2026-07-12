@@ -4,8 +4,10 @@ import {
   createCaseInsensitiveFilterOptions,
   createDefaultLogFilters,
   filterFirewallLogs,
+  isLogFilterValueActive,
   mergeFilteredLogCache,
   queryFirewallLogs,
+  toggleLogFilterValue,
   useLogQuery,
 } from "../../app/composables/useLogQuery";
 
@@ -31,6 +33,14 @@ describe("log query", () => {
     );
 
     expect(result).toEqual(["ALLOW", "DENY"]);
+  });
+
+  it("toggles exact quick-filter values case-insensitively", () => {
+    expect(toggleLogFilterValue("", " Allow ")).toBe("Allow");
+    expect(toggleLogFilterValue("allow", "ALLOW")).toBe("");
+    expect(toggleLogFilterValue("Allow", undefined)).toBe("Allow");
+    expect(isLogFilterValueActive(" allow ", "ALLOW")).toBe(true);
+    expect(isLogFilterValueActive("Allow", "Deny")).toBe(false);
   });
 
   it("filters by search text and fields", () => {
@@ -96,7 +106,7 @@ describe("log query", () => {
     expect(result.map((log) => log.id)).toEqual(["tcp-1", "tcp-2"]);
   });
 
-  it("stops collecting filtered matches at the visible limit", () => {
+  it("limits visible filtered matches", () => {
     const filters = createDefaultLogFilters();
     filters.protocol = "tcp";
 
@@ -143,6 +153,18 @@ describe("log query", () => {
     await nextTick();
 
     expect(filteredLogs.value.map((log) => log.id)).toEqual(["new"]);
+  });
+
+  it("keeps filters isolated between query instances", async () => {
+    const realTime = useLogQuery(ref([createLog({ id: "real-time" })]));
+    const logAnalysis = useLogQuery(ref([createLog({ id: "log-analysis" })]));
+
+    realTime.filters.action = "Deny";
+    await nextTick();
+
+    expect(realTime.filters.action).toBe("Deny");
+    expect(logAnalysis.filters.action).toBe("");
+    expect(logAnalysis.filteredLogs.value.map((log) => log.id)).toEqual(["log-analysis"]);
   });
 
   it("reads the plain raw source only while filters are active", async () => {

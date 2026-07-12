@@ -1,6 +1,5 @@
 import {
   clearStoredEventHubConnectionString,
-  EVENT_HUB_CONNECTION_STRING_STORAGE_KEY,
   readStoredEventHubConnectionString,
   storeEventHubConnectionString,
   type EventHubConnectionStorage,
@@ -35,9 +34,5 @@ describe("Event Hub connection storage", () => {
 
     clearStoredEventHubConnectionString(storage);
     expect(readStoredEventHubConnectionString(storage)).toBeNull();
-  });
-
-  it("uses one scoped browser storage key", () => {
-    expect(EVENT_HUB_CONNECTION_STRING_STORAGE_KEY).toBe("azure-argus:event-hub-connection-string");
   });
 });

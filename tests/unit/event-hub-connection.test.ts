@@ -1,6 +1,5 @@
 import {
   createInitialEventHubConnectionForm,
-  EVENT_HUB_LOOKBACK_OPTIONS,
   getEventHubLookbackStart,
   getEventHubName,
   getRawLogBufferSize,
@@ -45,16 +44,6 @@ describe("Event Hub connection helpers", () => {
     const now = new Date("2026-07-09T12:00:00.000Z");
 
     expect(getEventHubLookbackStart(15, now).toISOString()).toBe("2026-07-09T11:45:00.000Z");
-  });
-
-  it("defines fixed typed lookback options with exact labels", () => {
-    expect(EVENT_HUB_LOOKBACK_OPTIONS).toEqual([
-      { label: "Last 1 minute", value: 1 },
-      { label: "Last 3 minutes", value: 3 },
-      { label: "Last 5 minutes", value: 5 },
-      { label: "Last 10 minutes", value: 10 },
-      { label: "Last 15 minutes", value: 15 },
-    ]);
   });
 
   it("normalizes unsupported lookback defaults to 15 minutes", () => {

@@ -11,32 +11,47 @@ export function useEventHubConnectionPersistence(connectionString: Ref<string>) 
   const enabled = ref(false);
   const lastError = ref<string | null>(null);
   let initialized = false;
+  let ignoreEnabledChange = false;
+  let hasStoredValue = false;
   let storage: EventHubConnectionStorage | null = null;
+
+  function setEnabledWithoutSync(value: boolean) {
+    ignoreEnabledChange = true;
+    enabled.value = value;
+    ignoreEnabledChange = false;
+  }
 
   function clearStoredValue() {
     if (storage === null) {
+      setEnabledWithoutSync(true);
+      lastError.value = "Connection string could not be removed from browser storage.";
       return;
     }
 
     try {
       clearStoredEventHubConnectionString(storage);
+      hasStoredValue = false;
+      lastError.value = null;
     } catch {
-      storage = null;
+      hasStoredValue = true;
+      setEnabledWithoutSync(true);
       lastError.value = "Connection string could not be removed from browser storage.";
     }
   }
 
   function saveCurrentValue() {
     if (storage === null) {
+      setEnabledWithoutSync(hasStoredValue);
+      lastError.value = "Connection string could not be saved in browser storage.";
       return;
     }
 
     try {
       storeEventHubConnectionString(storage, connectionString.value);
+      hasStoredValue = true;
       lastError.value = null;
     } catch {
-      storage = null;
-      enabled.value = false;
+      setEnabledWithoutSync(hasStoredValue);
       lastError.value = "Connection string could not be saved in browser storage.";
     }
   }
@@ -46,8 +61,9 @@ export function useEventHubConnectionPersistence(connectionString: Ref<string>) 
       storage = window.localStorage;
       const storedValue = readStoredEventHubConnectionString(storage);
       if (storedValue !== null) {
+        hasStoredValue = true;
         connectionString.value = storedValue;
-        enabled.value = true;
+        setEnabledWithoutSync(true);
       }
     } catch {
       storage = null;
@@ -63,18 +79,22 @@ export function useEventHubConnectionPersistence(connectionString: Ref<string>) 
     }
   });
 
-  watch(enabled, (shouldPersist) => {
-    if (!initialized) {
-      return;
-    }
+  watch(
+    enabled,
+    (shouldPersist) => {
+      if (!initialized || ignoreEnabledChange) {
+        return;
+      }
 
-    if (shouldPersist) {
-      saveCurrentValue();
-      return;
-    }
+      if (shouldPersist) {
+        saveCurrentValue();
+        return;
+      }
 
-    clearStoredValue();
-  });
+      clearStoredValue();
+    },
+    { flush: "sync" },
+  );
 
   return {
     enabled,

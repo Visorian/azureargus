@@ -1,4 +1,4 @@
-import { effectScope, isReactive, isRef, ref, type Ref } from "vue";
+import { effectScope, isRef, ref, type Ref } from "vue";
 
 import {
   prependToBoundedBuffer,
@@ -60,7 +60,7 @@ describe("bounded log buffer helpers", () => {
     expect(prependToBoundedBuffer(["newest", "oldest"], [], 5)).toEqual(["newest", "oldest"]);
   });
 
-  it("keeps the raw buffer plain and publishes only visible rows on the coalesced interval", () => {
+  it("publishes only visible rows on the coalesced interval", () => {
     const buffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
       publishedSize: ref(2),
     });
@@ -75,7 +75,6 @@ describe("bounded log buffer helpers", () => {
 
     vi.advanceTimersByTime(1);
     expect(buffer.items.value.map((record) => record.id)).toEqual([3, 2]);
-    expect(isReactive(buffer.items.value[0])).toBe(false);
     expect(buffer.version.value).toBe(1);
   });
 

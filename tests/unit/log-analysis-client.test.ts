@@ -73,11 +73,13 @@ describe("Log analysis client", () => {
     const active = ref(true);
     const filters = reactive(createDefaultLogFilters());
     const sort = reactive(createDefaultLogSort());
+    const onBeforeReplace = vi.fn();
     const scope = effectScope();
     const query = scope.run(() =>
       useLogAnalyticsQuery({
         active,
         filters,
+        onBeforeReplace,
         request: async (body) => {
           requests.push(body);
           return response(`query-${requests.length}`);
@@ -122,11 +124,25 @@ describe("Log analysis client", () => {
     expect(requests).toHaveLength(3);
     expect(requests[2]?.filters.protocol).toBe("UDP");
 
+    query.addActionOption("Reject");
+    query.addProtocolOption("GRE");
+    expect(query.actionOptions.value).toContain("Reject");
+    expect(query.protocolOptions.value).toContain("GRE");
+    await query.run();
+    expect(query.actionOptions.value).toContain("Reject");
+    expect(query.protocolOptions.value).toContain("GRE");
+
     query.clear();
     expect(query.hasRun.value).toBe(false);
     expect(query.records.value).toEqual([]);
     expect(query.status.value).toBe("idle");
     expect(query.refinementPending.value).toBe(false);
+    expect(query.actionOptions.value).not.toContain("Reject");
+    expect(query.protocolOptions.value).not.toContain("GRE");
+    expect(filters.action).toBe("Deny");
+    expect(filters.protocol).toBe("UDP");
+    expect(sort).toEqual(createDefaultLogSort());
+    expect(onBeforeReplace).toHaveBeenCalledTimes(5);
 
     scope.stop();
     vi.useRealTimers();
@@ -202,6 +218,46 @@ describe("Log analysis client", () => {
     scope.stop();
   });
 
+  it("refines current criteria after they change during initial load", async () => {
+    vi.useFakeTimers();
+    const initial = createDeferred<LogAnalyticsQueryResponse>();
+    const filters = reactive(createDefaultLogFilters());
+    const requests: LogAnalyticsQueryRequest[] = [];
+    const scope = effectScope();
+    const query = scope.run(() =>
+      useLogAnalyticsQuery({
+        active: ref(true),
+        filters,
+        request: async (body) => {
+          requests.push(body);
+          return requests.length === 1 ? initial.promise : response("refined");
+        },
+        sort: reactive(createDefaultLogSort()),
+      }),
+    );
+
+    expect(query).toBeDefined();
+    if (!query) {
+      return;
+    }
+
+    const run = query.run();
+    filters.action = "Deny";
+    await nextTick();
+    initial.resolve(response("initial"));
+    await run;
+
+    expect(query.refinementPending.value).toBe(true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.filters.action).toBe("");
+    expect(requests[1]?.filters.action).toBe("Deny");
+    expect(query.records.value.map((record) => record.id)).toEqual(["refined"]);
+
+    scope.stop();
+    vi.useRealTimers();
+  });
+
   it("aborts an active request without surfacing an error", async () => {
     let requestSignal: AbortSignal | undefined;
     const scope = effectScope();
@@ -267,6 +323,25 @@ describe("Log analysis client", () => {
 
     expect(query.refinementPending.value).toBe(false);
     expect(request).toHaveBeenCalledOnce();
+    scope.stop();
+    vi.useRealTimers();
+  });
+
+  it("does not schedule requests for criteria changes while inactive", async () => {
+    vi.useFakeTimers();
+    const active = ref(false);
+    const filters = reactive(createDefaultLogFilters());
+    const request = vi.fn(async () => response("unused"));
+    const sort = reactive(createDefaultLogSort());
+    const scope = effectScope();
+    useLogAnalyticsQuery({ active, filters, request, sort });
+
+    filters.action = "Deny";
+    sort.key = "action";
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(request).not.toHaveBeenCalled();
     scope.stop();
     vi.useRealTimers();
   });
@@ -347,6 +422,7 @@ describe("Log analysis client", () => {
     }
 
     await query.run();
+    const appliedRange = query.appliedRange.value;
     const rerun = query.run();
     query.draftRange.from = "";
     await nextTick();
@@ -355,6 +431,7 @@ describe("Log analysis client", () => {
     expect(secondSignal?.aborted).toBe(true);
     expect(query.records.value.map((record) => record.id)).toEqual(["initial"]);
     expect(query.rangeDirty.value).toBe(true);
+    expect(query.appliedRange.value).toEqual(appliedRange);
     scope.stop();
   });
 });

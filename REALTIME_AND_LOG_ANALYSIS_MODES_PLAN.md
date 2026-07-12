@@ -72,8 +72,8 @@ Switching to Log analysis must stop Event Hub connection attempts, event process
 - Use Tailwind v4 utility classes only.
 - Keep reactive and lifecycle logic in composables; keep utilities free of Vue/Nuxt imports.
 - Treat Log Analytics calls as user-driven query mutations and use `useRequestFetch()` with `AbortSignal`. Do not add Pinia Colada in this scope.
-- Do not expose OIDC, Log Analytics, or Event Hub tokens/credentials to new storage or browser-visible server responses.
-- Do not persist mode, Log Analytics query results, date range, or retention preference.
+- Do not expose OIDC or Log Analytics tokens/credentials to new storage or browser-visible server responses.
+- Do not persist mode, Log Analytics query results, date range, or retention preference. Persist Event Hub connection string only after explicit browser-storage opt-in. If removal fails, keep opt-in visibly enabled and surface the failure instead of claiming the credential was removed.
 - Do not preserve legacy compatibility paths unless explicitly requested.
 
 ## Progress
@@ -99,8 +99,31 @@ Verified against final implementation on 2026-07-10. Review found and corrected:
 - bounded and keyed token acquisition and allowed disconnected callers to stop waiting;
 - expanded route, cancellation, refinement failure, date-dirty, filter mapping, and partial-response tests.
 
-No package changes, compatibility paths, alternate storage, arbitrary KQL, workspace picker, polling,
-or Log-result persistence were introduced.
+No package changes, compatibility paths, arbitrary KQL, workspace picker, polling, or Log-result
+persistence were introduced.
+
+### Re-verification Addendum (2026-07-12)
+
+Re-verified full plan after requested logs-page UI changes. Later approved scope moved the desktop
+sidebar right, strengthened the neutral palette, added local-retention help, and added explicit
+browser-local Event Hub connection-string persistence. These changes did not alter Log Analytics
+authorization, query contract, result storage, mode isolation, or other non-goals.
+
+Review found and corrected:
+
+- persistence teardown now drains records queued while an IndexedDB write is already active before
+  mode transition reports completion;
+- failed connection-string removal keeps persistence visibly selected and reports the failure so an
+  unchecked control never implies a stored SAS credential was removed;
+- typed Log action/protocol values now remain in the page-scoped option cache until Clear;
+- tests now cover queued-write teardown draining, criteria changes during initial query, applied
+  range preservation, typed-option reset, and browser-storage removal failure;
+- Playwright Test uses the configured Nix-wrapped browser when
+  `PLAYWRIGHT_MCP_EXECUTABLE_PATH` is present.
+
+Repository verification cannot prove deployment-side service-principal RBAC, workspace table plan,
+app-role assignment, stable OIDC secrets, or an explicit production tenant. Those remain required
+deployment checks under **Pre-implementation Checks**.
 
 ## Phase 1: Harden Real-time Teardown
 
@@ -117,7 +140,7 @@ or Log-result persistence were introduced.
 - Flush pending 100 ms batch after Event Hub closure, then await existing retention queue flush.
 - Ensure each resource close is attempted even if another close fails; report close error without leaving live references behind.
 - If Event Hub resources cannot be closed, fail transition and do not activate Log analysis. Ignoring callbacks is not sufficient proof that network work stopped.
-- Preserve current in-memory records, credentials, local retention enabled state, and retained IndexedDB history on mode switch.
+- Preserve current in-memory records, credentials, local retention enabled state, and retained IndexedDB history on mode switch. An explicitly remembered Event Hub connection string remains browser-local.
 - Add awaited page-leave teardown through mode orchestration composable.
 
 ### Acceptance Checks
@@ -150,7 +173,7 @@ or Log-result persistence were introduced.
 ### Acceptance Checks
 
 - Only one mode transition runs at a time.
-- Real-time credentials and buffered logs remain in memory when visiting Log analysis.
+- Real-time credentials and buffered logs remain available when visiting Log analysis. Credentials remain in memory unless connection-string persistence is explicitly enabled.
 - Each mode preserves its own filter and sort state while inactive; changes in Real-time never schedule Log Analytics query.
 - Log analysis results remain separate and are never appended to Real-time buffer or IndexedDB.
 - Anonymous and signed-in unauthorized users can see mode choice but cannot activate Log analysis.
@@ -184,7 +207,7 @@ or Log-result persistence were introduced.
 - Real-time UI contains one lookback control with only 1, 3, 5, 10, and 15 minutes.
 - Connect start position uses selected value.
 - No absolute date filters render in Real-time toolbar.
-- Existing credentials and visible-row setting retain current memory-only behavior.
+- Existing credentials retain current memory-only behavior unless connection-string persistence is explicitly enabled. Visible-row setting remains memory-only.
 
 ## Phase 4: Log Analytics Server Boundary
 
@@ -461,7 +484,7 @@ Because UI structure changes, verify anonymous Real-time state with `playwright-
 - No scheduled polling, auto-refresh, background retry, or dashboard widgets.
 - No Log Analytics results in IndexedDB.
 - No IndexedDB history browser or use as Log analysis source.
-- No durable Event Hub credentials, mode state, query range, query results, or retention preference.
+- No durable Event Hub credentials without explicit browser-storage opt-in. Mode state, query range, query results, and retention preference remain memory-only.
 - No app shell, login layout, table, or detail-modal redesign.
 - No package changes unless separately approved.
 

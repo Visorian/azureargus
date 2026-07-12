@@ -66,6 +66,9 @@ export function createLogHistoryPersistenceQueue({
   scheduler = createDefaultScheduler(),
   store,
 }: LogHistoryPersistenceQueueOptions): LogHistoryPersistenceQueue {
+  const writeBatchSize = Number.isFinite(maxBatchSize)
+    ? Math.max(1, Math.floor(maxBatchSize))
+    : LOG_HISTORY_MAX_WRITE_BATCH_SIZE;
   let isEnabled = enabled;
   let isFlushing = false;
   let activeFlushPromise: Promise<void> | null = null;
@@ -110,36 +113,40 @@ export function createLogHistoryPersistenceQueue({
   async function flush() {
     cancelScheduledFlush();
 
-    if (activeFlushPromise !== null) {
-      return activeFlushPromise;
-    }
+    while (isEnabled || activeFlushPromise !== null) {
+      if (activeFlushPromise !== null) {
+        const inFlight = activeFlushPromise;
+        await inFlight;
+        if (activeFlushPromise === inFlight) {
+          activeFlushPromise = null;
+          isFlushing = false;
+        }
+        continue;
+      }
 
-    if (!isEnabled || pendingRecords.length === 0) {
-      return;
-    }
+      if (pendingRecords.length === 0) {
+        return;
+      }
 
-    const records = pendingRecords;
-    pendingRecords = [];
-
-    activeFlushPromise = (async () => {
+      const records = pendingRecords.splice(0, writeBatchSize);
       isFlushing = true;
-      try {
-        await store.appendLogHistoryBatch(records, retention);
-      } catch (error: unknown) {
-        isEnabled = false;
-        pendingRecords = [];
-        onError?.(error);
-      } finally {
-        isFlushing = false;
+      const currentFlush = (async () => {
+        try {
+          await store.appendLogHistoryBatch(records, retention);
+        } catch (error: unknown) {
+          isEnabled = false;
+          pendingRecords = [];
+          onError?.(error);
+        }
+      })();
+      activeFlushPromise = currentFlush;
+
+      await currentFlush;
+      if (activeFlushPromise === currentFlush) {
         activeFlushPromise = null;
+        isFlushing = false;
       }
-
-      if (isEnabled && pendingRecords.length > 0) {
-        scheduleFlush();
-      }
-    })();
-
-    return activeFlushPromise;
+    }
   }
 
   function clearQueue() {
@@ -177,7 +184,7 @@ export function createLogHistoryPersistenceQueue({
       }
 
       pendingRecords.push(...toPersistedFirewallLogRecords(records));
-      if (pendingRecords.length >= maxBatchSize) {
+      if (pendingRecords.length >= writeBatchSize) {
         void flush();
         return;
       }
@@ -185,7 +192,7 @@ export function createLogHistoryPersistenceQueue({
       scheduleFlush();
     },
     async waitForIdle() {
-      await activeFlushPromise;
+      await flush();
     },
   };
 }

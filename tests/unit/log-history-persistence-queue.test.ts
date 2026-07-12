@@ -47,6 +47,14 @@ async function flushPromises() {
   await Promise.resolve();
 }
 
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("log history persistence queue", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -78,6 +86,30 @@ describe("log history persistence queue", () => {
     await flushPromises();
 
     expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([["one", "two"]]);
+  });
+
+  it("limits oversized persistence writes to configured batch size", async () => {
+    const { batches, store } = createStore();
+    const queue = createLogHistoryPersistenceQueue({
+      enabled: true,
+      maxBatchSize: 2,
+      store,
+    });
+
+    queue.queueRecords([
+      createLog("one"),
+      createLog("two"),
+      createLog("three"),
+      createLog("four"),
+      createLog("five"),
+    ]);
+    await queue.waitForIdle();
+
+    expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([
+      ["one", "two"],
+      ["three", "four"],
+      ["five"],
+    ]);
   });
 
   it("flushes by fallback timer delay", async () => {
@@ -199,6 +231,48 @@ describe("log history persistence queue", () => {
 
     resolveAppend?.();
     await idlePromise;
+
+    expect(idleResolved).toBe(true);
+    expect(queue.pendingCount()).toBe(0);
+  });
+
+  it("drains records queued during an active write before reporting idle", async () => {
+    const firstWrite = createDeferred();
+    const secondWrite = createDeferred();
+    const writes = [firstWrite, secondWrite];
+    const startedBatches: string[][] = [];
+    const { store } = createStore({
+      async appendLogHistoryBatch(records) {
+        startedBatches.push(records.map((record) => record.id));
+        const write = writes.shift();
+        if (!write) {
+          throw new Error("Unexpected persistence write.");
+        }
+        await write.promise;
+      },
+    });
+    const queue = createLogHistoryPersistenceQueue({
+      enabled: true,
+      maxBatchSize: 1,
+      store,
+    });
+
+    queue.queueRecords([createLog("first")]);
+    queue.queueRecords([createLog("second")]);
+    let idleResolved = false;
+    const idle = queue.waitForIdle().then(() => {
+      idleResolved = true;
+    });
+
+    expect(startedBatches).toEqual([["first"]]);
+    firstWrite.resolve();
+    await flushPromises();
+
+    expect(startedBatches).toEqual([["first"], ["second"]]);
+    expect(idleResolved).toBe(false);
+
+    secondWrite.resolve();
+    await idle;
 
     expect(idleResolved).toBe(true);
     expect(queue.pendingCount()).toBe(0);

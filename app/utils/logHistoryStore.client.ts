@@ -65,6 +65,13 @@ function transactionToPromise(transaction: IDBTransaction) {
   });
 }
 
+function requestToPromise<T>(request: IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(getIndexedDBError(request.error, "IndexedDB request failed."));
+  });
+}
+
 export function openLogHistoryStore() {
   if (typeof indexedDB === "undefined") {
     return Promise.resolve<IDBDatabase | null>(null);
@@ -146,25 +153,26 @@ function createIndexedDBLogHistoryAdapter(): LogHistoryStoreAdapter {
 
       return (
         (await withObjectStore("readwrite", async (store) => {
+          const excessCount = (await requestToPromise(store.count())) - maxRecords;
+          if (excessCount <= 0) {
+            return 0;
+          }
+
           const index = store.index(LOG_HISTORY_TIMESTAMP_INDEX);
           let deletedCount = 0;
-          let retainedCount = 0;
 
           await new Promise<void>((resolve, reject) => {
-            const request = index.openCursor(undefined, "prev");
+            const request = index.openCursor();
 
             request.onsuccess = () => {
               const cursor = request.result;
-              if (!cursor) {
+              if (!cursor || deletedCount >= excessCount) {
                 resolve();
                 return;
               }
 
-              retainedCount += 1;
-              if (retainedCount > maxRecords) {
-                cursor.delete();
-                deletedCount += 1;
-              }
+              cursor.delete();
+              deletedCount += 1;
               cursor.continue();
             };
             request.onerror = () =>

@@ -4,10 +4,23 @@ import { Socket } from "node:net";
 import { createEvent, type H3Event } from "h3";
 import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.js";
 
-import { LOG_ANALYSIS_ROLE } from "../../shared/types/logAnalytics";
+import { LOG_ANALYSIS_ROLE, type LogAnalyticsQueryRequest } from "../../shared/types/logAnalytics";
+import { getLogAnalyticsAccessToken } from "../../server/utils/logAnalyticsAuth";
+import {
+  executeLogAnalyticsQuery,
+  LogAnalyticsQueryError,
+} from "../../server/utils/logAnalyticsQuery";
 
 vi.mock("nuxt-oidc-auth/runtime/server/utils/session.js", () => ({
   requireUserSession: vi.fn(),
+}));
+vi.mock("../../server/utils/logAnalyticsAuth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../server/utils/logAnalyticsAuth")>()),
+  getLogAnalyticsAccessToken: vi.fn(),
+}));
+vi.mock("../../server/utils/logAnalyticsQuery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../server/utils/logAnalyticsQuery")>()),
+  executeLogAnalyticsQuery: vi.fn(),
 }));
 
 const config = {
@@ -19,9 +32,33 @@ const config = {
 let runtimeConfig: { logAnalytics: typeof config };
 let handler: (event: H3Event) => Promise<unknown>;
 
-function createTestEvent() {
+function createRequest(): LogAnalyticsQueryRequest {
+  return {
+    filters: {
+      action: "",
+      category: "",
+      destination: "",
+      protocol: "",
+      search: "",
+      source: "",
+    },
+    from: "2026-07-10T10:00:00.000Z",
+    sort: { direction: "desc", key: "timestamp" },
+    to: "2026-07-10T10:15:00.000Z",
+  };
+}
+
+function createTestEvent(body?: unknown) {
   const request = new IncomingMessage(new Socket());
   const response = new ServerResponse(request);
+  if (body !== undefined) {
+    const payload = JSON.stringify(body);
+    request.method = "POST";
+    request.headers["content-length"] = String(Buffer.byteLength(payload));
+    request.headers["content-type"] = "application/json";
+    request.push(payload);
+    request.push(null);
+  }
   return createEvent(request, response);
 }
 
@@ -39,6 +76,12 @@ afterAll(() => {
 beforeEach(() => {
   runtimeConfig = { logAnalytics: config };
   vi.mocked(requireUserSession).mockReset();
+  vi.mocked(getLogAnalyticsAccessToken).mockReset().mockResolvedValue("access-token");
+  vi.mocked(executeLogAnalyticsQuery).mockReset().mockResolvedValue({
+    limit: 1_000,
+    records: [],
+    truncated: false,
+  });
 });
 
 describe("Log Analytics query route authorization", () => {
@@ -69,5 +112,57 @@ describe("Log Analytics query route authorization", () => {
     });
 
     await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 503 });
+  });
+
+  it("returns query results for an authorized valid request", async () => {
+    vi.mocked(requireUserSession).mockResolvedValue({
+      provider: "entra",
+      claims: { tid: config.tenantId, roles: [LOG_ANALYSIS_ROLE] },
+    });
+    const request = createRequest();
+
+    await expect(handler(createTestEvent(request))).resolves.toEqual({
+      limit: 1_000,
+      records: [],
+      truncated: false,
+    });
+    expect(getLogAnalyticsAccessToken).toHaveBeenCalledOnce();
+    expect(executeLogAnalyticsQuery).toHaveBeenCalledWith(
+      config,
+      request,
+      "access-token",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("rejects an invalid request before contacting Azure", async () => {
+    vi.mocked(requireUserSession).mockResolvedValue({
+      provider: "entra",
+      claims: { tid: config.tenantId, roles: [LOG_ANALYSIS_ROLE] },
+    });
+
+    await expect(
+      handler(createTestEvent({ ...createRequest(), workspaceId: "caller-controlled" })),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled();
+    expect(executeLogAnalyticsQuery).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new LogAnalyticsQueryError("throttled", 30), 429],
+    [new LogAnalyticsQueryError("timeout"), 504],
+    [new LogAnalyticsQueryError("upstream"), 502],
+  ])("maps Azure query failures to the expected HTTP status", async (error, statusCode) => {
+    vi.mocked(requireUserSession).mockResolvedValue({
+      provider: "entra",
+      claims: { tid: config.tenantId, roles: [LOG_ANALYSIS_ROLE] },
+    });
+    vi.mocked(executeLogAnalyticsQuery).mockRejectedValueOnce(error);
+    const event = createTestEvent(createRequest());
+
+    await expect(handler(event)).rejects.toMatchObject({ statusCode });
+    if (statusCode === 429) {
+      expect(event.node.res.getHeader("retry-after")).toBe(30);
+    }
   });
 });
