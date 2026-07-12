@@ -53,4 +53,28 @@ describe("firewall log parser", () => {
     expect(log.sourceIp).toBe("192.168.1.10");
     expect(log.destinationIp).toBe("10.1.0.8");
   });
+
+  it("labels the default network action as the rule when no rule matched", () => {
+    const defaultAction = normalizeFirewallLogRecord({
+      raw: {
+        category: "AZFWNetworkRule",
+        properties: {
+          ActionReason: "Default Action",
+          Rule: "",
+        },
+      },
+    });
+    const namedRule = normalizeFirewallLogRecord({
+      raw: {
+        category: "AZFWNetworkRule",
+        properties: {
+          ActionReason: "Default Action",
+          Rule: "deny-web",
+        },
+      },
+    });
+
+    expect(defaultAction.rule).toBe("Default");
+    expect(namedRule.rule).toBe("deny-web");
+  });
 });

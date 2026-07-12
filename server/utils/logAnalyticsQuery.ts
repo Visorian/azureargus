@@ -55,7 +55,13 @@ const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFW
     DestinationFqdn = tostring(column_ifexists("Fqdn", "")),
     DestinationPort = tostring(column_ifexists("DestinationPort", "")),
     RuleCollection = tostring(column_ifexists("RuleCollection", "")),
-    Rule = tostring(column_ifexists("Rule", ""))
+    Rule = tostring(column_ifexists("Rule", "")),
+    ActionReason = tostring(column_ifexists("ActionReason", ""))
+| extend Rule = iff(
+    Category == "AZFWNetworkRule" and isempty(Rule) and ActionReason =~ "Default Action",
+    "Default",
+    Rule
+  )
 | extend DestinationAddress = iff(isnotempty(DestinationIp), DestinationIp, DestinationFqdn)
 | extend Message = strcat(
     Action,

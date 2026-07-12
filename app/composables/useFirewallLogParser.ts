@@ -157,9 +157,15 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
   const ruleCollection =
     readString(properties, ["ruleCollection", "RuleCollection", "ruleCollectionName"]) ||
     readString(rawRecord, ["ruleCollection", "RuleCollection", "ruleCollectionName"]);
-  const rule =
+  const explicitRule =
     readString(properties, ["rule", "Rule", "ruleName"]) ||
     readString(rawRecord, ["rule", "Rule", "ruleName"]);
+  const actionReason =
+    readString(properties, ["actionReason", "ActionReason"]) ||
+    readString(rawRecord, ["actionReason", "ActionReason"]);
+  const rule =
+    explicitRule ??
+    (category === "AZFWNetworkRule" && actionReason === "Default Action" ? "Default" : undefined);
   const sequenceNumber =
     input.sequenceNumber === undefined ? undefined : String(input.sequenceNumber);
   const enqueuedTimeUtc = normalizeTimestamp(input.enqueuedTimeUtc);

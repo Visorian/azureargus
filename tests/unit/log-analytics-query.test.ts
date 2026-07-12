@@ -60,6 +60,7 @@ describe("Log Analytics KQL builder", () => {
     expect(result.query).toContain(
       "union isfuzzy=true withsource=Category AZFWNetworkRule, AZFWApplicationRule, AZFWNatRule",
     );
+    expect(result.query).toContain('ActionReason =~ "Default Action"');
     expect(result.query).toContain("| order by TimeGenerated desc");
     expect(result.query).toContain("| take 1001");
   });
