@@ -5,11 +5,13 @@ import {
   getRawLogBufferSize,
   parseEventHubConnectionString,
   validateEventHubConnectionForm,
+  validateEventHubReceiverSettings,
   type EventHubConnectionForm,
 } from "./useEventHubConnection";
 import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFirewallLogParser";
 import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "~/types/firewall";
+import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
 const LIVE_TAIL_THRESHOLD_MS = 30_000;
@@ -45,12 +47,17 @@ export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => Eve
 
 export interface EventHubReceiverOptions {
   loadClientFactory?: () => Promise<CreateEventHubReceiverClient>;
+  managedFetch?: typeof fetch;
 }
+
+export type EventHubConnectionMode = "manual" | "managed";
 
 let client: EventHubReceiverClient | null = null;
 let subscription: ReceiverSubscription | null = null;
 let connectionGeneration = 0;
 let disconnectPromise: Promise<void> | null = null;
+let managedStreamController: AbortController | null = null;
+let managedStreamPromise: Promise<void> | null = null;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Event Hub receiver error.";
@@ -133,6 +140,7 @@ export function eventsToFirewallLogs(
 
 export function useEventHubReceiver({
   loadClientFactory = loadEventHubClientFactory,
+  managedFetch = globalThis.fetch,
 }: EventHubReceiverOptions = {}) {
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
   const errors = useState<string[]>("event-hub-errors", () => []);
@@ -219,11 +227,26 @@ export function useEventHubReceiver({
 
     const activeSubscription = subscription;
     const activeClient = client;
+    const activeManagedController = managedStreamController;
+    const activeManagedStream = managedStreamPromise;
     subscription = null;
     client = null;
+    managedStreamController = null;
+    managedStreamPromise = null;
 
     const teardownPromise = (async () => {
       const failures: unknown[] = [];
+
+      activeManagedController?.abort();
+      if (activeManagedStream) {
+        try {
+          await activeManagedStream;
+        } catch (error: unknown) {
+          if (!activeManagedController?.signal.aborted) {
+            failures.push(error);
+          }
+        }
+      }
 
       if (activeSubscription) {
         try {
@@ -286,8 +309,11 @@ export function useEventHubReceiver({
     return teardown();
   }
 
-  async function connect(form: EventHubConnectionForm) {
-    const validationErrors = validateEventHubConnectionForm(form);
+  async function connect(form: EventHubConnectionForm, mode: EventHubConnectionMode = "manual") {
+    const validationErrors =
+      mode === "managed"
+        ? validateEventHubReceiverSettings(form)
+        : validateEventHubConnectionForm(form);
     if (validationErrors.length > 0) {
       errors.value = validationErrors;
       return false;
@@ -312,6 +338,75 @@ export function useEventHubReceiver({
     caughtUp.value = false;
 
     try {
+      if (mode === "managed") {
+        const controller = new AbortController();
+        managedStreamController = controller;
+        const response = await managedFetch("/api/event-hub/stream", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            accept: "application/x-ndjson",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            consumerGroup: form.consumerGroup.trim(),
+            lookbackMinutes: form.lookbackMinutes,
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok || response.body === null) {
+          throw new Error(`Managed Event Hub connection failed (${response.status})`);
+        }
+        if (generation !== connectionGeneration) {
+          controller.abort();
+          return false;
+        }
+
+        status.value = "connected";
+        const streamPromise = consumeManagedEventHubStream(
+          response.body,
+          (envelope) => {
+            if (generation !== connectionGeneration) {
+              return;
+            }
+            if (envelope.type === "error") {
+              errors.value = [envelope.message, ...errors.value].slice(0, 5);
+              return;
+            }
+            if (envelope.type !== "events" || status.value !== "connected") {
+              return;
+            }
+
+            for (const event of envelope.events) {
+              const result = eventsToFirewallLogs([event], event.partitionId, nextRecordIndex);
+              nextRecordIndex = result.nextIndex;
+              batcher.pushMany(result.records);
+            }
+          },
+          controller.signal,
+        )
+          .then(() => {
+            if (generation === connectionGeneration && !controller.signal.aborted) {
+              errors.value = ["Managed Event Hub stream ended", ...errors.value].slice(0, 5);
+              status.value = "error";
+            }
+          })
+          .catch((error: unknown) => {
+            if (generation === connectionGeneration && !controller.signal.aborted) {
+              errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+              status.value = "error";
+            }
+          })
+          .finally(() => {
+            if (managedStreamController === controller) {
+              managedStreamController = null;
+              managedStreamPromise = null;
+            }
+          });
+        managedStreamPromise = streamPromise;
+        return true;
+      }
+
       const createClient = await loadClientFactory();
 
       if (generation !== connectionGeneration) {

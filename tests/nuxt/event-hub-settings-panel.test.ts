@@ -22,6 +22,7 @@ function createProps(connectionForm = createConnectionForm()) {
     connectionStringPersistenceError: null,
     logHistoryEnabled: true,
     logHistoryError: null,
+    managed: false,
     modeTransitioning: false,
     "onUpdate:connectionForm": (value: EventHubConnectionForm) => {
       Object.assign(connectionForm, value);
@@ -98,5 +99,18 @@ describe("EventHubSettingsPanel", () => {
     expect(retention.attributes("aria-checked")).toBe("true");
     await retention.trigger("click");
     expect(wrapper.emitted("updateLogRetention")).toEqual([[false]]);
+  });
+
+  it("disables deployment-managed credential settings", async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
+      ...mountOptions,
+      props: { ...createProps(), managed: true },
+    });
+
+    expect(wrapper.text()).toContain("Connection is configured by deployment.");
+    expect(wrapper.find("textarea").attributes()).toHaveProperty("disabled");
+    expect(wrapper.text()).not.toContain("Remember connection string");
+    const eventHubName = wrapper.findAll("input")[1];
+    expect(eventHubName?.attributes()).toHaveProperty("disabled");
   });
 });

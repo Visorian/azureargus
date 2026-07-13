@@ -47,9 +47,37 @@ async function queryLogHistoryIds(page: Page) {
 }
 
 async function enterAnonymousMode(page: Page) {
-  await page.goto("/login");
-  await page.getByRole("button", { name: "Use without login" }).click();
+  await page.goto("/logs");
   await expect(page).toHaveURL(/\/logs/);
+  await expect(page.getByRole("region", { name: "Data source" })).toBeVisible();
+}
+
+async function mockManagedDeployment(
+  page: Page,
+  availability: { eventHub: boolean; logAnalytics: boolean },
+) {
+  await page.route("**/api/capabilities", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        mode: "managed",
+        eventHubAvailable: availability.eventHub,
+        predefinedLogAnalyticsAvailable: availability.logAnalytics,
+        temporaryLogAnalyticsAuthAvailable: false,
+        errors: [],
+      },
+    });
+  });
+  await page.route("**/api/_auth/session", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        expireAt: Math.floor(Date.now() / 1_000) + 3_600,
+        name: "Managed User",
+        provider: "entra",
+      },
+    });
+  });
 }
 
 async function seedVisibleLog(page: Page, destinationIp: string) {
@@ -75,25 +103,150 @@ async function seedVisibleLog(page: Page, destinationIp: string) {
   }, destinationIp);
 }
 
-test("login page offers anonymous mode when enabled", async ({ page }) => {
+test("anonymous deployment bypasses application login", async ({ page }) => {
   await page.goto("/login");
 
-  await expect(page.getByRole("heading", { name: "Azure Argus" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Use without login" })).toBeVisible();
-});
-
-test("protected logs require a session and leaving anonymous mode ends it", async ({ page }) => {
-  await page.goto("/logs");
-  await expect(page).toHaveURL(/\/login/);
-
-  await page.getByRole("button", { name: "Use without login" }).click();
   await expect(page).toHaveURL(/\/logs/);
   await expect(page.getByText("Temporary session")).toBeVisible();
-  await page.getByRole("button", { name: "Leave" }).click();
+  await expect(page.getByRole("button", { name: "Leave" })).toHaveCount(0);
+});
 
-  await expect(page).toHaveURL(/\/login/);
+test("anonymous deployment starts directly in logs", async ({ page }) => {
+  await page.goto("/logs");
+  await expect(page).toHaveURL(/\/logs/);
+  await expect(page.getByText("Temporary session")).toBeVisible();
+});
+
+test("managed deployment requires application login", async ({ page }) => {
+  await page.route("**/api/capabilities", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        mode: "managed",
+        eventHubAvailable: true,
+        predefinedLogAnalyticsAvailable: false,
+        temporaryLogAnalyticsAuthAvailable: false,
+        errors: [],
+      },
+    });
+  });
+
   await page.goto("/logs");
   await expect(page).toHaveURL(/\/login/);
+  await expect(page.getByRole("button", { name: "Sign in with Entra" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use without login" })).toHaveCount(0);
+});
+
+test("managed Event Hub uses configured server stream without exposing credentials", async ({
+  page,
+}) => {
+  await mockManagedDeployment(page, { eventHub: true, logAnalytics: true });
+  await page.route("**/api/event-hub/stream", async (route) => {
+    const requestBody = route.request().postDataJSON();
+    expect(requestBody).toEqual({ consumerGroup: "$Default", lookbackMinutes: 15 });
+    expect(JSON.stringify(requestBody)).not.toContain("connectionString");
+    await route.fulfill({
+      body: `${JSON.stringify({
+        type: "events",
+        events: [
+          {
+            body: {
+              records: [
+                {
+                  Action: "Allow",
+                  Category: "AZFWNetworkRule",
+                  msg: "managed-stream-record",
+                  Protocol: "TCP",
+                  TimeGenerated: "2026-07-12T14:30:00.000Z",
+                },
+              ],
+            },
+            enqueuedTimeUtc: "2026-07-12T14:30:01.000Z",
+            partitionId: "0",
+            sequenceNumber: 42,
+          },
+        ],
+      })}\n`,
+      contentType: "application/x-ndjson",
+    });
+  });
+
+  await page.goto("/logs");
+  await expect(page.getByText("Managed User")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Connection string" })).toBeDisabled();
+  await expect(page.getByRole("textbox", { name: "Event Hub name" })).toBeDisabled();
+  await expect(page.getByRole("checkbox", { name: "Remember connection string" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByText("1 visible / 1 received")).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
+  ).toBeVisible();
+});
+
+test("managed Log Analytics-only deployment starts in configured query mode", async ({ page }) => {
+  await mockManagedDeployment(page, { eventHub: false, logAnalytics: true });
+  await page.route("**/api/log-analytics/query", async (route) => {
+    const requestBody = route.request().postDataJSON();
+    expect(requestBody).not.toHaveProperty("workspaceId");
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        limit: 1_000,
+        records: [
+          {
+            action: "Allow",
+            category: "AZFWNetworkRule",
+            id: "managed-query-record",
+            message: "managed-query-record",
+            protocol: "TCP",
+            raw: {},
+            searchableText: "managed-query-record",
+            timestamp: "2026-07-12T14:30:00.000Z",
+          },
+        ],
+        truncated: false,
+      },
+    });
+  });
+
+  await page.goto("/logs");
+  const dataSource = page.getByRole("group", { name: "Data source" });
+  await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toBeDisabled();
+  await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("textbox", { name: "Workspace ID*" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect to Azure" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Run query" }).click();
+  await expect(page.getByText("1 visible", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
+  ).toBeVisible();
+});
+
+test("anonymous delegated Log Analytics exposes temporary authentication controls", async ({
+  page,
+}) => {
+  await page.route("**/api/capabilities", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        mode: "anonymous",
+        eventHubAvailable: false,
+        predefinedLogAnalyticsAvailable: false,
+        temporaryLogAnalyticsAuthAvailable: true,
+        errors: [],
+      },
+    });
+  });
+
+  await page.goto("/logs");
+  await page.getByRole("button", { name: "Log Analytics" }).click();
+  await expect(page.getByRole("textbox", { name: "Workspace ID*" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect to Azure" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run query" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Leave" })).toHaveCount(0);
 });
 
 test("anonymous mode can reach logs page", async ({ page }) => {
@@ -107,7 +260,9 @@ test("anonymous mode can reach logs page", async ({ page }) => {
     "true",
   );
   await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeDisabled();
-  await expect(page.getByText("Log Analytics requires sign-in.")).toBeVisible();
+  await expect(
+    page.getByText("Log Analytics delegated authentication is not configured."),
+  ).toBeVisible();
   await expect(dataSource.getByText(/visible \/ .*received/)).toHaveCount(0);
   await expect(dataSource.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
   await expect(page.getByText(/visible \/ .*received/)).toBeVisible();
@@ -257,8 +412,6 @@ test("local log retention is opt-in and clearing is persistent", async ({ page }
   await appendLogHistory(page, [createPersistedLog("second-seed")]);
   await expect.poll(() => queryLogHistoryIds(page)).toEqual(["second-seed"]);
   await page.reload();
-  await expect(page).toHaveURL(/\/login/);
-  await page.getByRole("button", { name: "Use without login" }).click();
   await expect(page).toHaveURL(/\/logs/);
   await expect(logRetentionSwitch).not.toBeChecked();
   await expect.poll(() => queryLogHistoryIds(page)).toEqual([]);
@@ -351,14 +504,13 @@ test("connection string persistence is explicit and reversible", async ({ page }
   await rememberConnectionString.check();
 
   await page.reload();
-  await expect(page).toHaveURL(/\/login/);
-  await page.getByRole("button", { name: "Use without login" }).click();
+  await expect(page).toHaveURL(/\/logs/);
   await expect(connectionStringInput).toHaveValue(connectionString);
   await expect(rememberConnectionString).toBeChecked();
 
   await rememberConnectionString.uncheck();
   await page.reload();
-  await page.getByRole("button", { name: "Use without login" }).click();
+  await expect(page).toHaveURL(/\/logs/);
   await expect(connectionStringInput).toHaveValue("");
   await expect(rememberConnectionString).not.toBeChecked();
 });
@@ -424,7 +576,7 @@ test("connection string stays opted out when browser storage saving fails", asyn
     page.getByText("Connection string could not be saved in browser storage."),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "Use without login" }).click();
+  await expect(page).toHaveURL(/\/logs/);
   await expect(connectionStringInput).toHaveValue("");
   await expect(rememberConnectionString).not.toBeChecked();
 });

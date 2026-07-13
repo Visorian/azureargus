@@ -26,6 +26,7 @@ describe("analysis mode orchestration", () => {
     const state = useAnalysisMode({
       abortLogAnalysis: vi.fn(),
       canUseLogAnalysis: ref(true),
+      canUseRealTime: ref(true),
       closeDetail: vi.fn(),
       disconnectRealTime: () => disconnect.promise,
       mode,
@@ -46,6 +47,7 @@ describe("analysis mode orchestration", () => {
     const state = useAnalysisMode({
       abortLogAnalysis: vi.fn(),
       canUseLogAnalysis: ref(false),
+      canUseRealTime: ref(true),
       closeDetail: vi.fn(),
       disconnectRealTime,
       mode,
@@ -54,7 +56,7 @@ describe("analysis mode orchestration", () => {
     await expect(state.setMode("log-analysis")).resolves.toBe(false);
     expect(disconnectRealTime).not.toHaveBeenCalled();
     expect(mode.value).toBe("real-time-analysis");
-    expect(state.lastError.value).toBe("Log Analytics requires sign-in.");
+    expect(state.lastError.value).toBe("Log Analytics is unavailable.");
   });
 
   it("aborts Log Analysis work before returning to Real-time", async () => {
@@ -64,6 +66,7 @@ describe("analysis mode orchestration", () => {
     const state = useAnalysisMode({
       abortLogAnalysis,
       canUseLogAnalysis: ref(true),
+      canUseRealTime: ref(true),
       closeDetail,
       disconnectRealTime: vi.fn(async () => undefined),
       mode,
@@ -80,6 +83,7 @@ describe("analysis mode orchestration", () => {
     const state = useAnalysisMode({
       abortLogAnalysis: vi.fn(),
       canUseLogAnalysis: ref(true),
+      canUseRealTime: ref(true),
       closeDetail: vi.fn(),
       disconnectRealTime: vi.fn(async () => {
         throw new Error("teardown failed");
@@ -99,6 +103,7 @@ describe("analysis mode orchestration", () => {
     useAnalysisMode({
       abortLogAnalysis,
       canUseLogAnalysis: ref(true),
+      canUseRealTime: ref(true),
       closeDetail: vi.fn(),
       disconnectRealTime,
       mode: ref("real-time-analysis"),

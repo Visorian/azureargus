@@ -1,5 +1,11 @@
-import type { LogAnalyticsQueryRequest } from "../../shared/types/logAnalytics";
-import { validateLogAnalyticsQueryRequest } from "../../server/utils/logAnalyticsQuery";
+import type {
+  DelegatedLogAnalyticsQueryRequest,
+  LogAnalyticsQueryRequest,
+} from "../../shared/types/logAnalytics";
+import {
+  validateDelegatedLogAnalyticsQueryRequest,
+  validateLogAnalyticsQueryRequest,
+} from "../../server/utils/logAnalyticsQuery";
 
 function createRequest(): LogAnalyticsQueryRequest {
   return {
@@ -76,6 +82,36 @@ describe("Log Analytics request contract", () => {
         ...request,
         sort: { key: "timestamp", direction: "sideways" },
       }),
+    ).toBe(false);
+  });
+});
+
+describe("delegated Log Analytics request contract", () => {
+  function createDelegatedRequest(): DelegatedLogAnalyticsQueryRequest {
+    return {
+      ...createRequest(),
+      workspaceId: "33333333-3333-3333-3333-333333333333",
+    };
+  }
+
+  it("accepts a workspace ID plus the strict query shape", () => {
+    expect(validateDelegatedLogAnalyticsQueryRequest(createDelegatedRequest())).toBe(true);
+  });
+
+  it.each(["", "workspace", "33333333-3333-3333-3333-33333333333z"])(
+    "rejects invalid workspace ID %s",
+    (workspaceId) => {
+      expect(
+        validateDelegatedLogAnalyticsQueryRequest({ ...createDelegatedRequest(), workspaceId }),
+      ).toBe(false);
+    },
+  );
+
+  it("rejects missing and unknown fields", () => {
+    const { workspaceId: _workspaceId, ...withoutWorkspace } = createDelegatedRequest();
+    expect(validateDelegatedLogAnalyticsQueryRequest(withoutWorkspace)).toBe(false);
+    expect(
+      validateDelegatedLogAnalyticsQueryRequest({ ...createDelegatedRequest(), token: "secret" }),
     ).toBe(false);
   });
 });

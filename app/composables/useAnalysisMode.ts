@@ -6,6 +6,7 @@ export type AnalysisMode = "real-time-analysis" | "log-analysis";
 interface UseAnalysisModeOptions {
   abortLogAnalysis(): void;
   canUseLogAnalysis: Readonly<Ref<boolean>>;
+  canUseRealTime: Readonly<Ref<boolean>>;
   closeDetail(): void;
   disconnectRealTime(): Promise<void>;
   mode: Ref<AnalysisMode>;
@@ -24,7 +25,11 @@ export function useAnalysisMode(options: UseAnalysisModeOptions) {
       return nextMode === options.mode.value;
     }
     if (nextMode === "log-analysis" && !options.canUseLogAnalysis.value) {
-      lastError.value = "Log Analytics requires sign-in.";
+      lastError.value = "Log Analytics is unavailable.";
+      return false;
+    }
+    if (nextMode === "real-time-analysis" && !options.canUseRealTime.value) {
+      lastError.value = "Live Event Hub is unavailable.";
       return false;
     }
 

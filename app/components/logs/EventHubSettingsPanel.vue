@@ -10,6 +10,7 @@ defineProps<{
   connectionStringPersistenceError: string | null;
   logHistoryEnabled: boolean;
   logHistoryError: string | null;
+  managed: boolean;
   modeTransitioning: boolean;
 }>();
 
@@ -45,26 +46,36 @@ const bufferSize = createConnectionFieldModel("bufferSize");
     <div>
       <h2 class="text-sm font-semibold">Live Event Hub settings</h2>
       <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-        Use a Listen-only SAS policy. Credentials stay in memory unless remembered.
+        {{
+          managed
+            ? "Connection is configured by deployment."
+            : "Use a Listen-only SAS policy. Credentials stay in memory unless remembered."
+        }}
       </p>
     </div>
 
     <UForm :state="connectionForm" class="space-y-3" @submit="emit('connect')">
-      <UFormField label="Connection string" name="connectionString" required>
+      <UFormField label="Connection string" name="connectionString" :required="!managed">
         <UTextarea
           v-model="connectionString"
           :rows="4"
           class="w-full"
-          placeholder="Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=..."
+          :disabled="managed"
+          :placeholder="
+            managed
+              ? 'Configured by deployment'
+              : 'Endpoint=sb://...;SharedAccessKeyName=...;SharedAccessKey=...;EntityPath=...'
+          "
         />
       </UFormField>
       <UCheckbox
+        v-if="!managed"
         v-model="rememberConnectionString"
         label="Remember connection string"
         description="Stores this SAS credential unencrypted in browser storage. Avoid shared devices."
       />
       <p
-        v-if="connectionStringPersistenceError"
+        v-if="!managed && connectionStringPersistenceError"
         role="alert"
         class="text-xs text-red-600 dark:text-red-400"
       >
@@ -77,7 +88,8 @@ const bufferSize = createConnectionFieldModel("bufferSize");
         <UInput
           v-model="eventHubName"
           class="w-full"
-          placeholder="Only needed without EntityPath"
+          :disabled="managed"
+          :placeholder="managed ? 'Configured by deployment' : 'Only needed without EntityPath'"
         />
       </UFormField>
       <UFormField label="Lookback" name="lookbackMinutes">

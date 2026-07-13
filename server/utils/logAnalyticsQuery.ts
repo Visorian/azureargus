@@ -1,11 +1,11 @@
 import type { FirewallLogRecord } from "~/types/firewall";
 
 import type {
+  DelegatedLogAnalyticsQueryRequest,
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
   LogAnalyticsSort,
 } from "../../shared/types/logAnalytics";
-import type { LogAnalyticsRuntimeConfig } from "./logAnalyticsAuth";
 
 const INITIAL_LIMIT = 1_000;
 const REFINED_LIMIT = 5_000;
@@ -14,6 +14,7 @@ const MAX_FILTER_LENGTH = 256;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILTER_KEYS = ["search", "category", "action", "protocol", "source", "destination"] as const;
 const SORT_COLUMNS: Record<LogAnalyticsSort["key"], string> = {
   timestamp: "TimeGenerated",
@@ -334,6 +335,21 @@ export function validateLogAnalyticsQueryRequest(
   return from < to && to - from <= MAX_RANGE_MS;
 }
 
+export function validateDelegatedLogAnalyticsQueryRequest(
+  value: unknown,
+): value is DelegatedLogAnalyticsQueryRequest {
+  if (!isRecord(value) || !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "sort"])) {
+    return false;
+  }
+
+  const { workspaceId, ...request } = value;
+  return (
+    typeof workspaceId === "string" &&
+    WORKSPACE_ID_PATTERN.test(workspaceId) &&
+    validateLogAnalyticsQueryRequest(request)
+  );
+}
+
 export function encodeKqlStringLiteral(value: string) {
   return JSON.stringify(value);
 }
@@ -402,8 +418,12 @@ interface ExecuteLogAnalyticsQueryOptions {
   queryId?: string;
 }
 
+export interface LogAnalyticsQueryTarget {
+  workspaceId: string;
+}
+
 export async function executeLogAnalyticsQuery(
-  config: LogAnalyticsRuntimeConfig,
+  target: LogAnalyticsQueryTarget,
   request: LogAnalyticsQueryRequest,
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
@@ -415,7 +435,9 @@ export async function executeLogAnalyticsQuery(
   if (options.signal?.aborted) {
     controller.abort();
   } else {
-    options.signal?.addEventListener("abort", handleIncomingAbort, { once: true });
+    options.signal?.addEventListener("abort", handleIncomingAbort, {
+      once: true,
+    });
   }
 
   const timeout = setTimeout(() => {
@@ -428,7 +450,7 @@ export async function executeLogAnalyticsQuery(
     let response: Response;
     try {
       response = await fetchImplementation(
-        `https://api.loganalytics.azure.com/v1/workspaces/${encodeURIComponent(config.workspaceId)}/query`,
+        `https://api.loganalytics.azure.com/v1/workspaces/${encodeURIComponent(target.workspaceId)}/query`,
         {
           method: "POST",
           headers: {

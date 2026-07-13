@@ -4,8 +4,6 @@ definePageMeta({
   oidcAuth: false,
 });
 
-const runtimeConfig = useRuntimeConfig();
-const anonymousMode = useAnonymousMode();
 const { loggedIn, login } = useOidcAuth();
 const signingIn = ref(false);
 
@@ -27,12 +25,6 @@ async function startLogin() {
     signingIn.value = false;
   }
 }
-
-async function startAnonymousMode() {
-  if (anonymousMode.start()) {
-    await navigateTo("/logs");
-  }
-}
 </script>
 
 <template>
@@ -40,7 +32,7 @@ async function startAnonymousMode() {
     <template #header>
       <div class="space-y-1">
         <h1 class="text-lg font-semibold">Azure Argus</h1>
-        <p class="text-sm text-muted">Sign in before connecting to Event Hub logs.</p>
+        <p class="text-sm text-muted">Sign in to use configured data sources.</p>
       </div>
     </template>
 
@@ -52,15 +44,6 @@ async function startAnonymousMode() {
         label="Sign in with Entra"
         :loading="signingIn"
         @click="startLogin"
-      />
-      <UButton
-        v-if="runtimeConfig.public.allowAnonymousMode"
-        block
-        variant="outline"
-        color="neutral"
-        icon="i-lucide-user-round"
-        label="Use without login"
-        @click="startAnonymousMode"
       />
     </div>
   </UCard>

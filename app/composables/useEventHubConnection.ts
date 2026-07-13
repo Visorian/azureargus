@@ -101,6 +101,14 @@ export function validateEventHubConnectionForm(form: EventHubConnectionForm) {
     errors.push("Event Hub name is required when EntityPath is not present.");
   }
 
+  errors.push(...validateEventHubReceiverSettings(form));
+
+  return errors;
+}
+
+export function validateEventHubReceiverSettings(form: EventHubConnectionForm) {
+  const errors: string[] = [];
+
   if (form.consumerGroup.trim().length === 0) {
     errors.push("Consumer group is required.");
   }

@@ -10,6 +10,10 @@ import {
   isLogFilterValueActive,
   toggleLogFilterValue,
 } from "~/composables/useLogQuery";
+import type {
+  LogAnalyticsQueryRequest,
+  LogAnalyticsQueryResponse,
+} from "#shared/types/logAnalytics";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
 import { LOG_ANALYSIS_CATEGORIES, type LogAnalysisDateRange } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
@@ -51,28 +55,77 @@ const quickFilterButtonClass =
 
 const runtimeConfig = useRuntimeConfig();
 const appConfig = useAppConfig();
+const deployment = useDeploymentCapabilities();
+const capabilities = computed(() => deployment.capabilities.value);
+const managedMode = computed(() => capabilities.value?.mode === "managed");
+const eventHubSourceAvailable = computed(
+  () => capabilities.value?.mode === "anonymous" || capabilities.value?.eventHubAvailable === true,
+);
+const logAnalyticsSourceAvailable = computed(() =>
+  capabilities.value?.mode === "anonymous"
+    ? capabilities.value.temporaryLogAnalyticsAuthAvailable
+    : capabilities.value?.predefinedLogAnalyticsAvailable === true,
+);
 const versionNumber = appConfig.versionNumber as string;
 const receiver = useEventHubReceiver();
 const connectionForm = reactive<EventHubConnectionForm>(
   createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
 );
 const { enabled: rememberConnectionString, lastError: connectionStringPersistenceError } =
-  useEventHubConnectionPersistence(toRef(connectionForm, "connectionString"));
+  useEventHubConnectionPersistence(toRef(connectionForm, "connectionString"), {
+    active: computed(() => capabilities.value?.mode === "anonymous"),
+  });
 const connecting = ref(false);
 const sidebarCollapsed = ref(false);
 const detailOpen = ref(false);
 const selectedLog = ref<FirewallLogRecord | null>(null);
 const toast = useToast();
-const anonymousMode = useAnonymousMode();
-const { loggedIn } = useOidcAuth();
+const requestFetch = useRequestFetch();
+const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth();
+const temporaryWorkspaceId = ref("");
 const logHistory = useLogHistoryPersistence();
 const ipCountryLookup = useIpCountryLookup();
 const clearingLogHistory = ref(false);
 const logHistoryEnabled = computed(() => logHistory.enabled.value);
 const logHistoryError = computed(() => logHistory.lastError.value);
-const analysisMode = ref<AnalysisMode>("real-time-analysis");
+const analysisMode = ref<AnalysisMode>(
+  capabilities.value?.mode === "managed" && !capabilities.value.eventHubAvailable
+    ? "log-analysis"
+    : "real-time-analysis",
+);
 const logAnalysisActive = computed(() => analysisMode.value === "log-analysis");
-const canUseLogAnalysis = computed(() => loggedIn.value && !anonymousMode.enabled.value);
+const canUseLogAnalysis = logAnalyticsSourceAvailable;
+const logAnalyticsRequirement = computed(() => {
+  if (logAnalyticsSourceAvailable.value) {
+    return null;
+  }
+  return managedMode.value
+    ? "Log Analytics is not configured."
+    : "Log Analytics delegated authentication is not configured.";
+});
+const temporaryLogAnalyticsMode = computed(() => capabilities.value?.mode === "anonymous");
+const temporaryWorkspaceValid = computed(() =>
+  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(temporaryWorkspaceId.value.trim()),
+);
+const canRunLogAnalytics = computed(
+  () =>
+    managedMode.value ||
+    (temporaryLogAnalyticsAuth.connected.value && temporaryWorkspaceValid.value),
+);
+
+function requestTemporaryLogAnalytics(
+  body: LogAnalyticsQueryRequest,
+  signal: AbortSignal,
+  accessToken: string,
+) {
+  return requestFetch<LogAnalyticsQueryResponse>("/api/log-analytics/delegated-query", {
+    body: { ...body, workspaceId: temporaryWorkspaceId.value.trim() },
+    headers: { authorization: `Bearer ${accessToken}` },
+    method: "POST",
+    signal,
+  });
+}
+
 const realTimeQuery = useLogQuery(receiver.logs, {
   rawSource: {
     getRecords: receiver.getRawLogs,
@@ -93,6 +146,18 @@ const logQuery = useLogAnalyticsQuery({
       color: "error",
       icon: "i-lucide-circle-alert",
     });
+  },
+  request: async (body, signal) => {
+    if (managedMode.value) {
+      return requestFetch("/api/log-analytics/query", {
+        body,
+        method: "POST",
+        signal,
+      });
+    }
+
+    const accessToken = await temporaryLogAnalyticsAuth.getAccessToken();
+    return requestTemporaryLogAnalytics(body, signal, accessToken);
   },
   sort: logSort,
 });
@@ -116,6 +181,7 @@ const logResultSorting = useLogSorting(logResultQuery.filteredLogs, false, logSo
 const modeState = useAnalysisMode({
   abortLogAnalysis: logQuery.abort,
   canUseLogAnalysis,
+  canUseRealTime: eventHubSourceAvailable,
   closeDetail,
   disconnectRealTime: receiver.disconnect,
   mode: analysisMode,
@@ -247,7 +313,9 @@ const emptyState = computed(() => {
         }
       : {
           title: "No logs received",
-          description: "Connect to an Event Hub with a Listen-only SAS connection string.",
+          description: managedMode.value
+            ? "Connect to configured Event Hub."
+            : "Connect to an Event Hub with a Listen-only SAS connection string.",
         };
   }
 
@@ -296,6 +364,18 @@ watch(modeState.lastError, (error) => {
   }
 });
 
+watch(
+  managedMode,
+  (managed) => {
+    if (managed) {
+      connectionForm.connectionString = "";
+      connectionForm.eventHubName = "";
+      rememberConnectionString.value = false;
+    }
+  },
+  { immediate: true },
+);
+
 async function connect() {
   if (modeTransitioning.value || logAnalysisActive.value) {
     return;
@@ -303,7 +383,7 @@ async function connect() {
 
   connecting.value = true;
   try {
-    await receiver.connect(connectionForm);
+    await receiver.connect(connectionForm, managedMode.value ? "managed" : "manual");
   } finally {
     connecting.value = false;
   }
@@ -405,7 +485,38 @@ function clearActiveResults() {
 }
 
 async function runLogAnalysis() {
+  if (!canRunLogAnalytics.value) {
+    toast.add({
+      title: temporaryLogAnalyticsAuth.connected.value
+        ? "Workspace ID is invalid."
+        : "Connect to Azure before running Log Analytics query.",
+      color: "error",
+      icon: "i-lucide-circle-alert",
+    });
+    return;
+  }
+  if (temporaryLogAnalyticsMode.value) {
+    try {
+      const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(true);
+      await logQuery.run((body, signal) => requestTemporaryLogAnalytics(body, signal, accessToken));
+    } catch {
+      toast.add({
+        title: temporaryLogAnalyticsAuth.lastError.value ?? "Azure authentication failed.",
+        color: "error",
+        icon: "i-lucide-circle-alert",
+      });
+      return;
+    }
+    return;
+  }
   await logQuery.run();
+}
+
+async function disconnectTemporaryLogAnalytics() {
+  logQuery.abort();
+  logQuery.clear();
+  temporaryWorkspaceId.value = "";
+  await temporaryLogAnalyticsAuth.disconnect();
 }
 
 function applyLogFilters() {
@@ -522,7 +633,8 @@ function statusColor(status: string) {
                 :variant="logAnalysisActive ? 'outline' : 'solid'"
                 :color="logAnalysisActive ? 'neutral' : 'primary'"
                 :aria-pressed="!logAnalysisActive"
-                :disabled="modeTransitioning"
+                :aria-describedby="!eventHubSourceAvailable ? 'event-hub-requirement' : undefined"
+                :disabled="!eventHubSourceAvailable || modeTransitioning"
                 :loading="modeTransitioning && logAnalysisActive"
                 @click="updateAnalysisMode('real-time-analysis', $event)"
               >
@@ -549,11 +661,18 @@ function statusColor(status: string) {
             </UFieldGroup>
           </div>
           <p
-            v-if="!canUseLogAnalysis"
+            v-if="!eventHubSourceAvailable"
+            id="event-hub-requirement"
+            class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
+          >
+            Live Event Hub is not configured.
+          </p>
+          <p
+            v-if="logAnalyticsRequirement"
             id="log-analytics-requirement"
             class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
           >
-            Log Analytics requires sign-in.
+            {{ logAnalyticsRequirement }}
           </p>
         </div>
 
@@ -626,6 +745,7 @@ function statusColor(status: string) {
             :connection-string-persistence-error="connectionStringPersistenceError"
             :log-history-enabled="logHistoryEnabled"
             :log-history-error="logHistoryError"
+            :managed="managedMode"
             :mode-transitioning="modeTransitioning"
             @update:connection-form="updateConnectionForm"
             @connect="connect"
@@ -634,13 +754,20 @@ function statusColor(status: string) {
           />
           <LogsLogAnalyticsSettingsPanel
             v-else
+            v-model:workspace-id="temporaryWorkspaceId"
             :draft-range="logDraftRange"
             :applied-range-label="logAppliedRangeLabel"
+            :can-run="canRunLogAnalytics"
             :query-status="logQueryStatus"
             :range-dirty="logRangeDirty"
             :range-error="logRangeError"
             :results-truncated="logResultsTruncated"
+            :temporary="temporaryLogAnalyticsMode"
+            :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
+            :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
             @update:draft-range="updateLogDraftRange"
+            @connect-azure="temporaryLogAnalyticsAuth.connect"
+            @disconnect-azure="disconnectTemporaryLogAnalytics"
             @run="runLogAnalysis"
           />
         </section>

@@ -4,17 +4,24 @@ import type { LogAnalysisDateRange } from "~/utils/logAnalysis";
 
 defineProps<{
   appliedRangeLabel: string;
+  canRun: boolean;
   queryStatus: LogAnalyticsQueryStatus;
   rangeDirty: boolean;
   rangeError: string | null;
   resultsTruncated: boolean;
+  temporary: boolean;
+  temporaryAuthError: string | null;
+  temporaryAuthStatus: "idle" | "connecting" | "connected" | "error";
 }>();
 
 const emit = defineEmits<{
+  connectAzure: [];
+  disconnectAzure: [];
   run: [];
 }>();
 
 const draftRange = defineModel<LogAnalysisDateRange>("draftRange", { required: true });
+const workspaceId = defineModel<string>("workspaceId", { required: true });
 const draftFrom = computed({
   get: () => draftRange.value.from,
   set: (from: string) => {
@@ -38,6 +45,41 @@ const draftTo = computed({
       </p>
     </div>
 
+    <div
+      v-if="temporary"
+      class="space-y-3 border-b border-brand-gray-200 pb-3 dark:border-brand-gray-800"
+    >
+      <UFormField label="Workspace ID" name="workspaceId" required>
+        <UInput
+          v-model="workspaceId"
+          class="w-full"
+          placeholder="00000000-0000-0000-0000-000000000000"
+        />
+      </UFormField>
+      <div class="flex gap-2">
+        <UButton
+          color="primary"
+          variant="solid"
+          icon="i-lucide-log-in"
+          label="Connect to Azure"
+          :loading="temporaryAuthStatus === 'connecting'"
+          :disabled="temporaryAuthStatus === 'connected'"
+          @click="emit('connectAzure')"
+        />
+        <UButton
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-unplug"
+          label="Disconnect"
+          :disabled="temporaryAuthStatus !== 'connected'"
+          @click="emit('disconnectAzure')"
+        />
+      </div>
+      <p v-if="temporaryAuthError" role="alert" class="text-xs text-red-600 dark:text-red-400">
+        {{ temporaryAuthError }}
+      </p>
+    </div>
+
     <UForm :state="draftRange" class="space-y-3" @submit="emit('run')">
       <UFormField label="Start" name="from" required>
         <UInput v-model="draftFrom" type="datetime-local" class="w-full" />
@@ -51,6 +93,7 @@ const draftTo = computed({
         variant="solid"
         icon="i-lucide-search"
         label="Run query"
+        :disabled="!canRun"
         :loading="queryStatus === 'loading'"
       />
     </UForm>

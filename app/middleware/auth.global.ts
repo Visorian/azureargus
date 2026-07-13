@@ -1,13 +1,25 @@
-export default defineNuxtRouteMiddleware((to) => {
-  if (to.path === "/login" || to.meta.oidcAuth === false) {
+export default defineNuxtRouteMiddleware(async (to) => {
+  if (to.path === "/configuration-error") {
     return;
   }
 
-  const { loggedIn } = useOidcAuth();
-  const anonymousMode = useAnonymousMode();
-  const runtimeConfig = useRuntimeConfig();
+  const deployment = useDeploymentCapabilities();
+  let capabilities;
+  try {
+    capabilities = await deployment.load();
+  } catch {
+    return navigateTo("/configuration-error");
+  }
 
-  if (loggedIn.value || (runtimeConfig.public.allowAnonymousMode && anonymousMode.enabled.value)) {
+  if (capabilities.mode === "invalid") {
+    return navigateTo("/configuration-error");
+  }
+  if (capabilities.mode === "anonymous") {
+    return to.path === "/login" ? navigateTo("/logs") : undefined;
+  }
+
+  const { loggedIn } = useOidcAuth();
+  if (to.path === "/login" || to.meta.oidcAuth === false || loggedIn.value) {
     return;
   }
 

@@ -1,3 +1,51 @@
+import type { Plugin } from "vite";
+
+const MSAL_REDIRECT_MODULE_ID = "virtual:azure-argus-msal-redirect";
+const RESOLVED_MSAL_REDIRECT_MODULE_ID = `\0${MSAL_REDIRECT_MODULE_ID}`;
+const MSAL_REDIRECT_ASSET_PATH = "/_nuxt/log-analytics-redirect.js";
+
+function createMsalRedirectBridgePlugin(): Plugin {
+  let isBuild = false;
+
+  return {
+    name: "azure-argus:msal-redirect-bridge",
+    configResolved(config) {
+      isBuild = config.command === "build";
+    },
+    configureServer(server) {
+      server.middlewares.use(MSAL_REDIRECT_ASSET_PATH, async (_request, response, next) => {
+        const result = await server.transformRequest(MSAL_REDIRECT_MODULE_ID);
+        if (!result) {
+          next();
+          return;
+        }
+        response.setHeader("content-type", "text/javascript; charset=utf-8");
+        response.end(result.code);
+      });
+    },
+    buildStart() {
+      if (!isBuild) {
+        return;
+      }
+      this.emitFile({
+        type: "chunk",
+        id: MSAL_REDIRECT_MODULE_ID,
+        fileName: "_nuxt/log-analytics-redirect.js",
+      });
+    },
+    resolveId(id) {
+      return id === MSAL_REDIRECT_MODULE_ID ? RESOLVED_MSAL_REDIRECT_MODULE_ID : null;
+    },
+    load(id) {
+      if (id !== RESOLVED_MSAL_REDIRECT_MODULE_ID) {
+        return null;
+      }
+      return `import { broadcastResponseToMainFrame } from "@azure/msal-browser/redirect-bridge";
+void broadcastResponseToMainFrame();`;
+    },
+  };
+}
+
 export default defineNuxtConfig({
   modules: ["@nuxt/ui", "nuxt-oidc-auth"],
   ssr: false,
@@ -11,6 +59,10 @@ export default defineNuxtConfig({
     ipCountry: {
       databasePath: ".data/dbip-country-lite.mmdb",
     },
+    eventHub: {
+      connectionString: "",
+      name: "",
+    },
     logAnalytics: {
       tenantId: "",
       clientId: "",
@@ -18,8 +70,11 @@ export default defineNuxtConfig({
       workspaceId: "",
     },
     public: {
-      allowAnonymousMode: true,
       defaultLookbackMinutes: 15,
+      logAnalyticsDelegated: {
+        tenantId: "",
+        clientId: "",
+      },
       siteName: "Azure Argus",
     },
   },
@@ -42,6 +97,7 @@ export default defineNuxtConfig({
       include: ["buffer", "os-browserify/browser", "path-browserify", "process"],
     },
     plugins: [
+      createMsalRedirectBridgePlugin(),
       {
         name: "azure-argus:vite-checker-runtime-shim",
         apply: "serve",

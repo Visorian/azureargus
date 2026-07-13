@@ -25,6 +25,10 @@ export interface LogAnalyticsQueryRequest {
   sort: LogAnalyticsSort;
 }
 
+export interface DelegatedLogAnalyticsQueryRequest extends LogAnalyticsQueryRequest {
+  workspaceId: string;
+}
+
 export interface LogAnalyticsQueryResponse {
   records: FirewallLogRecord[];
   truncated: boolean;

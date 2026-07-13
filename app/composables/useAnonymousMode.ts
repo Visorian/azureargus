@@ -1,23 +1,8 @@
 export function useAnonymousMode() {
-  const enabled = useState("anonymous-mode-enabled", () => false);
-  const runtimeConfig = useRuntimeConfig();
-
-  function start() {
-    if (!runtimeConfig.public.allowAnonymousMode) {
-      return false;
-    }
-
-    enabled.value = true;
-    return true;
-  }
-
-  function stop() {
-    enabled.value = false;
-  }
+  const deployment = useDeploymentCapabilities();
+  const enabled = computed(() => deployment.capabilities.value?.mode === "anonymous");
 
   return {
     enabled,
-    start,
-    stop,
   };
 }

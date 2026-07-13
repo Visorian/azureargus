@@ -10,7 +10,7 @@ Browser workspace for receiving, inspecting, and querying Azure Firewall logs.
 - Add or remove filters directly from filterable table values.
 - Optionally retain up to 100,000 normalized logs in browser IndexedDB.
 - Resolve public destination IPs to country flags through a server-local MMDB database.
-- Use Microsoft Entra authentication or explicitly enabled anonymous mode.
+- Use managed application login or deployment-derived anonymous mode.
 
 ## Quick Start
 
@@ -24,13 +24,49 @@ bun run dev
 ```
 
 Open `http://127.0.0.1:3000` and connect with an Event Hub Listen-only SAS connection string.
-Anonymous mode is enabled by default for real-time analysis. Log Analytics requires any authenticated
-non-anonymous session plus independent server credentials.
+Without predefined data-source credentials, app starts directly in anonymous mode: Event Hub accepts
+temporary browser-provided SAS credential and Log Analytics can use temporary delegated Azure
+authentication when public SPA identifiers are configured.
 
 Configuration is documented in [`.env.example`](./.env.example). Set the
-`NUXT_OIDC_PROVIDERS_ENTRA_*` variables only for login and session authentication. Set the independent
-`NUXT_LOG_ANALYTICS_*` service-principal variables for historical queries; it may belong to a different
-tenant than the login provider.
+`NUXT_EVENT_HUB_*` and/or `NUXT_LOG_ANALYTICS_*` variables to select managed mode. Managed mode requires
+`NUXT_OIDC_PROVIDERS_ENTRA_*` login/session configuration, disables anonymous access, and exposes only
+fully predefined sources. Event Hub SAS and Log Analytics client secret stay server-side.
+
+### Deployment modes
+
+| Predefined environment group | Resulting mode         | Available data sources                                    |
+| ---------------------------- | ---------------------- | --------------------------------------------------------- |
+| None                         | Anonymous              | Temporary Event Hub SAS; optional delegated Log Analytics |
+| Event Hub                    | Managed/login required | Predefined server-side Event Hub                          |
+| Log Analytics                | Managed/login required | Predefined server-side Log Analytics                      |
+| Both                         | Managed/login required | Both predefined sources                                   |
+| Partial or malformed group   | Invalid deployment     | No login or anonymous fallback                            |
+
+- Event Hub: `NUXT_EVENT_HUB_CONNECTION_STRING` and, when connection string has no `EntityPath`,
+  `NUXT_EVENT_HUB_NAME`.
+- Log Analytics: `NUXT_LOG_ANALYTICS_TENANT_ID`, `NUXT_LOG_ANALYTICS_CLIENT_ID`,
+  `NUXT_LOG_ANALYTICS_CLIENT_SECRET`, and `NUXT_LOG_ANALYTICS_WORKSPACE_ID`.
+
+Anonymous deployments can optionally enable temporary Log Analytics authentication with both
+`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_TENANT_ID` and
+`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. These public identifiers do not enable application
+login or select managed mode.
+
+Managed deployments also require complete application-login configuration:
+`NUXT_OIDC_PROVIDERS_ENTRA_CLIENT_ID`, `NUXT_OIDC_PROVIDERS_ENTRA_CLIENT_SECRET`,
+`NUXT_OIDC_PROVIDERS_ENTRA_REDIRECT_URI`, `NUXT_OIDC_PROVIDERS_ENTRA_AUTHORIZATION_URL`,
+`NUXT_OIDC_PROVIDERS_ENTRA_TOKEN_URL`, `NUXT_OIDC_SESSION_SECRET`,
+`NUXT_OIDC_AUTH_SESSION_SECRET`, and `NUXT_OIDC_TOKEN_KEY`.
+
+For anonymous Log Analytics, register a Microsoft Entra SPA redirect URI at
+`https://YOUR_APP/log-analytics-redirect.html`, grant delegated Log Analytics `Data.Read`, and set
+`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_TENANT_ID` plus
+`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. Signed-in user also needs permission to query selected
+workspace. Public tenant/client IDs do not enable application login. Access token and workspace input
+remain browser-memory-only and are cleared on disconnect/page exit.
+Do not add a `Cross-Origin-Opener-Policy` response header to the redirect bridge page; MSAL popup
+communication requires that page to remain in the opener's browsing context group.
 
 ## IP Geolocation
 

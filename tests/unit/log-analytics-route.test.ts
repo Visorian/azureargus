@@ -29,7 +29,18 @@ const config = {
   clientSecret: "secret",
   workspaceId: "33333333-3333-3333-3333-333333333333",
 };
-let runtimeConfig: { logAnalytics: typeof config };
+const oidc = {
+  providers: {
+    entra: {
+      authorizationUrl: "https://login.example.com/authorize",
+      clientId: "44444444-4444-4444-8444-444444444444",
+      clientSecret: "login-secret",
+      redirectUri: "https://app.example.com/auth/callback",
+      tokenUrl: "https://login.example.com/token",
+    },
+  },
+};
+let runtimeConfig: Record<string, unknown>;
 let handler: (event: H3Event) => Promise<unknown>;
 
 function createRequest(): LogAnalyticsQueryRequest {
@@ -63,18 +74,22 @@ function createTestEvent(body?: unknown) {
 }
 
 beforeAll(async () => {
-  runtimeConfig = { logAnalytics: config };
+  vi.stubEnv("NUXT_OIDC_AUTH_SESSION_SECRET", "s".repeat(32));
+  vi.stubEnv("NUXT_OIDC_SESSION_SECRET", "s".repeat(48));
+  vi.stubEnv("NUXT_OIDC_TOKEN_KEY", Buffer.alloc(32).toString("base64"));
+  runtimeConfig = { logAnalytics: config, oidc };
   vi.stubGlobal("defineEventHandler", <T>(eventHandler: T) => eventHandler);
   vi.stubGlobal("useRuntimeConfig", () => runtimeConfig);
   handler = (await import("../../server/api/log-analytics/query.post")).default;
 });
 
 afterAll(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
-  runtimeConfig = { logAnalytics: config };
+  runtimeConfig = { logAnalytics: config, oidc };
   vi.mocked(requireUserSession)
     .mockReset()
     .mockResolvedValue({
@@ -91,7 +106,7 @@ beforeEach(() => {
 
 describe("Log Analytics query route authentication", () => {
   it("requires a login session before reading private configuration", async () => {
-    runtimeConfig = { logAnalytics: { ...config, clientSecret: "" } };
+    runtimeConfig = { logAnalytics: { ...config, clientSecret: "" }, oidc };
     vi.mocked(requireUserSession).mockRejectedValue({ statusCode: 401 });
 
     await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 401 });
@@ -99,7 +114,7 @@ describe("Log Analytics query route authentication", () => {
   });
 
   it("returns 503 when independent service-principal configuration is incomplete", async () => {
-    runtimeConfig = { logAnalytics: { ...config, clientSecret: "" } };
+    runtimeConfig = { logAnalytics: { ...config, clientSecret: "" }, oidc };
 
     await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 503 });
   });
@@ -119,6 +134,16 @@ describe("Log Analytics query route authentication", () => {
       "access-token",
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it("rejects the managed route in anonymous deployments", async () => {
+    runtimeConfig = {};
+
+    await expect(handler(createTestEvent(createRequest()))).rejects.toMatchObject({
+      statusCode: 403,
+    });
+    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled();
+    expect(executeLogAnalyticsQuery).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid request before contacting Azure", async () => {

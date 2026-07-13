@@ -7,10 +7,15 @@ import {
   type EventHubConnectionStorage,
 } from "~/utils/eventHubConnectionStorage";
 
-export function useEventHubConnectionPersistence(connectionString: Ref<string>) {
+export function useEventHubConnectionPersistence(
+  connectionString: Ref<string>,
+  options: { active?: Readonly<Ref<boolean>> } = {},
+) {
   const enabled = ref(false);
   const lastError = ref<string | null>(null);
+  const active = options.active ?? ref(true);
   let initialized = false;
+  let mounted = false;
   let ignoreEnabledChange = false;
   let hasStoredValue = false;
   let storage: EventHubConnectionStorage | null = null;
@@ -56,7 +61,11 @@ export function useEventHubConnectionPersistence(connectionString: Ref<string>) 
     }
   }
 
-  onMounted(() => {
+  function initialize() {
+    if (!mounted || initialized || !active.value) {
+      return;
+    }
+
     try {
       storage = window.localStorage;
       const storedValue = readStoredEventHubConnectionString(storage);
@@ -71,10 +80,26 @@ export function useEventHubConnectionPersistence(connectionString: Ref<string>) 
     } finally {
       initialized = true;
     }
+  }
+
+  onMounted(() => {
+    mounted = true;
+    initialize();
+  });
+
+  watch(active, (isActive) => {
+    if (isActive) {
+      initialize();
+      return;
+    }
+
+    setEnabledWithoutSync(false);
+    storage = null;
+    initialized = false;
   });
 
   watch(connectionString, () => {
-    if (initialized && enabled.value) {
+    if (active.value && initialized && enabled.value) {
       saveCurrentValue();
     }
   });
@@ -82,7 +107,7 @@ export function useEventHubConnectionPersistence(connectionString: Ref<string>) 
   watch(
     enabled,
     (shouldPersist) => {
-      if (!initialized || ignoreEnabledChange) {
+      if (!active.value || !initialized || ignoreEnabledChange) {
         return;
       }
 

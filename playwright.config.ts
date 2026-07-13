@@ -13,7 +13,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `NUXT_PUBLIC_ALLOW_ANONYMOUS_MODE=true NUXT_PUBLIC_DEFAULT_LOOKBACK_MINUTES=15 bun run dev --port ${port}`,
+    command: `NUXT_PUBLIC_DEFAULT_LOOKBACK_MINUTES=15 bun run dev --port ${port}`,
     url: `${baseURL}/login`,
     reuseExistingServer,
     timeout: 120_000,

@@ -90,6 +90,53 @@ afterEach(() => {
 });
 
 describe("Event Hub receiver helpers", () => {
+  it("connects managed mode with only receiver settings and reports stream EOF", async () => {
+    installNuxtMocks();
+    const encoder = new TextEncoder();
+    let closeStream!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        closeStream = () => controller.close();
+        controller.enqueue(encoder.encode('{"type":"heartbeat"}\n'));
+      },
+    });
+    const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+    const loadClientFactory = vi.fn<CreateEventHubReceiverClient>();
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory, managedFetch });
+    const form = createInitialEventHubConnectionForm();
+    form.consumerGroup = "  managed-consumer  ";
+    form.lookbackMinutes = 3;
+
+    await expect(receiver.connect(form, "managed")).resolves.toBe(true);
+    expect(managedFetch).toHaveBeenCalledOnce();
+    const [url, options] = managedFetch.mock.calls[0] ?? [];
+    expect(url).toBe("/api/event-hub/stream");
+    expect(options).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        accept: "application/x-ndjson",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ consumerGroup: "managed-consumer", lookbackMinutes: 3 }),
+    });
+    expect(String(options?.body)).not.toContain("connectionString");
+    expect(String(options?.body)).not.toContain("eventHubName");
+    expect(loadClientFactory).not.toHaveBeenCalled();
+    expect(receiver.status.value).toBe("connected");
+
+    receiver.pause();
+    expect(receiver.status.value).toBe("paused");
+    receiver.resume();
+    expect(receiver.status.value).toBe("connected");
+
+    closeStream();
+    await vi.waitFor(() => expect(receiver.status.value).toBe("error"));
+    expect(receiver.errors.value).toContain("Managed Event Hub stream ended");
+    await receiver.disconnect();
+  });
+
   it("allocates unique record indexes across expanded queued events", () => {
     const result = eventsToFirewallLogs(
       [

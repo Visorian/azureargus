@@ -154,7 +154,11 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     };
   }
 
-  async function execute(range: { from: string; to: string }, initial: boolean) {
+  async function execute(
+    range: { from: string; to: string },
+    initial: boolean,
+    requestForExecution: QueryRequest = request,
+  ) {
     clearDebounce();
     abortActiveRequest();
     const controller = new AbortController();
@@ -166,7 +170,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     lastError.value = null;
 
     try {
-      const response = await request(createRequestBody(range), controller.signal);
+      const response = await requestForExecution(createRequestBody(range), controller.signal);
       if (generation !== requestGeneration || !options.active.value) {
         return false;
       }
@@ -210,7 +214,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     }
   }
 
-  async function run() {
+  async function run(requestForExecution?: QueryRequest) {
     const parsed = parseLogAnalysisDateRange(draftRange);
     if (!parsed.ok) {
       rangeError.value = parsed.error;
@@ -219,7 +223,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
 
     rangeError.value = null;
     criteriaChangedDuringInitialLoad = false;
-    return execute(parsed.value, !hasRun.value);
+    return execute(parsed.value, !hasRun.value, requestForExecution);
   }
 
   function scheduleRefinement(immediate = false) {

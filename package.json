@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@azure/event-hubs": "^6.0.4",
+    "@azure/msal-browser": "5.17.0",
     "@maxmind/geoip2-node": "7.0.0",
     "@nuxt/ui": "^4.9.0",
     "buffer": "^6.0.3",

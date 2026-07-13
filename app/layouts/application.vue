@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const runtimeConfig = useRuntimeConfig();
 const anonymousMode = useAnonymousMode();
+const deployment = useDeploymentCapabilities();
 const { loggedIn, logout, user } = useOidcAuth();
 
 const identityLabel = computed(() => {
@@ -30,9 +31,7 @@ const identityLabel = computed(() => {
 });
 
 async function leave() {
-  if (anonymousMode.enabled.value) {
-    anonymousMode.stop();
-    await navigateTo("/login");
+  if (deployment.capabilities.value?.mode !== "managed") {
     return;
   }
 
@@ -64,6 +63,7 @@ async function leave() {
             {{ identityLabel }}
           </span>
           <UButton
+            v-if="deployment.capabilities.value?.mode === 'managed'"
             variant="ghost"
             color="neutral"
             icon="i-lucide-log-out"
