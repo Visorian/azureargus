@@ -1,3 +1,5 @@
+import type { DnsObservation } from "#shared/types/dns";
+
 export interface FirewallLogRecord {
   id: string;
   timestamp: string;
@@ -12,11 +14,15 @@ export interface FirewallLogRecord {
   ruleCollectionGroup?: string;
   ruleCollection?: string;
   rule?: string;
+  resourceId?: string;
   message: string;
   raw: unknown;
   partitionId?: string;
   sequenceNumber?: string;
+  offset?: string;
+  eventRecordIndex?: number;
   enqueuedTimeUtc?: string;
+  dns?: DnsObservation;
   searchableText: string;
 }
 

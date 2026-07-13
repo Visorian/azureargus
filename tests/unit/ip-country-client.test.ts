@@ -251,4 +251,31 @@ describe("IP country client", () => {
     expect(signal?.aborted).toBe(true);
     client = undefined;
   });
+
+  it("aborts and drops pending lookup work while its pane is inactive", async () => {
+    let signal: AbortSignal | undefined;
+    const request = vi.fn((_body, nextSignal: AbortSignal) => {
+      signal = nextSignal;
+      return new Promise<IpCountryLookupResponse>((_resolve, reject) => {
+        nextSignal.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError")),
+        );
+      });
+    });
+    const client = createIpCountryLookupClient(request);
+    client.queue("8.8.8.8");
+    await vi.advanceTimersByTimeAsync(50);
+
+    client.setActive(false);
+    client.queue("1.1.1.1");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(signal?.aborted).toBe(true);
+    expect(request).toHaveBeenCalledOnce();
+    client.setActive(true);
+    client.queue("1.1.1.1");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(request).toHaveBeenCalledTimes(2);
+    client.dispose();
+  });
 });

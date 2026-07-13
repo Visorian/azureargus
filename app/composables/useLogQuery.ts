@@ -11,6 +11,7 @@ interface LogQueryRawSource {
 }
 
 interface UseLogQueryOptions {
+  active?: Readonly<Ref<boolean>>;
   datasetKey?: Readonly<Ref<number | string>>;
   filters?: FirewallLogFilters;
   rawSource?: LogQueryRawSource;
@@ -168,6 +169,7 @@ export function mergeFilteredLogCache(
 export function useLogQuery(
   logs: Ref<FirewallLogRecord[]>,
   {
+    active = computed(() => true),
     datasetKey = computed(() => "default"),
     filters: providedFilters,
     rawSource,
@@ -182,8 +184,11 @@ export function useLogQuery(
   const rawSourceVersion = rawSource?.version ?? computed(() => 0);
 
   watch(
-    [logs, filterKey, visibleLimit, datasetKey, rawSourceVersion],
-    ([publishedLogs, nextFilterKey, nextVisibleLimit, nextDatasetKey]) => {
+    [active, logs, filterKey, visibleLimit, datasetKey, rawSourceVersion],
+    ([isActive, publishedLogs, nextFilterKey, nextVisibleLimit, nextDatasetKey]) => {
+      if (!isActive) {
+        return;
+      }
       const nextLogs = hasActiveLogFilters(filters)
         ? (rawSource?.getRecords() ?? publishedLogs)
         : publishedLogs;

@@ -14,6 +14,7 @@ export interface ManagedEventHubEventEnvelope {
     enqueuedTimeUtc: string;
     partitionId: string;
     sequenceNumber: number;
+    offset?: string;
   }>;
 }
 

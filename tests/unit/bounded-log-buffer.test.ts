@@ -92,6 +92,25 @@ describe("bounded log buffer helpers", () => {
     expect(buffer.version.value).toBe(1);
   });
 
+  it("retains raw rows without publishing while UI is inactive and catches up on activation", () => {
+    const publishingEnabled = ref(false);
+    const buffer = useBoundedLogBuffer<string>("test", ref(5), { publishingEnabled });
+
+    buffer.pushMany(["old", "new"]);
+    buffer.flush();
+    vi.advanceTimersByTime(500);
+
+    expect(buffer.getRawItems()).toEqual(["new", "old"]);
+    expect(buffer.items.value).toEqual([]);
+    expect(buffer.version.value).toBe(0);
+
+    publishingEnabled.value = true;
+    vi.advanceTimersByTime(250);
+
+    expect(buffer.items.value).toEqual(["new", "old"]);
+    expect(buffer.version.value).toBe(1);
+  });
+
   it("cancels pending publication when its reactive scope is disposed", () => {
     const scope = effectScope();
     const buffer = scope.run(() => useBoundedLogBuffer<string>("test", ref(5)));

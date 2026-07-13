@@ -12,6 +12,7 @@ import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFire
 import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "~/types/firewall";
 import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
+import { computed, watch, type Ref } from "vue";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
 const LIVE_TAIL_THRESHOLD_MS = 30_000;
@@ -23,6 +24,7 @@ export interface EventHubLogEvent {
   body: unknown;
   enqueuedTimeUtc?: Date | string;
   sequenceNumber?: number | string;
+  offset?: number | string;
 }
 
 interface ReceiverPartitionContext {
@@ -48,6 +50,12 @@ export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => Eve
 export interface EventHubReceiverOptions {
   loadClientFactory?: () => Promise<CreateEventHubReceiverClient>;
   managedFetch?: typeof fetch;
+  uiPublishingEnabled?: Readonly<Ref<boolean>>;
+}
+
+export interface NormalizedLogBatchSink {
+  onClear?(): void;
+  onRecords(records: readonly FirewallLogRecord[]): void;
 }
 
 export type EventHubConnectionMode = "manual" | "managed";
@@ -113,7 +121,9 @@ function eventToFirewallLogs(
       enqueuedTimeUtc: event.enqueuedTimeUtc,
       partitionId,
       sequenceNumber: event.sequenceNumber,
+      offset: event.offset,
       index: baseIndex + index,
+      eventRecordIndex: index,
     }),
   );
 }
@@ -141,6 +151,7 @@ export function eventsToFirewallLogs(
 export function useEventHubReceiver({
   loadClientFactory = loadEventHubClientFactory,
   managedFetch = globalThis.fetch,
+  uiPublishingEnabled,
 }: EventHubReceiverOptions = {}) {
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
   const errors = useState<string[]>("event-hub-errors", () => []);
@@ -152,7 +163,9 @@ export function useEventHubReceiver({
   const caughtUp = useState("event-hub-caught-up", () => false);
   const visibleLimit = useState("event-hub-visible-limit", () => DEFAULT_BUFFER_SIZE);
   const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
+  const uiActive = uiPublishingEnabled ?? computed(() => true);
   const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize, {
+    publishingEnabled: uiActive,
     publishedSize: visibleLimit,
   });
   const categoryOptions = useState<string[]>("event-hub-category-options", () => []);
@@ -163,25 +176,59 @@ export function useEventHubReceiver({
   const protocolKeys = new Set(protocolOptions.value.map((value) => value.toLowerCase()));
   const logHistoryPersistence = useLogHistoryPersistence();
   const paused = computed(() => status.value === "paused");
+  const normalizedBatchSinks = new Set<NormalizedLogBatchSink>();
   let nextRecordIndex = receivedCount.value;
+
+  function updateUiFilterOptions(records: readonly FirewallLogRecord[], rebuild = false) {
+    if (rebuild) {
+      categoryOptions.value = [];
+      actionOptions.value = [];
+      protocolOptions.value = [];
+      categoryKeys.clear();
+      actionKeys.clear();
+      protocolKeys.clear();
+    }
+    const nextCategories = [...categoryOptions.value];
+    const nextActions = [...actionOptions.value];
+    const nextProtocols = [...protocolOptions.value];
+    let categoriesChanged = false;
+    let actionsChanged = false;
+    let protocolsChanged = false;
+    for (const record of records) {
+      categoriesChanged =
+        addFilterOption(nextCategories, categoryKeys, record.category) || categoriesChanged;
+      actionsChanged = addFilterOption(nextActions, actionKeys, record.action) || actionsChanged;
+      protocolsChanged =
+        addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged;
+    }
+    if (categoriesChanged) categoryOptions.value = sortFilterOptions(nextCategories);
+    if (actionsChanged) actionOptions.value = sortFilterOptions(nextActions);
+    if (protocolsChanged) protocolOptions.value = sortFilterOptions(nextProtocols);
+  }
+
+  watch(
+    uiActive,
+    (active) => {
+      if (active) updateUiFilterOptions(buffer.getRawItems(), true);
+    },
+    { flush: "sync" },
+  );
+
   const batcher = createLogBatcher<FirewallLogRecord>({
     onFlush: (records) => {
+      for (const sink of normalizedBatchSinks) {
+        try {
+          sink.onRecords(records);
+        } catch (error: unknown) {
+          errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+        }
+      }
       buffer.pushMany(records);
-      const nextCategories = [...categoryOptions.value];
-      const nextActions = [...actionOptions.value];
-      const nextProtocols = [...protocolOptions.value];
-      let categoriesChanged = false;
-      let actionsChanged = false;
-      let protocolsChanged = false;
+      if (uiActive.value) updateUiFilterOptions(records);
       let nextLatestSourceTimestamp = latestSourceTimestamp.value;
       let latestEnqueuedTimestamp: string | null = null;
 
       for (const record of records) {
-        categoriesChanged =
-          addFilterOption(nextCategories, categoryKeys, record.category) || categoriesChanged;
-        actionsChanged = addFilterOption(nextActions, actionKeys, record.action) || actionsChanged;
-        protocolsChanged =
-          addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged;
         if (
           (nextLatestSourceTimestamp === null || record.timestamp > nextLatestSourceTimestamp) &&
           Date.parse(record.timestamp) > 0
@@ -196,15 +243,6 @@ export function useEventHubReceiver({
         }
       }
 
-      if (categoriesChanged) {
-        categoryOptions.value = sortFilterOptions(nextCategories);
-      }
-      if (actionsChanged) {
-        actionOptions.value = sortFilterOptions(nextActions);
-      }
-      if (protocolsChanged) {
-        protocolOptions.value = sortFilterOptions(nextProtocols);
-      }
       latestSourceTimestamp.value = nextLatestSourceTimestamp;
       if (
         !caughtUp.value &&
@@ -488,6 +526,14 @@ export function useEventHubReceiver({
     nextRecordIndex = 0;
     latestSourceTimestamp.value = null;
     caughtUp.value = false;
+    for (const sink of normalizedBatchSinks) {
+      sink.onClear?.();
+    }
+  }
+
+  function addNormalizedBatchSink(sink: NormalizedLogBatchSink) {
+    normalizedBatchSinks.add(sink);
+    return () => normalizedBatchSinks.delete(sink);
   }
 
   return {
@@ -509,5 +555,6 @@ export function useEventHubReceiver({
     pause,
     resume,
     clear,
+    addNormalizedBatchSink,
   };
 }

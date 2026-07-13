@@ -1,11 +1,14 @@
 import type { FirewallLogRecord } from "~/types/firewall";
+import { parseDnsObservation } from "#shared/utils/dns";
 
 export interface FirewallLogInput {
   raw: unknown;
   enqueuedTimeUtc?: Date | string;
   partitionId?: string;
   sequenceNumber?: number | string;
+  offset?: number | string;
   index?: number;
+  eventRecordIndex?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -206,13 +209,20 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     (category === "AZFWNetworkRule" && actionReason === "Default Action" ? "Default" : undefined);
   const sequenceNumber =
     input.sequenceNumber === undefined ? undefined : String(input.sequenceNumber);
+  const offset = input.offset === undefined ? undefined : String(input.offset);
   const enqueuedTimeUtc =
     input.enqueuedTimeUtc === undefined ? undefined : normalizeTimestamp(input.enqueuedTimeUtc);
+  const eventRecordIndex = input.eventRecordIndex ?? input.index ?? 0;
+  const resourceId =
+    readString(rawRecord, ["resourceId", "ResourceId", "_ResourceId"]) ||
+    readString(properties, ["resourceId", "ResourceId", "_ResourceId"]);
   const id = [
     input.partitionId ?? "partition",
-    sequenceNumber ?? "sequence",
-    input.index ?? 0,
+    offset ?? sequenceNumber ?? `index-${input.index ?? 0}`,
+    eventRecordIndex,
     timestamp,
+    resourceId?.toLowerCase() ?? "resource",
+    category.toLowerCase(),
   ].join(":");
   const searchableText = [
     timestamp,
@@ -247,11 +257,29 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     ruleCollectionGroup,
     ruleCollection,
     rule,
+    resourceId,
     message,
     raw: input.raw,
     partitionId: input.partitionId,
     sequenceNumber,
+    offset,
+    eventRecordIndex,
     enqueuedTimeUtc,
+    dns: parseDnsObservation({
+      id,
+      timestamp,
+      category,
+      action,
+      protocol,
+      sourceIp,
+      sourcePort,
+      destinationIp,
+      destinationPort,
+      resourceId,
+      message,
+      raw: input.raw,
+      origin: "event-hub",
+    }),
     searchableText,
   };
 }

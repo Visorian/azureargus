@@ -13,6 +13,7 @@ function createDraftRange(): LogAnalysisDateRange {
 function createProps(draftRange = createDraftRange()) {
   return {
     draftRange,
+    lens: "all-logs" as const,
     appliedRangeLabel: "08:00–09:00",
     canRun: true,
     queryStatus: "idle" as const,
@@ -140,5 +141,21 @@ describe("LogAnalyticsSettingsPanel", () => {
     expect(wrapper.text()).not.toContain("Workspace ID");
     expect(wrapper.text()).not.toContain("Connect to Azure");
     expect(wrapper.text()).not.toContain("Disconnect");
+  });
+
+  it("shows DNS readiness requirements only for DNS troubleshooting", async () => {
+    const wrapper = await mountSuspended(LogAnalyticsSettingsPanel, {
+      props: {
+        ...createProps(),
+        lens: "dns-troubleshooting",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Query DNS diagnostics");
+    expect(wrapper.text()).toContain("EnableDnstapLogging");
+    expect(wrapper.text()).toContain("AZFWDnsAdditional");
+
+    await wrapper.setProps({ lens: "all-logs" });
+    expect(wrapper.text()).not.toContain("EnableDnstapLogging");
   });
 });

@@ -14,9 +14,21 @@ import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
 } from "#shared/types/logAnalytics";
+import type {
+  DnsDetailQueryRequest,
+  DnsDetailQueryResponse,
+  DnsFilters,
+  DnsListQueryRequest,
+  DnsListQueryResponse,
+  DnsSort,
+} from "#shared/types/dns";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
 import { formatIcmpProtocol } from "~/utils/icmpProtocol";
-import { LOG_ANALYSIS_CATEGORIES, type LogAnalysisDateRange } from "~/utils/logAnalysis";
+import {
+  createDefaultLogAnalysisDateRange,
+  LOG_ANALYSIS_CATEGORIES,
+  type LogAnalysisDateRange,
+} from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
 
 definePageMeta({
@@ -42,6 +54,7 @@ interface DetailSection {
 }
 
 type QuickFilterKey = "category" | "action" | "protocol" | "source" | "destination";
+type LogsLens = "all-logs" | "dns-troubleshooting";
 
 const logTableColumns: LogTableColumn[] = [
   { key: "timestamp", label: "Date (UTC)" },
@@ -73,7 +86,9 @@ const logAnalyticsSourceAvailable = computed(() =>
     : capabilities.value?.predefinedLogAnalyticsAvailable === true,
 );
 const versionNumber = appConfig.versionNumber as string;
-const receiver = useEventHubReceiver();
+const activeLens = ref<LogsLens>("all-logs");
+const allLogsLensActive = computed(() => activeLens.value === "all-logs");
+const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive });
 const connectionForm = reactive<EventHubConnectionForm>(
   createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
 );
@@ -91,6 +106,7 @@ const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth();
 const temporaryWorkspaceId = ref("");
 const logHistory = useLogHistoryPersistence();
 const ipCountryLookup = useIpCountryLookup();
+watch(allLogsLensActive, (active) => ipCountryLookup.setActive(active), { immediate: true });
 const clearingLogHistory = ref(false);
 const logHistoryEnabled = computed(() => logHistory.enabled.value);
 const logHistoryError = computed(() => logHistory.lastError.value);
@@ -100,6 +116,13 @@ const analysisMode = ref<AnalysisMode>(
     : "real-time-analysis",
 );
 const logAnalysisActive = computed(() => analysisMode.value === "log-analysis");
+const allLogsRealTimeActive = computed(
+  () => !logAnalysisActive.value && activeLens.value === "all-logs",
+);
+const allLogsLogAnalysisActive = computed(
+  () => logAnalysisActive.value && activeLens.value === "all-logs",
+);
+const dnsLensActive = computed(() => activeLens.value === "dns-troubleshooting");
 const canUseLogAnalysis = logAnalyticsSourceAvailable;
 const logAnalyticsRequirement = computed(() => {
   if (logAnalyticsSourceAvailable.value) {
@@ -133,6 +156,7 @@ function requestTemporaryLogAnalytics(
 }
 
 const realTimeQuery = useLogQuery(receiver.logs, {
+  active: allLogsRealTimeActive,
   rawSource: {
     getRecords: receiver.getRawLogs,
     version: receiver.snapshotVersion,
@@ -142,8 +166,10 @@ const realTimeQuery = useLogQuery(receiver.logs, {
 const realTimeSorting = useLogSorting(realTimeQuery.filteredLogs);
 const logFilters = reactive(createDefaultLogFilters());
 const logSort = reactive(createDefaultLogSort());
+const logDraftRange = reactive(createDefaultLogAnalysisDateRange());
 const logQuery = useLogAnalyticsQuery({
-  active: logAnalysisActive,
+  active: allLogsLogAnalysisActive,
+  draftRange: logDraftRange,
   filters: logFilters,
   onBeforeReplace: closeDetail,
   onError: (message) => {
@@ -169,7 +195,6 @@ const logQuery = useLogAnalyticsQuery({
 });
 const {
   canApplyFilters: logCanApplyFilters,
-  draftRange: logDraftRange,
   hasRun: logHasRun,
   appliedRange: logAppliedRange,
   rangeDirty: logRangeDirty,
@@ -179,13 +204,65 @@ const {
   truncated: logResultsTruncated,
 } = logQuery;
 const logResultQuery = useLogQuery(logQuery.records, {
+  active: allLogsLogAnalysisActive,
   datasetKey: logQuery.datasetVersion,
   filters: logFilters,
   visibleLimit: logQuery.visibleLimit,
 });
 const logResultSorting = useLogSorting(logResultQuery.filteredLogs, false, logSort);
+async function requestDnsList(body: DnsListQueryRequest, signal: AbortSignal) {
+  if (managedMode.value) {
+    return requestFetch<DnsListQueryResponse>("/api/log-analytics/dns/list", {
+      body,
+      method: "POST",
+      signal,
+    });
+  }
+  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken();
+  return requestFetch<DnsListQueryResponse>("/api/log-analytics/delegated-dns/list", {
+    body: { ...body, workspaceId: temporaryWorkspaceId.value.trim() },
+    headers: { authorization: `Bearer ${accessToken}` },
+    method: "POST",
+    signal,
+  });
+}
+
+async function requestDnsDetail(body: DnsDetailQueryRequest, signal: AbortSignal) {
+  if (managedMode.value) {
+    return requestFetch<DnsDetailQueryResponse>("/api/log-analytics/dns/detail", {
+      body,
+      method: "POST",
+      signal,
+    });
+  }
+  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken();
+  return requestFetch<DnsDetailQueryResponse>("/api/log-analytics/delegated-dns/detail", {
+    body: { ...body, workspaceId: temporaryWorkspaceId.value.trim() },
+    headers: { authorization: `Bearer ${accessToken}` },
+    method: "POST",
+    signal,
+  });
+}
+
+const dns = useDnsTroubleshooting({
+  active: dnsLensActive,
+  draftRange: logDraftRange,
+  mode: analysisMode,
+  receiver,
+  requestDetail: requestDnsDetail,
+  requestList: requestDnsList,
+});
+const dnsDetailOpen = computed({
+  get: () => dns.selectedEntry.value !== null,
+  set: (open: boolean) => {
+    if (!open) dns.closeDetail();
+  },
+});
 const modeState = useAnalysisMode({
-  abortLogAnalysis: logQuery.abort,
+  abortLogAnalysis: () => {
+    logQuery.abort();
+    dns.abort();
+  },
   canUseLogAnalysis,
   canUseRealTime: eventHubSourceAvailable,
   closeDetail,
@@ -238,7 +315,11 @@ const protocols = computed(() =>
   logAnalysisActive.value ? logQuery.protocolOptions.value : realTimeProtocols.value,
 );
 const activeStatus = computed(() =>
-  logAnalysisActive.value ? logQuery.status.value : receiver.status.value,
+  activeLens.value === "dns-troubleshooting" && logAnalysisActive.value
+    ? dns.status.value
+    : logAnalysisActive.value
+      ? logQuery.status.value
+      : receiver.status.value,
 );
 const showRealTimeLag = computed(
   () =>
@@ -264,6 +345,27 @@ const logAppliedRangeLabel = computed(() => {
 
   return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)}`;
 });
+const dnsAppliedRangeLabel = computed(() => {
+  if (dns.appliedRange.value === null) return "";
+  return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)}`;
+});
+const activeAppliedRangeLabel = computed(() =>
+  activeLens.value === "dns-troubleshooting"
+    ? dnsAppliedRangeLabel.value
+    : logAppliedRangeLabel.value,
+);
+const activeQueryStatus = computed(() =>
+  activeLens.value === "dns-troubleshooting" ? dns.status.value : logQueryStatus.value,
+);
+const activeRangeDirty = computed(() =>
+  activeLens.value === "dns-troubleshooting" ? dns.rangeDirty.value : logRangeDirty.value,
+);
+const activeRangeError = computed(() =>
+  activeLens.value === "dns-troubleshooting" ? dns.rangeError.value : logRangeError.value,
+);
+const activeResultsTruncated = computed(() =>
+  activeLens.value === "dns-troubleshooting" ? dns.truncated.value : logResultsTruncated.value,
+);
 const parsedDetailSections = computed<DetailSection[]>(() => {
   const log = selectedLog.value;
   if (log === null) {
@@ -410,6 +512,14 @@ function updateLogDraftRange(value: LogAnalysisDateRange) {
   Object.assign(logDraftRange, value);
 }
 
+function updateDnsFilters(value: DnsFilters) {
+  Object.assign(dns.filters.value, value);
+}
+
+function updateDnsSort(value: DnsSort) {
+  Object.assign(dns.sort.value, value);
+}
+
 async function updateLogRetention(enabled: boolean) {
   if (enabled) {
     logHistory.enable();
@@ -436,6 +546,13 @@ async function updateAnalysisMode(mode: AnalysisMode, event: MouseEvent) {
 function closeDetail() {
   detailOpen.value = false;
   selectedLog.value = null;
+  dns.closeDetail();
+}
+
+function setLens(lens: LogsLens) {
+  if (activeLens.value === lens) return;
+  closeDetail();
+  activeLens.value = lens;
 }
 
 function resetActiveFilters() {
@@ -490,6 +607,10 @@ function quickFilterLabel(key: QuickFilterKey, value: string | undefined) {
 }
 
 function clearActiveResults() {
+  if (activeLens.value === "dns-troubleshooting") {
+    dns.clearActiveDataset();
+    return;
+  }
   if (logAnalysisActive.value) {
     logQuery.clear();
     return;
@@ -525,9 +646,41 @@ async function runLogAnalysis() {
   await logQuery.run();
 }
 
+async function runDnsAnalysis() {
+  if (!canRunLogAnalytics.value) {
+    toast.add({
+      title: temporaryLogAnalyticsAuth.connected.value
+        ? "Workspace ID is invalid."
+        : "Connect to Azure before running DNS query.",
+      color: "error",
+      icon: "i-lucide-circle-alert",
+    });
+    return;
+  }
+  if (temporaryLogAnalyticsMode.value) {
+    try {
+      await temporaryLogAnalyticsAuth.getAccessToken(true);
+    } catch {
+      toast.add({
+        title: temporaryLogAnalyticsAuth.lastError.value ?? "Azure authentication failed.",
+        color: "error",
+        icon: "i-lucide-circle-alert",
+      });
+      return;
+    }
+  }
+  await dns.run();
+}
+
+function runActiveLogAnalysis() {
+  return activeLens.value === "dns-troubleshooting" ? runDnsAnalysis() : runLogAnalysis();
+}
+
 async function disconnectTemporaryLogAnalytics() {
   logQuery.abort();
   logQuery.clear();
+  dns.abort();
+  dns.clearActiveDataset();
   temporaryWorkspaceId.value = "";
   await temporaryLogAnalyticsAuth.disconnect();
 }
@@ -631,7 +784,7 @@ function statusColor(status: string) {
       class="shrink-0 border-b border-brand-gray-300 bg-brand-gray-50 px-4 py-3 dark:border-brand-gray-700 dark:bg-brand-gray-900"
       aria-labelledby="data-source-label"
     >
-      <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+      <div class="flex min-w-0 flex-wrap items-center gap-3">
         <div class="flex min-w-0 flex-wrap items-center gap-3">
           <span
             id="data-source-label"
@@ -688,27 +841,33 @@ function statusColor(status: string) {
             {{ logAnalyticsRequirement }}
           </p>
         </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <UBadge
-            :color="statusColor(activeStatus)"
-            variant="subtle"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
+        <div class="ml-auto flex shrink-0 items-center gap-3">
+          <span
+            id="logs-lens-label"
+            class="text-xs font-semibold tracking-wide text-brand-gray-600 uppercase dark:text-brand-gray-300"
           >
-            {{ activeStatus }}
-          </UBadge>
-          <UBadge v-if="showRealTimeLag" icon="i-lucide-clock-3" color="neutral" variant="outline">
-            <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
-            <NuxtTime
-              :datetime="receiver.latestSourceTimestamp.value!"
-              relative
-              relative-style="narrow"
-              numeric="always"
-              :title="true"
-            />
-          </UBadge>
+            View
+          </span>
+          <div role="group" aria-labelledby="logs-lens-label" class="shrink-0">
+            <UFieldGroup size="sm">
+              <UButton
+                :variant="activeLens === 'all-logs' ? 'solid' : 'outline'"
+                :color="activeLens === 'all-logs' ? 'primary' : 'neutral'"
+                :aria-pressed="activeLens === 'all-logs'"
+                @click="setLens('all-logs')"
+              >
+                All logs
+              </UButton>
+              <UButton
+                :variant="activeLens === 'dns-troubleshooting' ? 'solid' : 'outline'"
+                :color="activeLens === 'dns-troubleshooting' ? 'primary' : 'neutral'"
+                :aria-pressed="activeLens === 'dns-troubleshooting'"
+                @click="setLens('dns-troubleshooting')"
+              >
+                DNS troubleshooting
+              </UButton>
+            </UFieldGroup>
+          </div>
         </div>
       </div>
     </section>
@@ -769,19 +928,20 @@ function statusColor(status: string) {
             v-else
             v-model:workspace-id="temporaryWorkspaceId"
             :draft-range="logDraftRange"
-            :applied-range-label="logAppliedRangeLabel"
+            :lens="activeLens"
+            :applied-range-label="activeAppliedRangeLabel"
             :can-run="canRunLogAnalytics"
-            :query-status="logQueryStatus"
-            :range-dirty="logRangeDirty"
-            :range-error="logRangeError"
-            :results-truncated="logResultsTruncated"
+            :query-status="activeQueryStatus"
+            :range-dirty="activeRangeDirty"
+            :range-error="activeRangeError"
+            :results-truncated="activeResultsTruncated"
             :temporary="temporaryLogAnalyticsMode"
             :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
             :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
             @update:draft-range="updateLogDraftRange"
             @connect-azure="temporaryLogAnalyticsAuth.connect"
             @disconnect-azure="disconnectTemporaryLogAnalytics"
-            @run="runLogAnalysis"
+            @run="runActiveLogAnalysis"
           />
         </section>
 
@@ -826,18 +986,47 @@ function statusColor(status: string) {
       </aside>
 
       <section
+        v-if="activeLens === 'all-logs'"
         class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950 lg:order-1"
       >
         <div
-          class="shrink-0 border-b border-brand-gray-300 bg-white p-4 dark:border-brand-gray-700 dark:bg-brand-gray-950"
+          class="shrink-0 border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950"
         >
-          <div class="flex flex-wrap items-center justify-between gap-3">
+          <div
+            role="group"
+            aria-label="All logs status and actions"
+            class="flex flex-wrap items-center justify-between gap-3 border-b border-brand-gray-300 px-4 py-3 dark:border-brand-gray-700"
+          >
             <div class="flex flex-wrap items-center gap-3">
+              <UBadge
+                :color="statusColor(activeStatus)"
+                variant="subtle"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {{ activeStatus }}
+              </UBadge>
+              <UBadge
+                v-if="showRealTimeLag"
+                icon="i-lucide-clock-3"
+                color="neutral"
+                variant="outline"
+              >
+                <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
+                <NuxtTime
+                  :datetime="receiver.latestSourceTimestamp.value!"
+                  relative
+                  relative-style="narrow"
+                  numeric="always"
+                  :title="true"
+                />
+              </UBadge>
               <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
                 {{ countLabel }}
               </span>
             </div>
-            <div class="flex gap-2">
+            <div class="ml-auto flex shrink-0 gap-2">
               <UButton
                 v-if="!logAnalysisActive && receiver.status.value === 'connected'"
                 variant="outline"
@@ -864,7 +1053,7 @@ function statusColor(status: string) {
             </div>
           </div>
 
-          <div class="mt-3 flex flex-wrap gap-2">
+          <div class="flex flex-wrap gap-2 px-4 py-3">
             <UInput
               v-model="activeFilters.search"
               icon="i-lucide-search"
@@ -1137,9 +1326,93 @@ function statusColor(status: string) {
           </div>
         </div>
       </section>
+      <section
+        v-else
+        class="flex min-h-0 flex-col overflow-hidden bg-white dark:bg-brand-gray-950 lg:order-1"
+      >
+        <div
+          role="group"
+          aria-label="DNS troubleshooting status and actions"
+          class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-brand-gray-300 px-4 py-3 dark:border-brand-gray-700"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <UBadge
+              :color="statusColor(activeStatus)"
+              variant="subtle"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {{ activeStatus }}
+            </UBadge>
+            <UBadge
+              v-if="showRealTimeLag"
+              icon="i-lucide-clock-3"
+              color="neutral"
+              variant="outline"
+            >
+              <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
+              <NuxtTime
+                :datetime="receiver.latestSourceTimestamp.value!"
+                relative
+                relative-style="narrow"
+                numeric="always"
+                :title="true"
+              />
+            </UBadge>
+          </div>
+          <div class="ml-auto flex shrink-0 gap-2">
+            <UButton
+              v-if="!logAnalysisActive && receiver.status.value === 'connected'"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-pause"
+              label="Pause"
+              @click="receiver.pause"
+            />
+            <UButton
+              v-if="!logAnalysisActive && receiver.status.value === 'paused'"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-play"
+              label="Resume"
+              @click="receiver.resume"
+            />
+            <UButton
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-trash-2"
+              label="Clear DNS results"
+              @click="clearActiveResults"
+            />
+          </div>
+        </div>
+        <LogsDnsTroubleshootingView
+          :filters="dns.filters.value"
+          :sort="dns.sort.value"
+          :entries="dns.entries.value"
+          :transports="dns.transports.value"
+          :sources="dns.sources.value"
+          :status="dns.status.value"
+          :error="dns.lastError.value"
+          :entries-truncated="dns.entriesTruncated.value"
+          :transports-truncated="dns.transportsTruncated.value"
+          :log-analysis="logAnalysisActive"
+          :can-apply-filters="dns.canApplyFilters.value"
+          :filter-options="dns.filterOptions.value"
+          :selected-entry-id="dns.selectedEntry.value?.id ?? null"
+          @update:filters="updateDnsFilters"
+          @update:sort="updateDnsSort"
+          @apply="dns.applyFilters"
+          @reset="dns.resetFilters"
+          @select="dns.selectEntry"
+          @select-transport="dns.selectTransport"
+        />
+      </section>
     </div>
 
     <UModal
+      v-if="activeLens === 'all-logs'"
       v-model:open="detailOpen"
       title="Log detail"
       :ui="{ content: 'select-none', body: 'select-none' }"
@@ -1225,5 +1498,13 @@ function statusColor(status: string) {
         </div>
       </template>
     </UModal>
+    <LogsDnsDetailModal
+      v-model:open="dnsDetailOpen"
+      :entry="dns.selectedEntry.value"
+      :detail="dns.detail.value"
+      :error="dns.detailError.value"
+      :loading="dns.detailStatus.value === 'loading'"
+      :sources="dns.sources.value"
+    />
   </div>
 </template>

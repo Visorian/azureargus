@@ -80,7 +80,42 @@ describe("firewall log parser", () => {
     expect(log.protocol).toBe("UDP");
     expect(log.sourceIp).toBe("192.168.179.30");
     expect(log.sourcePort).toBe("52100");
+    expect(log.resourceId).toContain("/AZUREFIREWALLS/");
+    expect(log.dns).toMatchObject({
+      queryId: "46151",
+      queryName: "eu-v20.events.endpoint.security.microsoft.com.",
+      responseSizeBytes: 390,
+    });
     expect(log.searchableText).toContain("dns query");
+  });
+
+  it("uses EventData-local record index in stable identity", () => {
+    const first = normalizeFirewallLogRecord({
+      raw: { category: "AZFWNetworkRule" },
+      partitionId: "2",
+      sequenceNumber: 99,
+      offset: "1200",
+      index: 700,
+      eventRecordIndex: 3,
+    });
+
+    expect(first.id).toContain("2:1200:3:");
+    expect(first.eventRecordIndex).toBe(3);
+    expect(first.offset).toBe("1200");
+  });
+
+  it("uses global ingestion index when EventData position metadata is unavailable", () => {
+    const raw = {
+      time: "2026-07-12T16:36:42.000Z",
+      category: "AZFWNetworkRule",
+      resourceId:
+        "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
+    };
+    const first = normalizeFirewallLogRecord({ raw, partitionId: "0", index: 10 });
+    const second = normalizeFirewallLogRecord({ raw, partitionId: "0", index: 11 });
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.id).toContain("0:index-10:10:");
   });
 
   it("labels structured Azure Firewall DNS query records as DNS queries", () => {
@@ -116,6 +151,7 @@ describe("firewall log parser", () => {
     expect(log.protocol).toBe("udp");
     expect(log.sourceIp).toBe("192.168.179.30");
     expect(log.sourcePort).toBe("54487");
+    expect(log.dns).toBeUndefined();
     expect(log.searchableText).toContain("dns query");
   });
 

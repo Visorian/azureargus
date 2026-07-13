@@ -11,7 +11,8 @@ import {
 type ManagedEventHubReceivedEvent = Pick<
   ReceivedEventData,
   "body" | "enqueuedTimeUtc" | "sequenceNumber"
->;
+> &
+  Partial<Pick<ReceivedEventData, "offset">>;
 
 export interface ManagedEventHubClient {
   close(): Promise<void>;
@@ -258,6 +259,7 @@ export function createManagedEventHubStream({
                     enqueuedTimeUtc: event.enqueuedTimeUtc.toISOString(),
                     partitionId: context.partitionId,
                     sequenceNumber: event.sequenceNumber,
+                    offset: event.offset === undefined ? undefined : String(event.offset),
                   })),
                 });
               },

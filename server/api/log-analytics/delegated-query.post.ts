@@ -1,4 +1,4 @@
-import { createError, getHeader, readValidatedBody, type H3Event } from "h3";
+import { createError, readValidatedBody } from "h3";
 
 import type { DelegatedLogAnalyticsQueryRequest } from "../../../shared/types/logAnalytics";
 import { parseDeploymentCapabilities } from "../../utils/deploymentCapabilities";
@@ -8,22 +8,9 @@ import {
 } from "../../utils/logAnalyticsQuery";
 import {
   createIncomingRequestSignal,
+  readDelegatedLogAnalyticsBearerToken,
   throwLogAnalyticsUpstreamError,
 } from "../../utils/logAnalyticsRoute";
-
-function readBearerToken(event: H3Event) {
-  const authorization = getHeader(event, "authorization");
-  const match = authorization?.match(/^Bearer ([^\s]+)$/);
-  const token = match?.[1];
-  if (!token) {
-    throw createError({
-      statusCode: 401,
-      message: "Delegated Log Analytics access token is required",
-    });
-  }
-
-  return token;
-}
 
 export default defineEventHandler(async (event) => {
   const runtimeConfig = useRuntimeConfig(event);
@@ -35,7 +22,7 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const accessToken = readBearerToken(event);
+  const accessToken = readDelegatedLogAnalyticsBearerToken(event);
   const request = await readValidatedBody<DelegatedLogAnalyticsQueryRequest>(event, (body) =>
     validateDelegatedLogAnalyticsQueryRequest(body) ? body : false,
   );

@@ -25,6 +25,7 @@ export interface IpCountryLookupClient {
   dispose(): void;
   getCountryCode(ip: string | undefined): string | null | undefined;
   queue(ip: string | undefined): void;
+  setActive(active: boolean): void;
 }
 
 function getStatusCode(error: unknown) {
@@ -74,6 +75,7 @@ export function createIpCountryLookupClient(
   let cooldownUntil = 0;
   let disabled = false;
   let disposed = false;
+  let lookupActive = true;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   function queueLatest(ip: string) {
@@ -116,7 +118,14 @@ export function createIpCountryLookupClient(
   }
 
   function schedule(delayMs = batchDelayMs) {
-    if (disposed || disabled || timer !== null || activeController !== null || queued.size === 0) {
+    if (
+      !lookupActive ||
+      disposed ||
+      disabled ||
+      timer !== null ||
+      activeController !== null ||
+      queued.size === 0
+    ) {
       return;
     }
 
@@ -130,7 +139,7 @@ export function createIpCountryLookupClient(
   }
 
   async function flush() {
-    if (disposed || disabled || activeController !== null || queued.size === 0) {
+    if (!lookupActive || disposed || disabled || activeController !== null || queued.size === 0) {
       return;
     }
 
@@ -198,6 +207,7 @@ export function createIpCountryLookupClient(
     if (
       !normalizedIp ||
       normalizedIp.length > MAX_IP_COUNTRY_VALUE_LENGTH ||
+      !lookupActive ||
       disposed ||
       disabled
     ) {
@@ -229,7 +239,16 @@ export function createIpCountryLookupClient(
     inFlight.clear();
   }
 
-  return { dispose, getCountryCode, queue };
+  function setActive(active: boolean) {
+    lookupActive = active;
+    if (active) return;
+    clearTimer();
+    activeController?.abort();
+    activeController = null;
+    queued.clear();
+  }
+
+  return { dispose, getCountryCode, queue, setActive };
 }
 
 export function useIpCountryLookup() {

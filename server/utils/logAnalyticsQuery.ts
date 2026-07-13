@@ -431,7 +431,7 @@ export function mapLogAnalyticsResponse(
   };
 }
 
-interface ExecuteLogAnalyticsQueryOptions {
+export interface ExecuteLogAnalyticsQueryOptions {
   fetchImplementation?: typeof fetch;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -442,9 +442,10 @@ export interface LogAnalyticsQueryTarget {
   workspaceId: string;
 }
 
-export async function executeLogAnalyticsQuery(
+export async function executeLogAnalyticsRawQuery(
   target: LogAnalyticsQueryTarget,
-  request: LogAnalyticsQueryRequest,
+  query: string,
+  timespan: string,
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
 ) {
@@ -455,16 +456,13 @@ export async function executeLogAnalyticsQuery(
   if (options.signal?.aborted) {
     controller.abort();
   } else {
-    options.signal?.addEventListener("abort", handleIncomingAbort, {
-      once: true,
-    });
+    options.signal?.addEventListener("abort", handleIncomingAbort, { once: true });
   }
 
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort();
   }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const { query, limit } = buildLogAnalyticsQuery(request);
 
   try {
     let response: Response;
@@ -477,10 +475,7 @@ export async function executeLogAnalyticsQuery(
             authorization: `Bearer ${accessToken}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({
-            query,
-            timespan: `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`,
-          }),
+          body: JSON.stringify({ query, timespan }),
           signal: controller.signal,
         },
       );
@@ -492,21 +487,35 @@ export async function executeLogAnalyticsQuery(
       throw errorForResponse(response);
     }
 
-    let payload: unknown;
     try {
-      payload = await response.json();
+      return (await response.json()) as unknown;
     } catch {
       throw new LogAnalyticsQueryError("upstream");
     }
-
-    return mapLogAnalyticsResponse(
-      payload,
-      request.sort,
-      options.queryId ?? crypto.randomUUID(),
-      limit,
-    );
   } finally {
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", handleIncomingAbort);
   }
+}
+
+export async function executeLogAnalyticsQuery(
+  target: LogAnalyticsQueryTarget,
+  request: LogAnalyticsQueryRequest,
+  accessToken: string,
+  options: ExecuteLogAnalyticsQueryOptions = {},
+) {
+  const { query, limit } = buildLogAnalyticsQuery(request);
+  const payload = await executeLogAnalyticsRawQuery(
+    target,
+    query,
+    `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`,
+    accessToken,
+    options,
+  );
+  return mapLogAnalyticsResponse(
+    payload,
+    request.sort,
+    options.queryId ?? crypto.randomUUID(),
+    limit,
+  );
 }

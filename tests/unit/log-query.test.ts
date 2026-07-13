@@ -189,4 +189,27 @@ describe("log query", () => {
     expect(getRecords).toHaveBeenCalledOnce();
     expect(filteredLogs.value.map((log) => log.id)).toEqual(["raw-tcp"]);
   });
+
+  it("does not scan hidden datasets and catches up when reactivated", async () => {
+    const active = ref(false);
+    const logs = ref([createLog({ id: "first", protocol: "TCP", searchableText: "tcp" })]);
+    const getRecords = vi.fn(() => logs.value);
+    const { filteredLogs, filters } = useLogQuery(logs, {
+      active,
+      rawSource: { getRecords, version: ref(0) },
+      visibleLimit: ref(10),
+    });
+    filters.protocol = "tcp";
+    await nextTick();
+
+    expect(getRecords).not.toHaveBeenCalled();
+    expect(filteredLogs.value).toEqual([]);
+
+    logs.value = [createLog({ id: "latest", protocol: "TCP", searchableText: "tcp" })];
+    active.value = true;
+    await nextTick();
+
+    expect(getRecords).toHaveBeenCalledOnce();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["latest"]);
+  });
 });

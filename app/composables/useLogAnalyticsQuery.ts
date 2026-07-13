@@ -26,6 +26,7 @@ interface UseLogAnalyticsQueryOptions {
   onError?: (message: string) => void;
   request?: QueryRequest;
   sort: FirewallLogSortState;
+  draftRange?: LogAnalysisDateRange;
 }
 
 function getErrorMessage(error: unknown) {
@@ -79,7 +80,8 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
   const limit = ref<number | null>(null);
   const hasRun = ref(false);
   const datasetVersion = ref(0);
-  const draftRange = reactive(createDefaultLogAnalysisDateRange());
+  const ownsDraftRange = options.draftRange === undefined;
+  const draftRange = options.draftRange ?? reactive(createDefaultLogAnalysisDateRange());
   const appliedRange = ref<{ from: string; to: string } | null>(null);
   const rangeError = ref<string | null>(null);
   const refinementPending = ref(false);
@@ -107,7 +109,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let requestGeneration = 0;
   let criteriaChangedDuringInitialLoad = false;
-  let rangeInitialized = options.active.value;
+  let rangeInitialized = options.active.value || !ownsDraftRange;
 
   function clearDebounce() {
     if (debounceTimer !== null) {
@@ -300,7 +302,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
   );
 
   watch(options.active, (active) => {
-    if (active && !rangeInitialized) {
+    if (active && ownsDraftRange && !rangeInitialized) {
       Object.assign(draftRange, createDefaultLogAnalysisDateRange());
       rangeInitialized = true;
     } else if (!active) {

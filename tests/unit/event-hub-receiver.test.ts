@@ -163,9 +163,9 @@ describe("Event Hub receiver helpers", () => {
     expect(result.nextIndex).toBe(10);
     expect(new Set(result.records.map((log) => log.id)).size).toBe(3);
     expect(result.records.map((log) => log.id)).toEqual([
-      "0:10:7:2026-07-09T12:00:00.000Z",
-      "0:10:8:2026-07-09T12:00:01.000Z",
-      "0:11:9:2026-07-09T12:00:02.000Z",
+      "0:10:0:2026-07-09T12:00:00.000Z:resource:unknown",
+      "0:10:1:2026-07-09T12:00:01.000Z:resource:unknown",
+      "0:11:0:2026-07-09T12:00:02.000Z:resource:unknown",
     ]);
   });
 
@@ -312,6 +312,103 @@ describe("Event Hub receiver helpers", () => {
     expect(receiver.protocolOptions.value).toEqual([]);
     expect(receiver.latestSourceTimestamp.value).toBeNull();
     expect(receiver.caughtUp.value).toBe(false);
+    await receiver.disconnect();
+  });
+
+  it("publishes normalized manual batches to sinks and clears them", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    const onClear = vi.fn<() => void>();
+    receiver.addNormalizedBatchSink({ onClear, onRecords });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents(
+      [
+        {
+          body: {
+            category: "AzureFirewallDnsProxy",
+            properties: {
+              msg: "DNS Request: 192.168.179.30:52338 - 22213 AAAA IN example.com. udp 57 false 1224 NOERROR qr,rd,ra 300 0.011877665s",
+            },
+            time: "2026-07-12T12:00:00.000Z",
+          },
+          sequenceNumber: 42,
+        },
+      ],
+      { partitionId: "0" },
+    );
+
+    expect(onRecords).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(onRecords).toHaveBeenCalledOnce();
+    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        category: "AzureFirewallDnsProxy",
+        dns: expect.objectContaining({ queryId: "22213", queryName: "example.com." }),
+        partitionId: "0",
+        sequenceNumber: "42",
+      }),
+    ]);
+
+    receiver.clear();
+    expect(onClear).toHaveBeenCalledOnce();
+    await receiver.disconnect();
+  });
+
+  it("defers all-log filter option work while its UI is inactive and rebuilds on return", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    const uiPublishingEnabled = shallowRef(false);
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+      uiPublishingEnabled,
+    });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents(
+      [
+        {
+          body: {
+            category: "AZFWNetworkRule",
+            properties: { Action: "Deny", Protocol: "UDP" },
+          },
+          sequenceNumber: 1,
+        },
+      ],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(receiver.categoryOptions.value).toEqual([]);
+    expect(receiver.actionOptions.value).toEqual([]);
+    expect(receiver.protocolOptions.value).toEqual([]);
+
+    uiPublishingEnabled.value = true;
+    expect(receiver.categoryOptions.value).toEqual(["AZFWNetworkRule"]);
+    expect(receiver.actionOptions.value).toEqual(["Deny"]);
+    expect(receiver.protocolOptions.value).toEqual(["UDP"]);
     await receiver.disconnect();
   });
 

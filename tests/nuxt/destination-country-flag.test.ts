@@ -10,6 +10,7 @@ function createLookup() {
     dispose: vi.fn(),
     getCountryCode: (ip) => (ip ? cache.get(ip) : undefined),
     queue: vi.fn(),
+    setActive: vi.fn(),
   };
   return { cache, lookup };
 }

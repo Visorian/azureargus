@@ -3,9 +3,10 @@ import type { LogAnalyticsQueryStatus } from "~/composables/useLogAnalyticsQuery
 import type { LogAnalysisDateRange } from "~/utils/logAnalysis";
 
 defineProps<{
+  lens: "all-logs" | "dns-troubleshooting";
   appliedRangeLabel: string;
   canRun: boolean;
-  queryStatus: LogAnalyticsQueryStatus;
+  queryStatus: LogAnalyticsQueryStatus | "idle" | "loading" | "success" | "error";
   rangeDirty: boolean;
   rangeError: string | null;
   resultsTruncated: boolean;
@@ -41,7 +42,11 @@ const draftTo = computed({
     <div>
       <h2 class="text-sm font-semibold">Log Analytics settings</h2>
       <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-        Query configured Azure Firewall workspace.
+        {{
+          lens === "dns-troubleshooting"
+            ? "Query DNS diagnostics in configured Azure Firewall workspace."
+            : "Query configured Azure Firewall workspace."
+        }}
       </p>
     </div>
 
@@ -97,6 +102,14 @@ const draftTo = computed({
         :loading="queryStatus === 'loading'"
       />
     </UForm>
+
+    <div
+      v-if="lens === 'dns-troubleshooting'"
+      class="rounded-md border border-brand-gray-200 p-3 text-xs text-brand-gray-600 dark:border-brand-gray-700 dark:text-brand-gray-300"
+    >
+      Full flow requires DNS proxy, <code>EnableDnstapLogging</code>,
+      <code>AZFWDnsAdditional</code> routed to Log Analytics, Analytics table plan, and query role.
+    </div>
 
     <p v-if="rangeError" role="alert" class="text-xs text-red-600 dark:text-red-400">
       {{ rangeError }}

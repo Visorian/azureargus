@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import type { PersistedFirewallLogRecord } from "../../app/utils/logHistoryRecord";
 import { EVENT_HUB_CONNECTION_STRING_STORAGE_KEY } from "../../app/utils/eventHubConnectionStorage";
@@ -50,6 +50,87 @@ async function enterAnonymousMode(page: Page) {
   await page.goto("/logs");
   await expect(page).toHaveURL(/\/logs/);
   await expect(page.getByRole("region", { name: "Data source" })).toBeVisible();
+}
+
+async function expectAlignedColumns(header: Locator, row: Locator) {
+  await expect(async () => {
+    const [headerCells, rowCells] = await Promise.all([
+      header.locator(":scope > *").evaluateAll((cells) =>
+        cells.map((cell) => {
+          const { width, x } = cell.getBoundingClientRect();
+          return { width, x };
+        }),
+      ),
+      row.locator(":scope > *").evaluateAll((cells) =>
+        cells.map((cell) => {
+          const { width, x } = cell.getBoundingClientRect();
+          return { width, x };
+        }),
+      ),
+    ]);
+
+    expect(rowCells).toHaveLength(headerCells.length);
+    for (const [index, headerCell] of headerCells.entries()) {
+      expect(Math.abs(rowCells[index]!.x - headerCell.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(rowCells[index]!.width - headerCell.width)).toBeLessThanOrEqual(1);
+    }
+  }).toPass();
+}
+
+async function expectNoHorizontalOverflow(cell: Locator) {
+  await expect
+    .poll(() => cell.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBeLessThanOrEqual(1);
+}
+
+async function expectLeftInSameRow(left: Locator, right: Locator) {
+  await expect(async () => {
+    const [leftBox, rightBox] = await Promise.all([left.boundingBox(), right.boundingBox()]);
+    expect(leftBox).not.toBeNull();
+    expect(rightBox).not.toBeNull();
+    const leftCenter = leftBox!.y + leftBox!.height / 2;
+    const rightCenter = rightBox!.y + rightBox!.height / 2;
+    expect(Math.abs(leftCenter - rightCenter)).toBeLessThanOrEqual(1);
+    expect(leftBox!.x + leftBox!.width).toBeLessThan(rightBox!.x);
+  }).toPass();
+}
+
+async function expectRightAligned(container: Locator, item: Locator) {
+  await expect(async () => {
+    const [containerBox, itemBox] = await Promise.all([
+      container.boundingBox(),
+      item.boundingBox(),
+    ]);
+    expect(containerBox).not.toBeNull();
+    expect(itemBox).not.toBeNull();
+    const rightInset = containerBox!.x + containerBox!.width - itemBox!.x - itemBox!.width;
+    expect(rightInset).toBeGreaterThanOrEqual(15);
+    expect(rightInset).toBeLessThanOrEqual(17);
+  }).toPass();
+}
+
+async function expectMatchingOuterEdges(
+  topLeft: Locator,
+  topRight: Locator,
+  bottomLeft: Locator,
+  bottomRight: Locator,
+) {
+  await expect(async () => {
+    const [topLeftBox, topRightBox, bottomLeftBox, bottomRightBox] = await Promise.all([
+      topLeft.boundingBox(),
+      topRight.boundingBox(),
+      bottomLeft.boundingBox(),
+      bottomRight.boundingBox(),
+    ]);
+    expect(topLeftBox).not.toBeNull();
+    expect(topRightBox).not.toBeNull();
+    expect(bottomLeftBox).not.toBeNull();
+    expect(bottomRightBox).not.toBeNull();
+    expect(Math.abs(topLeftBox!.x - bottomLeftBox!.x)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(topRightBox!.x + topRightBox!.width - bottomRightBox!.x - bottomRightBox!.width),
+    ).toBeLessThanOrEqual(1);
+  }).toPass();
 }
 
 async function mockManagedDeployment(
@@ -261,6 +342,199 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
   ).toBeVisible();
 });
 
+test("managed DNS lens queries explicitly and shows decoded response size", async ({ page }) => {
+  await mockManagedDeployment(page, { eventHub: false, logAnalytics: true });
+  let listRequests = 0;
+  let detailRequests = 0;
+  const observation = {
+    id: "dns-query:proxy-structured:0",
+    timestamp: "2026-07-12T14:30:00.000Z",
+    source: "proxy-structured",
+    stage: "proxy-exchange",
+    path: "proxy",
+    outcome: "response-unknown",
+    resourceId:
+      "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/network/providers/Microsoft.Network/azureFirewalls/hub",
+    queryName: "example.com.",
+    queryId: "22213",
+    queryType: "AAAA",
+    queryClass: "IN",
+    clientIp: "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255",
+    clientPort: "65535",
+    protocol: "UDP",
+    requestSizeBytes: 57,
+    responseSizeBytes: 300,
+    responseCode: "NOERROR",
+    responseFlags: ["qr", "rd", "ra"],
+    durationSeconds: 0.011877665,
+    parseState: "parsed",
+    warnings: [],
+    raw: { ResponseSize: 300 },
+  };
+  const selector = {
+    source: "proxy-structured",
+    resourceId: observation.resourceId,
+    timestamp: observation.timestamp,
+    queryId: observation.queryId,
+    queryName: observation.queryName,
+    clientIp: observation.clientIp,
+    clientPort: observation.clientPort,
+  };
+  const transportObservation = {
+    id: "dns-transport:network-rule:0",
+    timestamp: "2026-07-12T14:29:00.000Z",
+    source: "network-rule",
+    stage: "transport",
+    path: "direct",
+    outcome: "transport-observed",
+    clientIp: "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.254",
+    clientPort: "65535",
+    serverIp: "168.63.129.16",
+    serverPort: "53",
+    protocol: "UDP",
+    parseState: "parsed",
+    warnings: [],
+    raw: {},
+  };
+
+  await page.route("**/api/log-analytics/dns/list", async (route) => {
+    listRequests += 1;
+    const requestBody = route.request().postDataJSON();
+    expect(requestBody).not.toHaveProperty("workspaceId");
+    expect(requestBody).toMatchObject({
+      filters: {
+        search: "",
+        queryType: "",
+        client: "",
+        protocol: "",
+        outcome: "",
+        source: "",
+      },
+    });
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        queriedEntries: [
+          {
+            id: "dns-query:proxy-structured:0",
+            timestamp: observation.timestamp,
+            queryName: observation.queryName,
+            queryType: observation.queryType,
+            client: `${observation.clientIp}:${observation.clientPort}`,
+            protocol: observation.protocol,
+            path: observation.path,
+            outcome: observation.outcome,
+            durationSeconds: observation.durationSeconds,
+            observationCount: 1,
+            completeness: "complete",
+            confidence: "uncorrelated",
+            source: observation.source,
+            warnings: [],
+            observations: [observation],
+            detailSelector: selector,
+          },
+          {
+            id: "dns-query:proxy-structured:1",
+            timestamp: "2026-07-12T14:20:00.000Z",
+            queryName: "older.example.com.",
+            queryType: "A",
+            client: "10.0.0.4:53000",
+            protocol: "UDP",
+            path: "proxy",
+            outcome: "response-unknown",
+            durationSeconds: 0.02,
+            observationCount: 1,
+            completeness: "complete",
+            confidence: "uncorrelated",
+            source: "proxy-structured",
+            warnings: [],
+            observations: [],
+          },
+        ],
+        transportObservations: [transportObservation],
+        queriedEntriesTruncated: false,
+        transportObservationsTruncated: false,
+        sources: [{ source: "proxy-structured", availability: "available", truncated: false }],
+      },
+    });
+  });
+  await page.route("**/api/log-analytics/dns/detail", async (route) => {
+    detailRequests += 1;
+    expect(route.request().postDataJSON()).toEqual({ selector });
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        observations: [observation],
+        detailTruncated: false,
+        completeness: "complete",
+        warnings: [],
+      },
+    });
+  });
+
+  await page.goto("/logs");
+  await expect(page.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
+  await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+  await expect(page.getByText("Run DNS query to load entries.")).toBeVisible();
+  expect(listRequests).toBe(0);
+  expect(detailRequests).toBe(0);
+
+  await page.getByRole("button", { name: "Run query" }).click();
+  await expect(page.getByText("2 queried entries · 1 unidentified transports")).toBeVisible();
+  await expect.poll(() => listRequests).toBe(1);
+
+  const filterControlTops = await page
+    .getByTestId("dns-filter-grid")
+    .locator(":scope > *")
+    .evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().top));
+  expect(filterControlTops).toHaveLength(7);
+  expect(Math.max(...filterControlTops) - Math.min(...filterControlTops)).toBeLessThanOrEqual(1);
+
+  const entryRows = page
+    .locator('section[aria-labelledby="dns-entry-heading"]')
+    .getByRole("button", { name: /Open DNS details/ });
+  await expect(entryRows.first()).toHaveAccessibleName("Open DNS details for example.com.");
+  const sortOrder = page.getByRole("combobox", { name: "DNS sort order" });
+  await expect(sortOrder).toContainText("Newest first");
+  await sortOrder.click();
+  await page.getByRole("option", { name: "Oldest first" }).click();
+  await expect(entryRows.first()).toHaveAccessibleName("Open DNS details for older.example.com.");
+
+  const entryHeader = page.getByTestId("dns-entry-header");
+  const entryRow = page.getByRole("button", { name: "Open DNS details for example.com." });
+  const transportHeader = page.getByTestId("dns-transport-header");
+  const transportRow = page.getByRole("button", {
+    name: "Open DNS transport details for ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.254:65535",
+  });
+
+  await expectAlignedColumns(entryHeader, entryRow);
+  await expectAlignedColumns(transportHeader, transportRow);
+  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(3));
+  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(1));
+
+  await page.setViewportSize({ width: 390, height: 812 });
+  await transportRow.scrollIntoViewIfNeeded();
+  for (const testId of ["dns-entry-scroll", "dns-transport-scroll"]) {
+    await page.getByTestId(testId).evaluate((element) => {
+      element.scrollLeft = 120;
+    });
+  }
+  await expectAlignedColumns(entryHeader, entryRow);
+  await expectAlignedColumns(transportHeader, transportRow);
+  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(3));
+  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(1));
+
+  await page.getByRole("button", { name: "Open DNS details for example.com." }).click();
+
+  await expect(page.getByRole("dialog", { name: "DNS resolution detail" })).toBeVisible();
+  await expect(page.getByText("300 bytes, not TTL")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy raw" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Raw message" })).toHaveValue(
+    JSON.stringify(observation.raw, null, 2),
+  );
+  await expect.poll(() => detailRequests).toBe(1);
+});
+
 test("anonymous delegated Log Analytics exposes temporary authentication controls", async ({
   page,
 }) => {
@@ -366,6 +640,94 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("receiver status indicators follow the active pane actions", async ({ page }) => {
+  await enterAnonymousMode(page);
+  await page.evaluate(() => {
+    const nuxtApp = window.useNuxtApp?.();
+    if (!nuxtApp) {
+      throw new Error("Nuxt app is unavailable");
+    }
+    nuxtApp.payload.state["$sevent-hub-status"] = "paused";
+    nuxtApp.payload.state["$sevent-hub-latest-source-timestamp"] = "2026-07-13T12:00:00.000Z";
+    nuxtApp.payload.state["$sevent-hub-caught-up"] = false;
+  });
+
+  const dataSource = page.getByRole("region", { name: "Data source" });
+  await expect(dataSource.getByRole("status")).toHaveCount(0);
+  await expect(dataSource.getByText("Catching up", { exact: true })).toHaveCount(0);
+
+  const allLogsControls = page.getByRole("group", { name: "All logs status and actions" });
+  await expect(allLogsControls.getByRole("status")).toHaveText("paused");
+  await expect(allLogsControls.getByText("Catching up", { exact: true })).toBeVisible();
+  await expectLeftInSameRow(
+    allLogsControls.getByRole("status"),
+    allLogsControls.getByRole("button", { name: "Resume" }),
+  );
+
+  await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+  await expect(allLogsControls).toHaveCount(0);
+  const dnsControls = page.getByRole("group", {
+    name: "DNS troubleshooting status and actions",
+  });
+  await expect(dnsControls.getByRole("status")).toHaveText("paused");
+  await expect(dnsControls.getByText("Catching up", { exact: true })).toBeVisible();
+  await expectLeftInSameRow(
+    dnsControls.getByRole("status"),
+    dnsControls.getByRole("button", { name: "Resume" }),
+  );
+
+  await page.setViewportSize({ height: 812, width: 375 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+});
+
+test("pane action rails align with filters and separate them", async ({ page }) => {
+  await page.setViewportSize({ height: 720, width: 2048 });
+  await enterAnonymousMode(page);
+
+  const allLogsControls = page.getByRole("group", { name: "All logs status and actions" });
+  await expect(allLogsControls).toHaveCSS("border-bottom-style", "solid");
+  await expect(allLogsControls).toHaveCSS("border-bottom-width", "1px");
+  await expectMatchingOuterEdges(
+    allLogsControls.getByRole("status"),
+    allLogsControls.getByRole("button", { name: "Clear", exact: true }),
+    page.getByPlaceholder("Search logs"),
+    page.getByRole("button", { name: "Reset", exact: true }),
+  );
+
+  await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+  const dnsControls = page.getByRole("group", {
+    name: "DNS troubleshooting status and actions",
+  });
+  await expect(dnsControls).toHaveCSS("border-bottom-style", "solid");
+  await expect(dnsControls).toHaveCSS("border-bottom-width", "1px");
+  await expectMatchingOuterEdges(
+    dnsControls.getByRole("status"),
+    dnsControls.getByRole("button", { name: "Clear DNS results" }),
+    page.getByRole("textbox", { name: "Domain or DNS search" }),
+    page.getByRole("combobox", { name: "DNS sort order" }),
+  );
+});
+
+test("data source rail keeps source left and view right", async ({ page }) => {
+  await enterAnonymousMode(page);
+
+  const rail = page.getByRole("region", { name: "Data source" });
+  const dataSourceControls = rail.getByRole("group", { name: "Data source" });
+  const viewControls = rail.getByRole("group", { name: "View" });
+  const logAnalyticsRequirement = rail.getByText(
+    "Log Analytics delegated authentication is not configured.",
+    { exact: true },
+  );
+
+  await expectLeftInSameRow(dataSourceControls, logAnalyticsRequirement);
+  await expectLeftInSameRow(logAnalyticsRequirement, viewControls);
+  await expectRightAligned(rail, viewControls);
+  await expect(viewControls.getByRole("button", { name: "All logs" })).toBeVisible();
+  await expect(viewControls.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
+});
+
 test("data source rail remains bounded at narrow viewport", async ({ page }) => {
   await page.setViewportSize({ height: 812, width: 375 });
   await enterAnonymousMode(page);
@@ -373,6 +735,10 @@ test("data source rail remains bounded at narrow viewport", async ({ page }) => 
   const dataSource = page.getByRole("group", { name: "Data source" });
   await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toBeVisible();
   await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeVisible();
+  const view = page.getByRole("group", { name: "View" });
+  await expect(view.getByRole("button", { name: "All logs" })).toBeVisible();
+  await expect(view.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
+  await expectRightAligned(page.getByRole("region", { name: "Data source" }), view);
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(dataSource).toBeVisible();
   await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();

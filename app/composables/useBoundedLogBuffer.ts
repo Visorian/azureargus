@@ -1,9 +1,10 @@
-import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, type Ref } from "vue";
+import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, watch, type Ref } from "vue";
 
 export const DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS = 250;
 
 interface BoundedLogBufferOptions {
   publishIntervalMs?: number;
+  publishingEnabled?: Readonly<Ref<boolean>>;
   publishedSize?: Readonly<Ref<number>>;
 }
 
@@ -60,6 +61,7 @@ export function useBoundedLogBuffer<T>(
   maxSize: Readonly<Ref<number>>,
   {
     publishIntervalMs = DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS,
+    publishingEnabled = ref(true),
     publishedSize = maxSize,
   }: BoundedLogBufferOptions = {},
 ) {
@@ -80,7 +82,7 @@ export function useBoundedLogBuffer<T>(
 
   function publish() {
     cancelPublish();
-    if (!publishPending) {
+    if (!publishingEnabled.value || !publishPending) {
       return;
     }
 
@@ -90,7 +92,7 @@ export function useBoundedLogBuffer<T>(
   }
 
   function schedulePublish() {
-    if (publishTimer !== undefined) {
+    if (!publishingEnabled.value || publishTimer !== undefined) {
       return;
     }
     if (publishIntervalMs <= 0) {
@@ -110,6 +112,18 @@ export function useBoundedLogBuffer<T>(
     publishPending = true;
     schedulePublish();
   }
+
+  watch(
+    publishingEnabled,
+    (enabled) => {
+      if (enabled) {
+        schedulePublish();
+      } else {
+        cancelPublish();
+      }
+    },
+    { flush: "sync" },
+  );
 
   function clear() {
     cancelPublish();
