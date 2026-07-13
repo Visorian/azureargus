@@ -482,6 +482,15 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await page.getByRole("button", { name: "Run query" }).click();
   await expect(page.getByText("2 queried entries · 1 unidentified transports")).toBeVisible();
   await expect.poll(() => listRequests).toBe(1);
+  await expect(page.getByText("Response received", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Transport observed", { exact: true })).toBeVisible();
+  await expect(page.getByText("response-unknown", { exact: true })).toHaveCount(0);
+
+  const resultFilter = page.getByLabel("DNS result");
+  await resultFilter.click();
+  await expect(page.getByRole("option", { name: "Response received" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Transport observed" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   const filterControlTops = await page
     .getByTestId("dns-filter-grid")

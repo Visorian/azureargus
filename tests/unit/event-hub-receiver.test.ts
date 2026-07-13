@@ -137,6 +137,59 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
+  it("publishes managed DNS batches with stable Event Hub offsets", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `${JSON.stringify({
+              type: "events",
+              events: [
+                {
+                  body: {
+                    category: "AzureFirewallDnsProxy",
+                    properties: {
+                      msg: "DNS Request: 192.168.179.30:52338 - 22213 AAAA IN example.com. udp 57 false 1224 NOERROR qr,rd,ra 300 0.011877665s",
+                    },
+                    time: "2026-07-12T12:00:00.000Z",
+                  },
+                  enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+                  offset: "123",
+                  partitionId: "0",
+                  sequenceNumber: 42,
+                },
+              ],
+            })}\n`,
+          ),
+        );
+      },
+    });
+    const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ managedFetch });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    receiver.addNormalizedBatchSink({ onRecords });
+
+    await receiver.connect(createInitialEventHubConnectionForm(), "managed");
+    await vi.waitFor(() => expect(receiver.status.value).toBe("connected"));
+    vi.advanceTimersByTime(100);
+
+    expect(onRecords).toHaveBeenCalledOnce();
+    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        dns: expect.objectContaining({ queryId: "22213", queryName: "example.com." }),
+        offset: "123",
+        partitionId: "0",
+        sequenceNumber: "42",
+      }),
+    ]);
+
+    await receiver.disconnect();
+  });
+
   it("allocates unique record indexes across expanded queued events", () => {
     const result = eventsToFirewallLogs(
       [

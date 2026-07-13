@@ -105,6 +105,24 @@ describe("DNS Log Analytics request contracts", () => {
         selector: { ...request.selector, resourceId: "not-an-arm-resource-id" },
       }),
     ).toBe(false);
+    for (const source of ["flow-trace", "network-rule"] as const) {
+      expect(
+        validateDnsDetailQueryRequest({
+          selector: { ...request.selector, source, queryId: "inapplicable" },
+        }),
+      ).toBe(false);
+      expect(
+        validateDnsDetailQueryRequest({
+          selector: {
+            source,
+            resourceId,
+            timestamp: request.selector.timestamp,
+            clientIp: "10.0.0.4",
+            clientPort: "52338",
+          },
+        }),
+      ).toBe(true);
+    }
   });
 
   it("requires workspace only on delegated detail requests", () => {
@@ -142,6 +160,9 @@ describe("DNS Log Analytics KQL", () => {
     expect(queries.every(({ query }) => query.includes("| project "))).toBe(true);
     expect(queries.every(({ query }) => !query.includes("\n| take 9999\n"))).toBe(true);
     expect(queries[1]?.query).toContain('| where Category == "AzureFirewallDnsProxy"');
+    expect(queries[1]?.query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"');
+    expect(queries[1]?.query).toContain('| where ResourceType =~ "AZUREFIREWALLS"');
+    expect(queries[1]?.query).toContain('| where tolower(Message) matches regex "\\\\sudp\\\\s"');
     expect(queries[3]?.query).toContain(
       "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
     );
@@ -165,6 +186,14 @@ describe("DNS Log Analytics KQL", () => {
     network.filters.outcome = "blocked";
     const [networkQuery] = buildDnsListQueries(network);
     expect(networkQuery?.query).toContain('| where Action contains "Deny"');
+
+    const legacy = createListRequest();
+    legacy.filters.source = "proxy-legacy";
+    legacy.filters.outcome = "transport-error";
+    const [legacyQuery] = buildDnsListQueries(legacy);
+    expect(legacyQuery?.query).toContain(
+      '| where trim_start(@"\\s+", Message) startswith "Error:"',
+    );
   });
 
   it("selects one allowlisted detail table and escapes every selector value", () => {
@@ -188,6 +217,17 @@ describe("DNS Log Analytics KQL", () => {
     expect(query).toContain(
       "| where TimeGenerated >= datetime(2026-07-10T10:01:00.000Z) and TimeGenerated < datetime(2026-07-10T10:01:00.001Z)",
     );
+  });
+
+  it("scopes legacy detail to Azure Firewall diagnostics", () => {
+    const request = createDetailRequest();
+    request.selector.source = "proxy-legacy";
+
+    const query = buildDnsDetailQuery(request.selector);
+
+    expect(query).toContain('| where Category == "AzureFirewallDnsProxy"');
+    expect(query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"');
+    expect(query).toContain('| where ResourceType =~ "AZUREFIREWALLS"');
   });
 });
 
@@ -336,6 +376,24 @@ describe("DNS Log Analytics source mapping", () => {
       truncated: false,
       warning: "Source query forbidden",
     });
+  });
+
+  it("returns per-source diagnostics when every source probe fails", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "table unavailable" } }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const result = await executeDnsListQuery({ workspaceId }, createListRequest(), "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.queriedEntries).toEqual([]);
+    expect(result.transportObservations).toEqual([]);
+    expect(result.sources).toHaveLength(4);
+    expect(result.sources.every((source) => source.availability === "failed")).toBe(true);
   });
 
   it("requeries one exact bounded detail selector without server list state", async () => {

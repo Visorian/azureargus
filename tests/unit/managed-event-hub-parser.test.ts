@@ -14,7 +14,7 @@ describe("managed Event Hub NDJSON parser", () => {
         );
         controller.enqueue(
           encoder.encode(
-            '"partitionId":"0","sequenceNumber":7}]}\n{"type":"error","message":"Session expired"}',
+            '"offset":"123","partitionId":"0","sequenceNumber":7}]}\n{"type":"error","message":"Session expired"}',
           ),
         );
         controller.close();
@@ -36,6 +36,7 @@ describe("managed Event Hub NDJSON parser", () => {
           {
             body: { msg: "allow" },
             enqueuedTimeUtc: "2026-07-12T12:00:00.000Z",
+            offset: "123",
             partitionId: "0",
             sequenceNumber: 7,
           },

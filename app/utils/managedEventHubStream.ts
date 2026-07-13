@@ -30,13 +30,15 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
         !isRecord(event) ||
         typeof event.enqueuedTimeUtc !== "string" ||
         typeof event.partitionId !== "string" ||
-        typeof event.sequenceNumber !== "number"
+        typeof event.sequenceNumber !== "number" ||
+        (event.offset !== undefined && typeof event.offset !== "string")
       ) {
         throw new Error("Managed Event Hub stream returned invalid event");
       }
       return {
         body: event.body,
         enqueuedTimeUtc: event.enqueuedTimeUtc,
+        offset: event.offset,
         partitionId: event.partitionId,
         sequenceNumber: event.sequenceNumber,
       };

@@ -8,6 +8,7 @@ import type {
 import {
   DNS_CLASS_LABELS,
   DNS_FLAG_LABELS,
+  DNS_OUTCOME_LABELS,
   DNS_QUERY_TYPE_LABELS,
   DNS_RCODE_LABELS,
 } from "#shared/utils/dns";
@@ -53,6 +54,10 @@ function duration(seconds: number | undefined) {
   return `${seconds.toFixed(2)} s`;
 }
 
+function outcomeLabel(observation: DnsObservation) {
+  return DNS_OUTCOME_LABELS[observation.outcome];
+}
+
 async function copyRaw(observation: DnsObservation) {
   try {
     await navigator.clipboard.writeText(rawJson(observation));
@@ -95,7 +100,7 @@ async function copyRaw(observation: DnsObservation) {
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Result</p>
-            <p>{{ entry.outcome }}</p>
+            <p>{{ DNS_OUTCOME_LABELS[entry.outcome] }}</p>
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Client</p>
@@ -174,7 +179,7 @@ async function copyRaw(observation: DnsObservation) {
                     Server {{ observation.serverIp
                     }}<span v-if="observation.serverPort">:{{ observation.serverPort }}</span>
                   </p>
-                  <p>{{ observation.outcome }}</p>
+                  <p>{{ outcomeLabel(observation) }}</p>
                 </div>
               </div>
             </li>

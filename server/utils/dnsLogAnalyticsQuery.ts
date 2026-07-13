@@ -99,17 +99,14 @@ export function validateDelegatedDnsListQueryRequest(
 }
 
 function isDetailSelector(value: unknown): value is DnsDetailSelector {
+  const source = isRecord(value) ? value.source : undefined;
+  const optionalKeys =
+    source === "flow-trace" || source === "network-rule"
+      ? ["clientIp", "clientPort"]
+      : ["queryId", "queryName", "clientIp", "clientPort"];
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "source",
-      "resourceId",
-      "timestamp",
-      "queryId",
-      "queryName",
-      "clientIp",
-      "clientPort",
-    ]) ||
+    !hasOnlyKeys(value, ["source", "resourceId", "timestamp", ...optionalKeys]) ||
     !SOURCE_KINDS.includes(value.source as DnsSourceKind) ||
     typeof value.resourceId !== "string" ||
     !FIREWALL_RESOURCE_ID_PATTERN.test(value.resourceId) ||
@@ -117,9 +114,10 @@ function isDetailSelector(value: unknown): value is DnsDetailSelector {
   ) {
     return false;
   }
-  return ["queryId", "queryName", "clientIp", "clientPort"].every(
+  return optionalKeys.every(
     (key) =>
-      value[key] === undefined || (typeof value[key] === "string" && value[key].length <= 256),
+      value[key] === undefined ||
+      (typeof value[key] === "string" && value[key].length > 0 && value[key].length <= 256),
   );
 }
 
@@ -157,8 +155,8 @@ function filterClauses(
 }
 
 function regexTokenClause(field: string, value: string) {
-  const escaped = value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return `| where ${field} matches regex ${encodeKqlStringLiteral(`\\s${escaped}\\s`)}`;
+  const escaped = value.toLowerCase().replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return `| where tolower(${field}) matches regex ${encodeKqlStringLiteral(`\\s${escaped}\\s`)}`;
 }
 
 function outcomeClauses(source: DnsSourceKind, outcome: string) {
@@ -185,7 +183,8 @@ function outcomeClauses(source: DnsSourceKind, outcome: string) {
   }
   if (source === "proxy-legacy") {
     if (normalized === "response-unknown") return ['| where Message contains " NOERROR "'];
-    if (normalized === "transport-error") return ['| where Message startswith "Error:"'];
+    if (normalized === "transport-error")
+      return ['| where trim_start(@"\\s+", Message) startswith "Error:"'];
     if (normalized === "dns-error")
       return ['| where Message startswith "DNS Request:" and Message !contains " NOERROR "'];
     return ["| where false"];
@@ -278,6 +277,7 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
         "AzureDiagnostics",
         '| where Category == "AzureFirewallDnsProxy"',
         '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
+        '| where ResourceType =~ "AZUREFIREWALLS"',
         "| project TimeGenerated, Category, ResourceId=_ResourceId, Message=tostring(msg_s)",
         ...legacyFilters,
         ...outcomeClauses("proxy-legacy", request.filters.outcome.trim()),
@@ -434,7 +434,16 @@ export async function executeDnsListQuery(
     observations.push(...result.value.observations.slice(0, LIST_LIMIT));
     sources.push({ source, availability: "available", truncated });
   }
-  if (sources.every((source) => source.availability !== "available")) throw firstFailure;
+  if (sources.every((source) => source.availability !== "available")) {
+    if (sources.every((source) => source.availability === "forbidden")) throw firstFailure;
+    return {
+      queriedEntries: [],
+      transportObservations: [],
+      queriedEntriesTruncated: false,
+      transportObservationsTruncated: false,
+      sources,
+    };
+  }
 
   const transport = observations.filter((observation) => observation.source === "network-rule");
   const entries = createDnsEntries(observations);
@@ -487,7 +496,11 @@ export function buildDnsDetailQuery(selector: DnsDetailSelector) {
   const sourceShape = {
     "proxy-legacy": {
       table: "AzureDiagnostics",
-      before: ['| where Category == "AzureFirewallDnsProxy"'],
+      before: [
+        '| where Category == "AzureFirewallDnsProxy"',
+        '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
+        '| where ResourceType =~ "AZUREFIREWALLS"',
+      ],
       projection:
         "| project TimeGenerated, Category, ResourceId=_ResourceId, Message=tostring(msg_s)",
     },

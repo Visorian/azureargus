@@ -13,6 +13,11 @@ export function createDnsObservationStore(maxEntries = 10_000, maxTransports = m
   const entries = new Map<string, DnsEntry>();
   const transports = new Map<string, DnsObservation>();
 
+  function newestFirst<T extends { id: string; timestamp: string }>(left: T, right: T) {
+    const timestampOrder = right.timestamp.localeCompare(left.timestamp);
+    return timestampOrder || right.id.localeCompare(left.id);
+  }
+
   function removeId(id: string) {
     entries.delete(id);
     transports.delete(id);
@@ -23,8 +28,8 @@ export function createDnsObservationStore(maxEntries = 10_000, maxTransports = m
     evictedTransportIds: string[] = [],
   ): DnsObservationStoreSnapshot {
     return {
-      entries: [...entries.values()].toReversed(),
-      transports: [...transports.values()].toReversed(),
+      entries: [...entries.values()].toSorted(newestFirst),
+      transports: [...transports.values()].toSorted(newestFirst),
       evictedEntryIds,
       evictedTransportIds,
     };

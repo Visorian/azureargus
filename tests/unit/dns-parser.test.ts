@@ -58,6 +58,46 @@ describe("DNS parser", () => {
     });
   });
 
+  it("rejects malformed legacy duration values instead of exposing NaN", () => {
+    const observation = parseDnsObservation(
+      input({ message: LEGACY_MESSAGE.replace("0.011877665s", "1..2s") }),
+    );
+
+    expect(observation).toMatchObject({
+      parseState: "unparsed",
+      outcome: "pending",
+      warnings: ["Unrecognized AzureFirewallDnsProxy message"],
+    });
+    expect(observation?.durationSeconds).toBeUndefined();
+  });
+
+  it("rejects overflowing legacy numeric values", () => {
+    const observation = parseDnsObservation(
+      input({ message: LEGACY_MESSAGE.replace("57 false", `${"9".repeat(400)} false`) }),
+    );
+
+    expect(observation).toMatchObject({
+      parseState: "unparsed",
+      outcome: "pending",
+      warnings: ["Invalid numeric value in AzureFirewallDnsProxy message"],
+    });
+    expect(observation?.requestSizeBytes).toBeUndefined();
+  });
+
+  it("reports bounded response flag values", () => {
+    const flags = Array.from({ length: 33 }, (_, index) =>
+      index === 0 ? "x".repeat(65) : `f${index}`,
+    ).join(",");
+    const observation = parseDnsObservation(
+      input({ message: LEGACY_MESSAGE.replace("qr,rd,ra", flags) }),
+    );
+
+    expect(observation?.responseFlags).toHaveLength(32);
+    expect(observation?.warnings).toEqual(
+      expect.arrayContaining(["Response flag count truncated", "Response flag truncated"]),
+    );
+  });
+
   it("parses documented legacy proxy transport errors without treating error number as RCODE", () => {
     const observation = parseDnsObservation(
       input({

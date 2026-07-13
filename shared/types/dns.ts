@@ -116,7 +116,7 @@ export interface DnsFilters {
 }
 
 export interface DnsFilterOptions {
-  outcomes: string[];
+  outcomes: DnsOutcome[];
   protocols: string[];
   queryTypes: string[];
   sources: string[];

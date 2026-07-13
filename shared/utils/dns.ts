@@ -8,8 +8,19 @@ import type {
   DnsStage,
 } from "../types/dns";
 
+export const DNS_OUTCOME_LABELS: Readonly<Record<DnsOutcome, string>> = {
+  "answer-observed": "Answer observed",
+  "no-data": "No data",
+  "response-unknown": "Response received",
+  "dns-error": "DNS error",
+  blocked: "Blocked by firewall",
+  "transport-error": "Transport error",
+  "transport-observed": "Transport observed",
+  pending: "Pending or partial",
+};
+
 const LEGACY_SUCCESS_PATTERN =
-  /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>[\d.]+)s$/i;
+  /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>\d+(?:\.\d+)?)s$/i;
 const LEGACY_ERROR_PATTERN =
   /^\s*Error:\s*(?<errorNumber>\d+)\s+(?<queryName>\S+)\s+(?<queryType>[^:]+):\s*(?<errorMessage>.+)$/i;
 const BRACKETED_ENDPOINT_PATTERN = /^\[(?<ip>.+)](?::(?<port>\d+))?$/;
@@ -201,12 +212,14 @@ function canonicalText(
 
 function canonicalFlags(value: string | undefined, warnings: string[]) {
   const bounded = canonicalText(value, "Response flags", warnings, SHORT_TEXT_LIMIT);
-  return bounded && bounded !== "-"
-    ? bounded
-        .split(",")
-        .slice(0, 32)
-        .map((flag) => flag.trim().slice(0, CODE_LIMIT))
-    : [];
+  if (!bounded || bounded === "-") return [];
+  const flags = bounded.split(",");
+  if (flags.length > 32) warnings.push("Response flag count truncated");
+  return flags.slice(0, 32).map((flag) => {
+    const trimmed = flag.trim();
+    if (trimmed.length > CODE_LIMIT) warnings.push("Response flag truncated");
+    return trimmed.slice(0, CODE_LIMIT);
+  });
 }
 
 function baseObservation(
@@ -273,6 +286,23 @@ function parseLegacy(input: DnsRecordInput): DnsObservation {
   const client = splitEndpoint(match.groups.client);
   const responseCode = match.groups.responseCode;
   const warnings = [...observation.warnings];
+  const requestSizeBytes = Number(match.groups.requestSize);
+  const ednsBufferSizeBytes = Number(match.groups.ednsBuffer);
+  const responseSizeBytes = Number(match.groups.responseSize);
+  const durationSeconds = Number(match.groups.duration);
+  if (
+    !Number.isFinite(requestSizeBytes) ||
+    !Number.isFinite(ednsBufferSizeBytes) ||
+    !Number.isFinite(responseSizeBytes) ||
+    !Number.isFinite(durationSeconds)
+  ) {
+    return {
+      ...observation,
+      outcome: "pending",
+      parseState: "unparsed",
+      warnings: [...warnings, "Invalid numeric value in AzureFirewallDnsProxy message"],
+    };
+  }
   return {
     ...observation,
     clientIp: canonicalText(client.ip, "Client IP", warnings, SHORT_TEXT_LIMIT),
@@ -282,13 +312,13 @@ function parseLegacy(input: DnsRecordInput): DnsObservation {
     queryClass: canonicalText(match.groups.queryClass, "Query class", warnings),
     queryName: canonicalText(match.groups.queryName, "Query name", warnings, QUERY_NAME_LIMIT),
     protocol: canonicalText(match.groups.protocol?.toUpperCase(), "Protocol", warnings, CODE_LIMIT),
-    requestSizeBytes: Number(match.groups.requestSize),
+    requestSizeBytes,
     dnssecOk: match.groups.dnssecOk?.toLowerCase() === "true",
-    ednsBufferSizeBytes: Number(match.groups.ednsBuffer),
+    ednsBufferSizeBytes,
     responseCode: canonicalText(responseCode, "Response code", warnings, CODE_LIMIT),
     responseFlags: canonicalFlags(match.groups.flags, warnings),
-    responseSizeBytes: Number(match.groups.responseSize),
-    durationSeconds: Number(match.groups.duration),
+    responseSizeBytes,
+    durationSeconds,
     outcome: getOutcome(responseCode),
     warnings,
   };
@@ -510,7 +540,10 @@ export function createDnsEntries(observations: readonly DnsObservation[]): DnsEn
       observations: [observation],
       detailSelector: detailSelector(observation),
     }))
-    .toSorted((left, right) => right.timestamp.localeCompare(left.timestamp));
+    .toSorted((left, right) => {
+      const timestampOrder = right.timestamp.localeCompare(left.timestamp);
+      return timestampOrder || right.id.localeCompare(left.id);
+    });
 }
 
 export const DNS_QUERY_TYPE_LABELS: Readonly<Record<string, string>> = {

@@ -3,14 +3,20 @@ import { defineComponent } from "vue";
 
 import DnsDetailModal from "../../app/components/logs/DnsDetailModal.vue";
 import DnsTroubleshootingView from "../../app/components/logs/DnsTroubleshootingView.vue";
-import type { DnsEntry, DnsFilters, DnsObservation, DnsSort } from "../../shared/types/dns";
+import type {
+  DnsEntry,
+  DnsFilterOptions,
+  DnsFilters,
+  DnsObservation,
+  DnsSort,
+} from "../../shared/types/dns";
 
 const filterOptions = {
   outcomes: ["response-unknown", "transport-observed"],
   protocols: ["TCP", "UDP"],
   queryTypes: ["A", "AAAA"],
   sources: ["network-rule", "proxy-legacy"],
-};
+} satisfies DnsFilterOptions;
 
 const observation: DnsObservation = {
   id: "observation-1",
@@ -80,7 +86,12 @@ const SelectStub = defineComponent({
 describe("DNS troubleshooting components", () => {
   it("renders named entries separately from unidentified transport and emits selection", async () => {
     const filters = createFilters();
-    const transport = { ...observation, id: "transport-1", source: "network-rule" as const };
+    const transport = {
+      ...observation,
+      id: "transport-1",
+      source: "network-rule" as const,
+      outcome: "transport-observed" as const,
+    };
     const wrapper = await mountSuspended(DnsTroubleshootingView, {
       props: {
         entries: [entry],
@@ -108,6 +119,9 @@ describe("DNS troubleshooting components", () => {
     expect(wrapper.text()).toContain("Observations");
     expect(wrapper.text()).toContain("Destination");
     expect(wrapper.text()).toContain("Transport truncated");
+    expect(wrapper.text()).toContain("Response received");
+    expect(wrapper.text()).toContain("Transport observed");
+    expect(wrapper.text()).not.toContain("response-unknown");
     expect(wrapper.text()).not.toContain("Entries truncated");
 
     await wrapper.get('button[aria-label="Open DNS details for api.example."]').trigger("click");
@@ -140,6 +154,7 @@ describe("DNS troubleshooting components", () => {
     });
 
     expect(wrapper.get('[role="alert"]').text()).toBe("DNS query failed.");
+    expect(wrapper.text()).not.toContain("No matching DNS entries.");
   });
 
   it("maps explicit sort-order choices without a separate direction control", async () => {
@@ -216,6 +231,7 @@ describe("DNS troubleshooting components", () => {
     expect(wrapper.text()).toContain("Observed flow");
     expect(wrapper.text()).toContain("Proxy exchange");
     expect(wrapper.text()).toContain("Response size");
+    expect(wrapper.text()).toContain("Response received");
     expect(wrapper.text()).toContain("300");
     expect(wrapper.text()).toContain("Recursion desired");
     expect(wrapper.text()).not.toContain("Not observed: terminal response");

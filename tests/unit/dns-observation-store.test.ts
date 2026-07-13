@@ -73,4 +73,23 @@ describe("DNS observation store", () => {
     expect(result.evictedEntryIds).toEqual([]);
     expect(result.evictedTransportIds).toHaveLength(1);
   });
+
+  it("orders snapshots by event time instead of arrival order", () => {
+    const store = createDnsObservationStore();
+    const olderEntry = dnsRecord(1);
+    const newerEntry = dnsRecord(2);
+    const olderTransport = transportRecord(1);
+    const newerTransport = transportRecord(2);
+
+    store.pushRecords([newerEntry, olderEntry, newerTransport, olderTransport]);
+
+    expect(store.snapshot().entries.map((entry) => entry.queryName)).toEqual([
+      "host2.example.",
+      "host1.example.",
+    ]);
+    expect(store.snapshot().transports.map((observation) => observation.id)).toEqual([
+      newerTransport.dns?.id,
+      olderTransport.dns?.id,
+    ]);
+  });
 });

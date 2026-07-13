@@ -6,9 +6,11 @@ import type {
   DnsFilterOptions,
   DnsFilters,
   DnsObservation,
+  DnsOutcome,
   DnsSort,
   DnsSourceStatus,
 } from "#shared/types/dns";
+import { DNS_OUTCOME_LABELS } from "#shared/utils/dns";
 
 const props = defineProps<{
   entries: DnsEntry[];
@@ -95,8 +97,40 @@ function filterModel(key: "queryType" | "protocol" | "outcome" | "source") {
 
 const queryTypeFilter = filterModel("queryType");
 const protocolFilter = filterModel("protocol");
-const outcomeFilter = filterModel("outcome");
 const sourceFilter = filterModel("source");
+
+function isDnsOutcome(value: string): value is DnsOutcome {
+  return Object.hasOwn(DNS_OUTCOME_LABELS, value);
+}
+
+const outcomeFilter = computed<DnsOutcome | null>({
+  get: () => (isDnsOutcome(filters.value.outcome) ? filters.value.outcome : null),
+  set: (value) => {
+    filters.value.outcome = value ?? "";
+  },
+});
+const outcomeItems = computed(() =>
+  props.filterOptions.outcomes.map((value) => ({
+    label: DNS_OUTCOME_LABELS[value],
+    value,
+  })),
+);
+const emptyEntryMessage = computed(() => {
+  if (props.status === "loading") return "Loading DNS entries…";
+  if (props.error) return "DNS query failed.";
+  if (props.status === "idle" && props.logAnalysis) return "Run DNS query to load entries.";
+  const unavailable = props.sources.filter((source) => source.availability !== "available");
+  if (props.sources.length > 0 && unavailable.length === props.sources.length) {
+    return "No DNS sources are available for this query.";
+  }
+  if (unavailable.length > 0) return "No entries returned by available DNS sources.";
+  if (props.entriesTruncated) return "No entries retained within bounded DNS query results.";
+  return "No matching DNS entries.";
+});
+
+function outcomeLabel(value: DnsEntry["outcome"]) {
+  return DNS_OUTCOME_LABELS[value];
+}
 
 function duration(seconds: number | undefined) {
   if (seconds === undefined) return "-";
@@ -140,7 +174,8 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
       />
       <USelectMenu
         v-model="outcomeFilter"
-        :items="filterOptions.outcomes"
+        :items="outcomeItems"
+        value-key="value"
         aria-label="DNS result"
         clear
         placeholder="Result"
@@ -228,7 +263,6 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
             :item-size="44"
             key-field="id"
             class="min-h-0 min-w-278 flex-1"
-            role="list"
           >
             <template #default="{ item }">
               <button
@@ -248,7 +282,7 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
                 <span>{{ item.queryType ?? "-" }}</span>
                 <span class="whitespace-nowrap font-mono">{{ item.client || "-" }}</span>
                 <span>{{ item.path }}</span>
-                <span>{{ item.outcome }}</span>
+                <span>{{ outcomeLabel(item.outcome) }}</span>
                 <span>{{ duration(item.durationSeconds) }}</span>
                 <span>{{ item.observationCount }}</span>
               </button>
@@ -258,11 +292,7 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
             v-else
             class="grid min-h-52 min-w-278 flex-1 place-items-center p-8 text-center text-sm text-brand-gray-600 dark:text-brand-gray-300"
           >
-            {{
-              status === "idle" && logAnalysis
-                ? "Run DNS query to load entries."
-                : "No matching DNS entries."
-            }}
+            {{ emptyEntryMessage }}
           </div>
         </ClientOnly>
       </div>
@@ -299,7 +329,6 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
             :item-size="40"
             key-field="id"
             class="min-h-0 min-w-251 flex-1"
-            role="list"
           >
             <template #default="{ item }">
               <button
@@ -318,7 +347,7 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
                 <span class="whitespace-nowrap font-mono">{{ endpoint(item, "client") }}</span>
                 <span class="truncate font-mono">{{ endpoint(item, "server") }}</span>
                 <span>{{ item.protocol ?? "-" }}</span>
-                <span>{{ item.outcome }}</span>
+                <span>{{ outcomeLabel(item.outcome) }}</span>
               </button>
             </template>
           </RecycleScroller>

@@ -135,8 +135,8 @@ function hasActiveFilters(filters: DnsFilters) {
   return Object.values(filters).some((value) => value.trim().length > 0);
 }
 
-function sortedOptions(values: readonly (string | undefined)[]) {
-  return [...new Set(values.filter((value): value is string => Boolean(value)))]
+function sortedOptions<T extends string>(values: readonly (T | undefined)[]) {
+  return [...new Set(values.filter((value): value is T => Boolean(value)))]
     .filter((value) => value.length > 0)
     .toSorted((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
 }
