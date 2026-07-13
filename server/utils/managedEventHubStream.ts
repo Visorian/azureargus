@@ -48,6 +48,16 @@ interface ManagedEventHubStreamOptions {
 
 const textEncoder = new TextEncoder();
 
+function containsControlCharacter(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 31 || code === 127) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function waitForResponseDrain(response: ServerResponse) {
   return new Promise<void>((resolve, reject) => {
     const cleanup = () => {
@@ -117,10 +127,7 @@ export function validateManagedEventHubStreamRequest(
     consumerGroup === consumerGroup.trim() &&
     consumerGroup.length > 0 &&
     consumerGroup.length <= 256 &&
-    ![...consumerGroup].some((character) => {
-      const code = character.charCodeAt(0);
-      return code <= 31 || code === 127;
-    }) &&
+    !containsControlCharacter(consumerGroup) &&
     typeof request.lookbackMinutes === "number" &&
     MANAGED_EVENT_HUB_LOOKBACK_MINUTES.includes(
       request.lookbackMinutes as ManagedEventHubLookbackMinutes,

@@ -9,9 +9,9 @@ export function countryCodeToFlag(value: string | null | undefined) {
     return "";
   }
 
-  return [...countryCode]
-    .map((character) => String.fromCodePoint(character.charCodeAt(0) + 127_397))
-    .join("");
+  return Array.from(countryCode, (character) =>
+    String.fromCodePoint(character.charCodeAt(0) + 127_397),
+  ).join("");
 }
 
 export function countryCodeToName(

@@ -101,7 +101,7 @@ describe("Event Hub receiver helpers", () => {
       },
     });
     const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
-    const loadClientFactory = vi.fn<CreateEventHubReceiverClient>();
+    const loadClientFactory = vi.fn<() => Promise<CreateEventHubReceiverClient>>();
     const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
     const receiver = useEventHubReceiver({ loadClientFactory, managedFetch });
     const form = createInitialEventHubConnectionForm();

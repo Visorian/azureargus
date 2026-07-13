@@ -60,19 +60,18 @@ function mergeOptions(current: readonly string[], values: readonly (string | und
 }
 
 export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
-  const requestFetch = options.request === undefined ? useRequestFetch() : null;
-  const request =
-    options.request ??
-    ((body: LogAnalyticsQueryRequest, signal: AbortSignal) => {
-      if (requestFetch === null) {
-        throw new Error("Log Analytics request fetch is unavailable.");
-      }
-      return requestFetch<LogAnalyticsQueryResponse>("/api/log-analytics/query", {
+  let request: QueryRequest;
+  if (options.request === undefined) {
+    const requestFetch = useRequestFetch();
+    request = (body: LogAnalyticsQueryRequest, signal: AbortSignal) =>
+      requestFetch<LogAnalyticsQueryResponse>("/api/log-analytics/query", {
         body,
         method: "POST",
         signal,
       });
-    });
+  } else {
+    request = options.request;
+  }
   const records = shallowRef<FirewallLogRecord[]>([]);
   const status = ref<LogAnalyticsQueryStatus>("idle");
   const lastError = ref<string | null>(null);

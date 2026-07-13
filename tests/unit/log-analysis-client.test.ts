@@ -48,13 +48,12 @@ describe("Log analysis client", () => {
   it("creates and validates local date ranges", () => {
     const range = createDefaultLogAnalysisDateRange(new Date("2026-07-10T12:00:00.000Z"));
     const parsed = parseLogAnalysisDateRange(range);
+    const duration = parsed.ok
+      ? new Date(parsed.value.to).getTime() - new Date(parsed.value.from).getTime()
+      : undefined;
 
     expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      expect(new Date(parsed.value.to).getTime() - new Date(parsed.value.from).getTime()).toBe(
-        15 * 60_000,
-      );
-    }
+    expect(duration).toBe(15 * 60_000);
     expect(parseLogAnalysisDateRange({ from: "2026-07-10T12:00", to: "2026-07-09T12:00" })).toEqual(
       { error: "Start date must be before end date.", ok: false },
     );

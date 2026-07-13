@@ -117,7 +117,7 @@ describe("temporary Log Analytics authentication", () => {
       ["temporary-log-analytics-status", expect.objectContaining({ value: "connected" })],
       ["temporary-log-analytics-error", expect.objectContaining({ value: null })],
     ]);
-    expect(JSON.stringify([...state.values()].map((value) => value.value))).not.toContain(token);
+    expect(JSON.stringify(Array.from(state.values(), (value) => value.value))).not.toContain(token);
   });
 
   it("uses popup fallback only for an explicitly interactive token request", async () => {
@@ -203,7 +203,7 @@ describe("temporary Log Analytics authentication", () => {
     await auth.disconnect();
     popup.resolve({ account, accessToken: "late-token" });
 
-    await expect(preparing).rejects.toThrow();
+    await expect(preparing).rejects.toBeInstanceOf(Error);
     expect(auth.connected.value).toBe(false);
     await expect(auth.getAccessToken()).rejects.toThrow(
       "Connect to Azure before running Log Analytics query.",

@@ -141,9 +141,7 @@ describe("delegated Log Analytics query route", () => {
       const event = createTestEvent(createRequest());
 
       await expect(handler(event)).rejects.toMatchObject({ statusCode });
-      if (statusCode === 429) {
-        expect(event.node.res.getHeader("retry-after")).toBe(15);
-      }
+      expect(event.node.res.getHeader("retry-after")).toBe(statusCode === 429 ? 15 : undefined);
     },
   );
 });

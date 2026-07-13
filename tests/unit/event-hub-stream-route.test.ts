@@ -170,7 +170,9 @@ describe("managed Event Hub stream route", () => {
       await handler(event);
 
       expect(EventHubConsumerClient).toHaveBeenCalledOnce();
-      expect(EventHubConsumerClient.mock.calls[0]).toHaveLength(constructorArgumentCount);
+      expect(vi.mocked(EventHubConsumerClient).mock.calls[0]).toHaveLength(
+        constructorArgumentCount,
+      );
       expect(createManagedEventHubStream).toHaveBeenCalledWith(
         expect.objectContaining({
           request: { consumerGroup: "$Default", lookbackMinutes: 5 },

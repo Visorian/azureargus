@@ -74,7 +74,7 @@ describe("bounded log buffer helpers", () => {
     expect(buffer.items.value).toEqual([]);
 
     vi.advanceTimersByTime(1);
-    expect(buffer.items.value.map((record) => record.id)).toEqual([3, 2]);
+    expect(buffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2]);
     expect(buffer.version.value).toBe(1);
   });
 

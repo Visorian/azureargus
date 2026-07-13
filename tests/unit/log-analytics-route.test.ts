@@ -163,8 +163,6 @@ describe("Log Analytics query route authentication", () => {
     const event = createTestEvent(createRequest());
 
     await expect(handler(event)).rejects.toMatchObject({ statusCode });
-    if (statusCode === 429) {
-      expect(event.node.res.getHeader("retry-after")).toBe(30);
-    }
+    expect(event.node.res.getHeader("retry-after")).toBe(statusCode === 429 ? 30 : undefined);
   });
 });

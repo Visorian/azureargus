@@ -10,7 +10,7 @@ import { updateIpCountryDatabase } from "../../scripts/update-ip-country-databas
 const fixturePath = new URL("../fixtures/GeoLite2-Country-Test.mmdb", import.meta.url);
 
 function responseWithBody(body: Uint8Array) {
-  return new Response(body, { status: 200 });
+  return new Response(new Uint8Array(body), { status: 200 });
 }
 
 describe("IP country database updater", () => {
@@ -54,7 +54,7 @@ describe("IP country database updater", () => {
     expect(operations).toEqual(["write", "rename"]);
     expect(await readFile(databasePath)).toEqual(fixture);
     expect(
-      Reader.openBuffer(await readFile(databasePath)).country("81.2.69.142").country.isoCode,
+      Reader.openBuffer(await readFile(databasePath)).country("81.2.69.142").country?.isoCode,
     ).toBe("GB");
   });
 
@@ -92,7 +92,7 @@ describe("IP country database updater", () => {
         databasePath,
         fetcher: async () => responseWithBody(responseBody),
       }),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(Error);
     expect(await readFile(databasePath)).toEqual(previous);
   });
 });
