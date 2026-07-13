@@ -23,6 +23,8 @@ export interface PersistedFirewallLogRecord {
   sourcePort?: string;
   destinationIp?: string;
   destinationPort?: string;
+  policy?: string;
+  ruleCollectionGroup?: string;
   ruleCollection?: string;
   rule?: string;
   message: string;
@@ -51,6 +53,8 @@ export function toPersistedFirewallLogRecord(log: FirewallLogRecord): PersistedF
     sourcePort: log.sourcePort,
     destinationIp: log.destinationIp,
     destinationPort: log.destinationPort,
+    policy: log.policy,
+    ruleCollectionGroup: log.ruleCollectionGroup,
     ruleCollection: log.ruleCollection,
     rule: log.rule,
     message: log.message,

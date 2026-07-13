@@ -103,6 +103,42 @@ async function seedVisibleLog(page: Page, destinationIp: string) {
   }, destinationIp);
 }
 
+async function seedDetailLog(page: Page, destinationIp = "20.30.40.50", protocol = "TCP") {
+  await page.evaluate(
+    ({ nextDestinationIp, nextProtocol }) => {
+      const nuxtApp = window.useNuxtApp?.();
+      if (!nuxtApp) {
+        throw new Error("Nuxt app is unavailable");
+      }
+      nuxtApp.payload.state["$sfirewall-log-records"] = [
+        {
+          action: "Deny",
+          category: "AZFWNetworkRule",
+          destinationIp: nextDestinationIp,
+          destinationPort: "443",
+          enqueuedTimeUtc: "2026-07-12T16:37:56.822Z",
+          id: "detail-row",
+          message: "detail-record",
+          partitionId: "0",
+          policy: "hub-policy",
+          protocol: nextProtocol,
+          raw: { detail: true },
+          rule: "deny-web",
+          ruleCollection: "blocked",
+          ruleCollectionGroup: "hub-collection-group",
+          searchableText: "detail-record",
+          sequenceNumber: "5234806",
+          sourceIp: "10.140.16.133",
+          sourcePort: "15213",
+          timestamp: "2026-07-12T16:36:42.015Z",
+        },
+      ];
+      nuxtApp.payload.state["$sevent-hub-received-count"] = 1;
+    },
+    { nextDestinationIp: destinationIp, nextProtocol: protocol },
+  );
+}
+
 test("anonymous deployment bypasses application login", async ({ page }) => {
   await page.goto("/login");
 
@@ -350,6 +386,54 @@ test("data source rail remains bounded at narrow viewport", async ({ page }) => 
     .toEqual({ horizontal: true, vertical: true });
 });
 
+test("log detail renders destination flag and separates Event Hub metadata", async ({ page }) => {
+  await page.route("**/api/ip-country", async (route) => {
+    const body = route.request().postDataJSON() as { ips: string[] };
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        results: body.ips.map((ip) => ({ countryCode: "US", ip })),
+      },
+    });
+  });
+  await enterAnonymousMode(page);
+  await seedDetailLog(page);
+
+  await page.getByRole("row").filter({ hasText: "deny-web" }).getByRole("cell").first().click();
+  const dialog = page.getByRole("dialog", { name: "Log detail" });
+  await expect(dialog.getByText("hub-policy", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("hub-collection-group", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Event Hub metadata" })).toBeVisible();
+  await expect(dialog.getByText("Sequence", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Enqueued", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Partition", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Copy Policy" })).toBeVisible();
+  await expect(
+    dialog.getByRole("img", { name: "GeoIP country: United States (US)" }),
+  ).toBeVisible();
+});
+
+test("log detail identifies an internal RFC 1918 destination", async ({ page }) => {
+  await enterAnonymousMode(page);
+  await seedDetailLog(page, "172.16.0.1");
+
+  await page.getByRole("row").filter({ hasText: "deny-web" }).getByRole("cell").first().click();
+  const dialog = page.getByRole("dialog", { name: "Log detail" });
+  await expect(dialog.getByRole("img", { name: "Internal address (RFC 1918)" })).toBeVisible();
+  await expect(dialog.getByText("172.16.0.1", { exact: true })).toBeVisible();
+});
+
+test("log detail explains a known ICMP type", async ({ page }) => {
+  await enterAnonymousMode(page);
+  await seedDetailLog(page, "20.30.40.50", "ICMP Type=8");
+
+  await expect(
+    page.getByRole("table", { name: "Firewall logs" }).getByText("ICMP Type=8", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("row").filter({ hasText: "deny-web" }).getByRole("cell").first().click();
+  const dialog = page.getByRole("dialog", { name: "Log detail" });
+  await expect(dialog.getByText("ICMP Type=8 (Echo Request)", { exact: true })).toBeVisible();
+});
 
 test("destination country flag follows a recycled visible row", async ({ page }) => {
   let releaseFirstLookup: (() => void) | undefined;

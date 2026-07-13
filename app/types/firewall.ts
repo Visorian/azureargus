@@ -8,6 +8,8 @@ export interface FirewallLogRecord {
   sourcePort?: string;
   destinationIp?: string;
   destinationPort?: string;
+  policy?: string;
+  ruleCollectionGroup?: string;
   ruleCollection?: string;
   rule?: string;
   message: string;

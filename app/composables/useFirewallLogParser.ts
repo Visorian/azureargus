@@ -45,7 +45,15 @@ function normalizeTimestamp(value: string | Date | undefined) {
   return new Date(0).toISOString();
 }
 
-function extractLegacyAction(message: string) {
+function extractActionFallback(message: string, category: string) {
+  const normalizedCategory = category.toLowerCase();
+  if (
+    normalizedCategory === "azfwdnsquery" ||
+    (normalizedCategory === "azurefirewalldnsproxy" && /^\s*DNS Request\s*:/i.test(message))
+  ) {
+    return "DNS query";
+  }
+
   const actionMatch = message.match(/\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/i);
   if (actionMatch?.[2]) {
     return actionMatch[2].toUpperCase();
@@ -75,6 +83,20 @@ function extractLegacyProtocol(message: string) {
 
   const keywordMatch = message.match(/\b(tcp|udp|icmp|http|https)\b/i);
   return keywordMatch?.[1]?.toUpperCase() ?? "Unknown";
+}
+
+function extractLegacyPolicy(message: string) {
+  return message
+    .match(
+      /\bPolicy\s*:\s*(.*?)(?=\.\s*(?:Rule Collection Group|Rule Collection|Rule)\s*:|$)/i,
+    )?.[1]
+    ?.trim();
+}
+
+function extractLegacyRuleCollectionGroup(message: string) {
+  return message
+    .match(/\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/i)?.[1]
+    ?.trim();
 }
 
 function extractIpPorts(message: string) {
@@ -133,7 +155,7 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
   const action =
     readString(properties, ["action", "Action"]) ||
     readString(rawRecord, ["action", "Action"]) ||
-    extractLegacyAction(message);
+    extractActionFallback(message, category);
   const protocol =
     readString(properties, ["protocol", "Protocol"]) ||
     readString(rawRecord, ["protocol", "Protocol"]) ||
@@ -154,6 +176,22 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     readString(properties, ["destinationPort", "DestinationPort"]) ||
     readString(rawRecord, ["destinationPort", "DestinationPort"]) ||
     legacyAddressParts.destinationPort;
+  const policy =
+    readString(properties, ["policy", "Policy", "policyName"]) ||
+    readString(rawRecord, ["policy", "Policy", "policyName"]) ||
+    extractLegacyPolicy(message);
+  const ruleCollectionGroup =
+    readString(properties, [
+      "ruleCollectionGroup",
+      "RuleCollectionGroup",
+      "ruleCollectionGroupName",
+    ]) ||
+    readString(rawRecord, [
+      "ruleCollectionGroup",
+      "RuleCollectionGroup",
+      "ruleCollectionGroupName",
+    ]) ||
+    extractLegacyRuleCollectionGroup(message);
   const ruleCollection =
     readString(properties, ["ruleCollection", "RuleCollection", "ruleCollectionName"]) ||
     readString(rawRecord, ["ruleCollection", "RuleCollection", "ruleCollectionName"]);
@@ -168,7 +206,8 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     (category === "AZFWNetworkRule" && actionReason === "Default Action" ? "Default" : undefined);
   const sequenceNumber =
     input.sequenceNumber === undefined ? undefined : String(input.sequenceNumber);
-  const enqueuedTimeUtc = normalizeTimestamp(input.enqueuedTimeUtc);
+  const enqueuedTimeUtc =
+    input.enqueuedTimeUtc === undefined ? undefined : normalizeTimestamp(input.enqueuedTimeUtc);
   const id = [
     input.partitionId ?? "partition",
     sequenceNumber ?? "sequence",
@@ -184,6 +223,8 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     sourcePort,
     destinationIp,
     destinationPort,
+    policy,
+    ruleCollectionGroup,
     ruleCollection,
     rule,
     message,
@@ -202,6 +243,8 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     sourcePort,
     destinationIp,
     destinationPort,
+    policy,
+    ruleCollectionGroup,
     ruleCollection,
     rule,
     message,

@@ -27,6 +27,8 @@ describe("log history record mapping", () => {
       accessToken: "token",
       connectionString: "Endpoint=sb://example/;SharedAccessKey=secret",
       consumerGroup: "$Default",
+      policy: "hub-policy",
+      ruleCollectionGroup: "hub-collection-group",
       sharedAccessKey: "secret",
     };
 
@@ -37,7 +39,9 @@ describe("log history record mapping", () => {
       category: "AZFWNetworkRule",
       id: "id",
       message: "Allow TCP",
+      policy: "hub-policy",
       protocol: "TCP",
+      ruleCollectionGroup: "hub-collection-group",
       searchableText: "allow tcp",
       timestamp: "2026-07-09T12:00:00.000Z",
     });

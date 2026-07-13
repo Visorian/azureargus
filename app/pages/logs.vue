@@ -15,6 +15,7 @@ import type {
   LogAnalyticsQueryResponse,
 } from "#shared/types/logAnalytics";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
+import { formatIcmpProtocol } from "~/utils/icmpProtocol";
 import { LOG_ANALYSIS_CATEGORIES, type LogAnalysisDateRange } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
 
@@ -33,6 +34,11 @@ interface DetailField {
   value?: string;
   mono?: boolean;
   wide?: boolean;
+}
+
+interface DetailSection {
+  fields: DetailField[];
+  title?: string;
 }
 
 type QuickFilterKey = "category" | "action" | "protocol" | "source" | "destination";
@@ -258,7 +264,7 @@ const logAppliedRangeLabel = computed(() => {
 
   return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)}`;
 });
-const parsedDetailFields = computed<DetailField[]>(() => {
+const parsedDetailSections = computed<DetailSection[]>(() => {
   const log = selectedLog.value;
   if (log === null) {
     return [];
@@ -268,7 +274,9 @@ const parsedDetailFields = computed<DetailField[]>(() => {
     { label: "Timestamp", value: formatTime(log.timestamp), mono: true },
     { label: "Category", value: log.category },
     { label: "Action", value: log.action },
-    { label: "Protocol", value: log.protocol },
+    { label: "Protocol", value: formatIcmpProtocol(log.protocol) },
+    { label: "Policy", value: log.policy },
+    { label: "Rule collection group", value: log.ruleCollectionGroup },
     { label: "Rule collection", value: log.ruleCollection },
     { label: "Rule", value: log.rule },
     { label: "Source IP", value: log.sourceIp, mono: true },
@@ -282,19 +290,24 @@ const parsedDetailFields = computed<DetailField[]>(() => {
     { label: "Destination port", value: log.destinationPort, mono: true },
   ];
 
+  const sections: DetailSection[] = [{ fields }];
+
   if (!logAnalysisActive.value) {
-    fields.push(
-      { label: "Partition", value: log.partitionId, mono: true },
+    const eventHubFields: DetailField[] = [
       { label: "Sequence", value: log.sequenceNumber, mono: true },
       {
         label: "Enqueued",
         value: log.enqueuedTimeUtc ? formatTime(log.enqueuedTimeUtc) : undefined,
         mono: true,
       },
-    );
+    ].filter((field) => field.value !== undefined && field.value !== "");
+
+    if (eventHubFields.length > 0) {
+      sections.push({ fields: eventHubFields, title: "Event Hub metadata" });
+    }
   }
 
-  return fields;
+  return sections;
 });
 const rawLogJson = computed(() => {
   if (selectedLog.value === null) {
@@ -715,7 +728,7 @@ function statusColor(status: string) {
         color="neutral"
         variant="outline"
         square
-        size="sm"
+        size="md"
         class="absolute top-1/2 right-2 z-20 -translate-y-1/2 rounded-full bg-white dark:bg-brand-gray-950"
         @click="expandSidebar"
       />
@@ -730,7 +743,7 @@ function statusColor(status: string) {
           color="neutral"
           variant="outline"
           square
-          size="sm"
+          size="md"
           class="absolute top-3 right-3 z-20 rounded-full bg-white dark:bg-brand-gray-950 lg:top-1/2 lg:right-auto lg:left-0 lg:-translate-x-1/2 lg:-translate-y-1/2"
           @click="collapseSidebar"
         />
@@ -1134,39 +1147,53 @@ function statusColor(status: string) {
     >
       <template #body>
         <div v-if="selectedLog" class="space-y-4">
-          <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <div
-              v-for="field in parsedDetailFields"
-              :key="field.label"
-              :class="field.wide ? 'sm:col-span-2' : ''"
-            >
-              <dt class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                {{ field.label }}
-              </dt>
-              <dd
-                class="mt-1 flex min-w-0 items-start gap-2 text-brand-gray-950 dark:text-brand-gray-50"
+          <section
+            v-for="(section, sectionIndex) in parsedDetailSections"
+            :key="section.title ?? sectionIndex"
+            class="space-y-3"
+          >
+            <div v-if="section.title" class="flex items-center gap-3">
+              <h3
+                class="shrink-0 text-xs font-semibold tracking-wide text-brand-gray-600 uppercase dark:text-brand-gray-300"
               >
-                <DestinationCountryFlag
-                  v-if="field.countryDestination"
-                  :destination="field.countryDestination"
-                  :lookup="ipCountryLookup"
-                />
-                <span :class="['min-w-0 break-words', field.mono ? 'font-mono text-xs' : '']">
-                  {{ displayValue(field.value) }}
-                </span>
-                <UButton
-                  class="shrink-0"
-                  variant="ghost"
-                  color="neutral"
-                  size="xs"
-                  icon="i-lucide-copy"
-                  :aria-label="`Copy ${field.label}`"
-                  :disabled="!field.value"
-                  @click.stop="copyValue(field.label, field.value)"
-                />
-              </dd>
+                {{ section.title }}
+              </h3>
+              <div class="h-px flex-1 bg-brand-gray-200 dark:bg-brand-gray-700" />
             </div>
-          </dl>
+            <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              <div
+                v-for="field in section.fields"
+                :key="field.label"
+                :class="field.wide ? 'sm:col-span-2' : ''"
+              >
+                <dt class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+                  {{ field.label }}
+                </dt>
+                <dd
+                  class="mt-1 flex min-w-0 items-center gap-2 text-brand-gray-950 dark:text-brand-gray-50"
+                >
+                  <DestinationCountryFlag
+                    v-if="field.countryDestination"
+                    :destination="field.countryDestination"
+                    :lookup="ipCountryLookup"
+                  />
+                  <span :class="['min-w-0 break-words', field.mono ? 'font-mono text-xs' : '']">
+                    {{ displayValue(field.value) }}
+                  </span>
+                  <UButton
+                    class="shrink-0"
+                    variant="ghost"
+                    color="neutral"
+                    size="xs"
+                    icon="i-lucide-copy"
+                    :aria-label="`Copy ${field.label}`"
+                    :disabled="!field.value"
+                    @click.stop="copyValue(field.label, field.value)"
+                  />
+                </dd>
+              </div>
+            </dl>
+          </section>
           <section
             class="rounded-md border border-brand-gray-200 bg-brand-gray-50 dark:border-brand-gray-700 dark:bg-brand-gray-900"
           >

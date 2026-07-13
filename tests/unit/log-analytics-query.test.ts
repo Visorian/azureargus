@@ -25,6 +25,8 @@ const columns = [
   "DestinationIp",
   "DestinationFqdn",
   "DestinationPort",
+  "Policy",
+  "RuleCollectionGroup",
   "RuleCollection",
   "Rule",
   "Message",
@@ -59,6 +61,10 @@ describe("Log Analytics KQL builder", () => {
     expect(result.limit).toBe(1_000);
     expect(result.query).toContain(
       "union isfuzzy=true withsource=Category AZFWNetworkRule, AZFWApplicationRule, AZFWNatRule",
+    );
+    expect(result.query).toContain('Policy = tostring(column_ifexists("Policy", ""))');
+    expect(result.query).toContain(
+      'RuleCollectionGroup = tostring(column_ifexists("RuleCollectionGroup", ""))',
     );
     expect(result.query).toContain('ActionReason =~ "Default Action"');
     expect(result.query).toContain("| order by TimeGenerated desc");
@@ -117,6 +123,8 @@ describe("Log Analytics response mapping", () => {
         "20.30.40.50",
         "",
         "443",
+        "hub-policy",
+        "hub-collection-group",
         "blocked",
         "deny-web",
         "Deny TCP",
@@ -131,6 +139,8 @@ describe("Log Analytics response mapping", () => {
         "example.com",
         "example.com",
         "443",
+        "app-policy",
+        "app-collection-group",
         "web",
         "allow-web",
         "Allow HTTPS",
@@ -152,6 +162,8 @@ describe("Log Analytics response mapping", () => {
       category: "AZFWApplicationRule",
       destinationIp: "example.com",
       destinationPort: "443",
+      policy: "app-policy",
+      ruleCollectionGroup: "app-collection-group",
     });
     expect(result.records[0]?.raw).toEqual({
       TimeGenerated: "2026-07-10T10:01:00.000Z",
@@ -163,6 +175,8 @@ describe("Log Analytics response mapping", () => {
       DestinationIp: "example.com",
       DestinationFqdn: "example.com",
       DestinationPort: "443",
+      Policy: "app-policy",
+      RuleCollectionGroup: "app-collection-group",
       RuleCollection: "web",
       Rule: "allow-web",
       Message: "Allow HTTPS",
@@ -253,6 +267,9 @@ describe("Log Analytics Azure request", () => {
     }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(LogAnalyticsQueryError);
-    expect(error).toMatchObject({ kind: "timeout", message: "Log Analytics query failed" });
+    expect(error).toMatchObject({
+      kind: "timeout",
+      message: "Log Analytics query failed",
+    });
   });
 });

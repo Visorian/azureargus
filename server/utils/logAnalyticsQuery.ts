@@ -39,6 +39,8 @@ const REQUIRED_RESULT_COLUMNS = [
   "DestinationIp",
   "DestinationFqdn",
   "DestinationPort",
+  "Policy",
+  "RuleCollectionGroup",
   "RuleCollection",
   "Rule",
   "Message",
@@ -55,6 +57,8 @@ const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFW
     DestinationIp = tostring(column_ifexists("DestinationIp", "")),
     DestinationFqdn = tostring(column_ifexists("Fqdn", "")),
     DestinationPort = tostring(column_ifexists("DestinationPort", "")),
+    Policy = tostring(column_ifexists("Policy", "")),
+    RuleCollectionGroup = tostring(column_ifexists("RuleCollectionGroup", "")),
     RuleCollection = tostring(column_ifexists("RuleCollection", "")),
     Rule = tostring(column_ifexists("Rule", "")),
     ActionReason = tostring(column_ifexists("ActionReason", ""))
@@ -74,6 +78,8 @@ const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFW
     " to ",
     DestinationAddress,
     iff(isempty(DestinationPort), "", strcat(":", DestinationPort)),
+    iff(isempty(Policy), "", strcat(" policy ", Policy)),
+    iff(isempty(RuleCollectionGroup), "", strcat(" collection group ", RuleCollectionGroup)),
     iff(isempty(RuleCollection), "", strcat(" collection ", RuleCollection)),
     iff(isempty(Rule), "", strcat(" rule ", Rule))
   )
@@ -87,6 +93,8 @@ const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFW
     DestinationIp = DestinationAddress,
     DestinationFqdn,
     DestinationPort,
+    Policy,
+    RuleCollectionGroup,
     RuleCollection,
     Rule,
     Message
@@ -99,6 +107,8 @@ const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFW
     SourcePort, " ",
     DestinationIp, " ",
     DestinationPort, " ",
+    Policy, " ",
+    RuleCollectionGroup, " ",
     RuleCollection, " ",
     Rule, " ",
     Message
@@ -261,6 +271,10 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
     const destinationFqdn = optionalText(readTextCell(row, columnIndexes, "DestinationFqdn"));
     const destinationIp = projectedDestination ?? destinationFqdn;
     const destinationPort = optionalText(readTextCell(row, columnIndexes, "DestinationPort"));
+    const policy = optionalText(readTextCell(row, columnIndexes, "Policy"));
+    const ruleCollectionGroup = optionalText(
+      readTextCell(row, columnIndexes, "RuleCollectionGroup"),
+    );
     const ruleCollection = optionalText(readTextCell(row, columnIndexes, "RuleCollection"));
     const rule = optionalText(readTextCell(row, columnIndexes, "Rule"));
     const message = readTextCell(row, columnIndexes, "Message");
@@ -274,6 +288,8 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
       DestinationIp: projectedDestination,
       DestinationFqdn: destinationFqdn,
       DestinationPort: destinationPort,
+      Policy: policy,
+      RuleCollectionGroup: ruleCollectionGroup,
       RuleCollection: ruleCollection,
       Rule: rule,
       Message: message,
@@ -287,6 +303,8 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
       sourcePort,
       destinationIp,
       destinationPort,
+      policy,
+      ruleCollectionGroup,
       ruleCollection,
       rule,
       message,
@@ -305,6 +323,8 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
       sourcePort,
       destinationIp,
       destinationPort,
+      policy,
+      ruleCollectionGroup,
       ruleCollection,
       rule,
       message,
