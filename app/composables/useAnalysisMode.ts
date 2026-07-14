@@ -10,6 +10,8 @@ interface UseAnalysisModeOptions {
   closeDetail(): void;
   disconnectRealTime(): Promise<void>;
   mode: Ref<AnalysisMode>;
+  pauseRealTime(): void;
+  resetRealTime(): Promise<void>;
 }
 
 function getErrorMessage(error: unknown) {
@@ -19,6 +21,7 @@ function getErrorMessage(error: unknown) {
 export function useAnalysisMode(options: UseAnalysisModeOptions) {
   const transitioning = ref(false);
   const lastError = ref<string | null>(null);
+  let logAnalysisCommitted = false;
 
   async function setMode(nextMode: AnalysisMode) {
     if (nextMode === options.mode.value || transitioning.value) {
@@ -37,19 +40,32 @@ export function useAnalysisMode(options: UseAnalysisModeOptions) {
     lastError.value = null;
     try {
       if (nextMode === "log-analysis") {
-        await options.disconnectRealTime();
+        options.pauseRealTime();
       } else {
         options.abortLogAnalysis();
       }
 
       options.closeDetail();
       options.mode.value = nextMode;
+      logAnalysisCommitted = false;
       return true;
     } catch (error: unknown) {
       lastError.value = getErrorMessage(error);
       return false;
     } finally {
       transitioning.value = false;
+    }
+  }
+
+  async function commitLogAnalysis() {
+    if (options.mode.value !== "log-analysis" || logAnalysisCommitted) return false;
+    logAnalysisCommitted = true;
+    try {
+      await options.resetRealTime();
+      return true;
+    } catch (error: unknown) {
+      lastError.value = getErrorMessage(error);
+      return false;
     }
   }
 
@@ -63,6 +79,7 @@ export function useAnalysisMode(options: UseAnalysisModeOptions) {
   });
 
   return {
+    commitLogAnalysis,
     lastError,
     setMode,
     transitioning,

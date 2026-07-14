@@ -355,6 +355,8 @@ const modeState = useAnalysisMode({
   closeDetail,
   disconnectRealTime: receiver.disconnect,
   mode: analysisMode,
+  pauseRealTime: receiver.pause,
+  resetRealTime: receiver.reset,
 });
 const modeTransitioning = modeState.transitioning;
 const actionLabels: Record<string, string> = {
@@ -634,6 +636,20 @@ async function updateAnalysisMode(mode: AnalysisMode, event: MouseEvent) {
   if (control instanceof HTMLElement && control.isConnected) {
     control.focus();
   }
+}
+
+function commitLogAnalysisInteraction(event: Event) {
+  if (!logAnalysisActive.value) return;
+  const target = event.target;
+  if (
+    !(target instanceof Element) ||
+    !target.closest(
+      'a, button, input, select, textarea, [role="button"], [role="checkbox"], [role="combobox"], [role="switch"], [role="textbox"]',
+    )
+  ) {
+    return;
+  }
+  void modeState.commitLogAnalysis();
 }
 
 function closeDetail() {
@@ -1164,32 +1180,38 @@ function statusColor(status: string) {
             @disconnect="receiver.disconnect"
             @update-log-retention="updateLogRetention"
           />
-          <LogsLogAnalyticsSettingsPanel
+          <div
             v-else
-            v-model:tenant-id="temporaryTenantId"
-            v-model:workspace-id="temporaryWorkspaceId"
-            v-model:query-limit="logAnalyticsQueryLimit"
-            :admin-consent-url="temporaryAdminConsentUrl"
-            :dns-readiness="dnsSourceReadiness.readiness.value"
-            :dns-readiness-status="dnsSourceReadiness.status.value"
-            :lens="activeLens"
-            :temporary="temporaryLogAnalyticsMode"
-            :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
-            :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
-            :temporary-access-error="temporaryAccessError"
-            :temporary-access-status="temporaryAccessStatus"
-            :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
-            :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
-            :temporary-azure-username="temporaryAzureUsername"
-            :tenant-options="temporaryTenants"
-            :workspace-options="temporaryWorkspaces"
-            @change-tenant="changeTemporaryTenant"
-            @change-workspace="changeTemporaryWorkspace"
-            @connect-azure="connectTemporaryLogAnalytics"
-            @disconnect-azure="disconnectTemporaryLogAnalytics"
-            @authorize-log-analytics="authorizeTemporaryLogAnalytics"
-            @refresh-azure-access="refreshTemporaryAzureAccess"
-          />
+            @click.capture="commitLogAnalysisInteraction"
+            @input.capture="commitLogAnalysisInteraction"
+            @change.capture="commitLogAnalysisInteraction"
+          >
+            <LogsLogAnalyticsSettingsPanel
+              v-model:tenant-id="temporaryTenantId"
+              v-model:workspace-id="temporaryWorkspaceId"
+              v-model:query-limit="logAnalyticsQueryLimit"
+              :admin-consent-url="temporaryAdminConsentUrl"
+              :dns-readiness="dnsSourceReadiness.readiness.value"
+              :dns-readiness-status="dnsSourceReadiness.status.value"
+              :lens="activeLens"
+              :temporary="temporaryLogAnalyticsMode"
+              :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
+              :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
+              :temporary-access-error="temporaryAccessError"
+              :temporary-access-status="temporaryAccessStatus"
+              :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
+              :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
+              :temporary-azure-username="temporaryAzureUsername"
+              :tenant-options="temporaryTenants"
+              :workspace-options="temporaryWorkspaces"
+              @change-tenant="changeTemporaryTenant"
+              @change-workspace="changeTemporaryWorkspace"
+              @connect-azure="connectTemporaryLogAnalytics"
+              @disconnect-azure="disconnectTemporaryLogAnalytics"
+              @authorize-log-analytics="authorizeTemporaryLogAnalytics"
+              @refresh-azure-access="refreshTemporaryAzureAccess"
+            />
+          </div>
         </section>
 
         <footer
@@ -1235,6 +1257,9 @@ function statusColor(status: string) {
       <section
         v-if="activeLens === 'all-logs'"
         class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950 lg:order-1"
+        @click.capture="commitLogAnalysisInteraction"
+        @input.capture="commitLogAnalysisInteraction"
+        @change.capture="commitLogAnalysisInteraction"
       >
         <div class="shrink-0 bg-white dark:bg-brand-gray-950">
           <div
@@ -1579,6 +1604,9 @@ function statusColor(status: string) {
       <section
         v-else
         class="flex min-h-0 flex-col overflow-hidden bg-white dark:bg-brand-gray-950 lg:order-1"
+        @click.capture="commitLogAnalysisInteraction"
+        @input.capture="commitLogAnalysisInteraction"
+        @change.capture="commitLogAnalysisInteraction"
       >
         <div
           role="group"

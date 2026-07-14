@@ -531,6 +531,13 @@ export function useEventHubReceiver({
     }
   }
 
+  async function reset() {
+    const disconnecting = disconnect();
+    clear();
+    errors.value = [];
+    await disconnecting;
+  }
+
   function addNormalizedBatchSink(sink: NormalizedLogBatchSink) {
     normalizedBatchSinks.add(sink);
     return () => normalizedBatchSinks.delete(sink);
@@ -552,6 +559,7 @@ export function useEventHubReceiver({
     paused,
     connect,
     disconnect,
+    reset,
     pause,
     resume,
     clear,

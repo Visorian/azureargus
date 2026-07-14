@@ -546,6 +546,59 @@ describe("Event Hub receiver helpers", () => {
     expect(receiver.status.value).toBe("idle");
   });
 
+  it("resets paused receiver resources and buffered state", async () => {
+    vi.useFakeTimers();
+    const mocks = installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const subscriptionClose = vi.fn<() => Promise<void>>(async () => undefined);
+    const clientClose = vi.fn<() => Promise<void>>(async () => undefined);
+    const client: EventHubReceiverClient = {
+      close: clientClose,
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: subscriptionClose };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    const onClear = vi.fn<() => void>();
+    receiver.addNormalizedBatchSink({
+      onClear,
+      onRecords: vi.fn<(records: readonly FirewallLogRecord[]) => void>(),
+    });
+    await receiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents(
+      [
+        {
+          body: {
+            category: "AZFWNetworkRule",
+            properties: { Action: "Allow", Protocol: "UDP" },
+            time: "2026-07-12T12:00:00.000Z",
+          },
+        },
+      ],
+      { partitionId: "0" },
+    );
+    await requireHandlers(handlers).processError(new Error("stale receiver error"));
+    vi.advanceTimersByTime(100);
+    expect(mocks.logs.value).toHaveLength(1);
+    expect(receiver.receivedCount.value).toBe(1);
+
+    receiver.pause();
+    await receiver.reset();
+
+    expect(subscriptionClose).toHaveBeenCalledOnce();
+    expect(clientClose).toHaveBeenCalledOnce();
+    expect(mocks.logs.value).toEqual([]);
+    expect(receiver.receivedCount.value).toBe(0);
+    expect(receiver.latestSourceTimestamp.value).toBeNull();
+    expect(receiver.errors.value).toEqual([]);
+    expect(receiver.status.value).toBe("idle");
+    expect(onClear).toHaveBeenCalledOnce();
+  });
+
   it("shares one teardown across overlapping disconnect calls", async () => {
     installNuxtMocks();
     const closeBarrier = createDeferred<void>();
