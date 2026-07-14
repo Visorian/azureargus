@@ -19,6 +19,7 @@ function createRequest(): LogAnalyticsQueryRequest {
       source: "",
       destination: "",
     },
+    limit: 1_000,
     sort: { key: "timestamp", direction: "desc" },
   };
 }
@@ -61,6 +62,14 @@ describe("Log Analytics request contract", () => {
     expect(validateLogAnalyticsQueryRequest({ ...createRequest(), from: "not-a-timestamp" })).toBe(
       false,
     );
+  });
+
+  it.each([99, 5_001, 1_000.5, Number.NaN])("rejects invalid query limit %s", (limit) => {
+    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), limit })).toBe(false);
+  });
+
+  it.each([100, 1_000, 5_000])("accepts bounded query limit %s", (limit) => {
+    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), limit })).toBe(true);
   });
 
   it("rejects oversized filters and non-allowlisted sorts", () => {

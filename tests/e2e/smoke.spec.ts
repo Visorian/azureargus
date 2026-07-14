@@ -298,6 +298,11 @@ test("managed Event Hub uses configured server stream without exposing credentia
   await expect(
     page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
   ).toBeVisible();
+  const firewallTable = page.getByRole("table", { name: "Firewall logs" });
+  const tableBox = await firewallTable.boundingBox();
+  expect(tableBox?.x).toBeGreaterThanOrEqual(15);
+  await expect(firewallTable).toHaveCSS("border-top-width", "1px");
+  await expect(firewallTable).toHaveCSS("border-radius", "6px");
 });
 
 test("managed Log Analytics-only deployment starts in configured query mode", async ({ page }) => {
@@ -305,10 +310,11 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
   await page.route("**/api/log-analytics/query", async (route) => {
     const requestBody = route.request().postDataJSON();
     expect(requestBody).not.toHaveProperty("workspaceId");
+    expect(requestBody.limit).toBe(2_000);
     await route.fulfill({
       contentType: "application/json",
       json: {
-        limit: 1_000,
+        limit: 2_000,
         records: [
           {
             action: "Allow",
@@ -335,7 +341,13 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
   );
   await expect(page.getByRole("textbox", { name: "Workspace ID*" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Connect to Azure" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Run query" }).click();
+  const runQuery = page.getByRole("button", { name: "Run query" });
+  await expect(
+    page.getByRole("complementary").getByRole("button", { name: "Run query" }),
+  ).toHaveCount(0);
+  await expect(runQuery).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Query result limit" }).fill("2000");
+  await runQuery.click();
   await expect(page.getByText("1 visible", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
@@ -344,8 +356,13 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
 
 test("managed DNS lens queries explicitly and shows decoded response size", async ({ page }) => {
   await mockManagedDeployment(page, { eventHub: false, logAnalytics: true });
+  let readinessRequests = 0;
   let listRequests = 0;
   let detailRequests = 0;
+  let releaseDetail!: () => void;
+  const detailRelease = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
   const observation = {
     id: "dns-query:proxy-structured:0",
     timestamp: "2026-07-12T14:30:00.000Z",
@@ -397,6 +414,21 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
     raw: {},
   };
 
+  await page.route("**/api/log-analytics/dns/readiness", async (route) => {
+    readinessRequests += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        readiness: [
+          { source: "proxy-structured", status: "success", sampleCount: 2 },
+          { source: "proxy-legacy", status: "failed", sampleCount: null },
+          { source: "flow-trace", status: "success", sampleCount: 2 },
+          { source: "network-rule", status: "success", sampleCount: 2 },
+        ],
+      },
+    });
+  });
+
   await page.route("**/api/log-analytics/dns/list", async (route) => {
     listRequests += 1;
     const requestBody = route.request().postDataJSON();
@@ -410,6 +442,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
         outcome: "",
         source: "",
       },
+      limit: 1_000,
     });
     await route.fulfill({
       contentType: "application/json",
@@ -454,13 +487,22 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
         transportObservations: [transportObservation],
         queriedEntriesTruncated: false,
         transportObservationsTruncated: false,
-        sources: [{ source: "proxy-structured", availability: "available", truncated: false }],
+        sources: [
+          { source: "proxy-structured", availability: "available", truncated: false },
+          {
+            source: "proxy-legacy",
+            availability: "failed",
+            truncated: false,
+            warning: "Source query failed",
+          },
+        ],
       },
     });
   });
   await page.route("**/api/log-analytics/dns/detail", async (route) => {
     detailRequests += 1;
     expect(route.request().postDataJSON()).toEqual({ selector });
+    await detailRelease;
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -473,18 +515,53 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   });
 
   await page.goto("/logs");
+  await expect.poll(() => readinessRequests).toBe(1);
+  expect(listRequests).toBe(0);
   await expect(page.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
   await page.getByRole("button", { name: "DNS troubleshooting" }).click();
   await expect(page.getByText("Run DNS query to load entries.")).toBeVisible();
+  await expect(
+    page.getByTestId("log-filter-row").getByRole("button", { name: "Apply filters" }),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("log-filter-row").getByRole("button", { name: "Reset" }),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("log-query-row").getByRole("button", { name: "Run query" }),
+  ).toBeVisible();
+  await expect(page.getByText("2+ records", { exact: true })).toHaveCount(3);
+  await expect(page.getByText("Check failed", { exact: true })).toBeVisible();
+  expect(readinessRequests).toBe(1);
   expect(listRequests).toBe(0);
   expect(detailRequests).toBe(0);
 
   await page.getByRole("button", { name: "Run query" }).click();
-  await expect(page.getByText("2 queried entries · 1 unidentified transports")).toBeVisible();
+  expect(readinessRequests).toBe(1);
+  const dnsStatusRail = page.getByRole("group", {
+    name: "DNS troubleshooting status and actions",
+  });
+  await expect(
+    dnsStatusRail.getByText("2 queried entries · 1 unidentified transport"),
+  ).toBeVisible();
+  await expect(dnsStatusRail.getByRole("status")).toHaveCount(1);
   await expect.poll(() => listRequests).toBe(1);
   await expect(page.getByText("Response received", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Transport observed", { exact: true })).toHaveCount(0);
+  const showUnidentified = page.getByRole("checkbox", {
+    name: "Show unidentified DNS transport",
+  });
+  await showUnidentified.check();
   await expect(page.getByText("Transport observed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not observed", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .locator('section[aria-labelledby="dns-entry-heading"]')
+      .getByText("Partial", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("response-unknown", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("DNS results may be incomplete", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/could not be queried/)).toHaveCount(0);
+  await expect(page.getByText("Source query failed", { exact: true })).toHaveCount(0);
 
   const resultFilter = page.getByLabel("DNS result");
   await resultFilter.click();
@@ -511,32 +588,48 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
 
   const entryHeader = page.getByTestId("dns-entry-header");
   const entryRow = page.getByRole("button", { name: "Open DNS details for example.com." });
-  const transportHeader = page.getByTestId("dns-transport-header");
   const transportRow = page.getByRole("button", {
     name: "Open DNS transport details for ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.254:65535",
   });
 
   await expectAlignedColumns(entryHeader, entryRow);
-  await expectAlignedColumns(transportHeader, transportRow);
-  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(3));
-  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(1));
+  await expectAlignedColumns(entryHeader, transportRow);
+  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(4));
+  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(5));
 
   await page.setViewportSize({ width: 390, height: 812 });
   await transportRow.scrollIntoViewIfNeeded();
-  for (const testId of ["dns-entry-scroll", "dns-transport-scroll"]) {
-    await page.getByTestId(testId).evaluate((element) => {
-      element.scrollLeft = 120;
-    });
-  }
+  await page.getByTestId("dns-entry-scroll").evaluate((element) => {
+    element.scrollLeft = 120;
+  });
   await expectAlignedColumns(entryHeader, entryRow);
-  await expectAlignedColumns(transportHeader, transportRow);
-  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(3));
-  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(1));
+  await expectAlignedColumns(entryHeader, transportRow);
+  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(4));
+  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(5));
+
+  await transportRow.click();
+  const transportDetail = page.getByRole("dialog", { name: "DNS transport detail" });
+  await expect(transportDetail).toBeVisible();
+  await expect(transportDetail.getByText("168.63.129.16:53", { exact: true })).toBeVisible();
+  await expect.poll(() => detailRequests).toBe(0);
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Open DNS details for example.com." }).click();
 
-  await expect(page.getByRole("dialog", { name: "DNS resolution detail" })).toBeVisible();
+  const resolutionDetail = page.getByRole("dialog", { name: "DNS resolution detail" });
+  await expect(resolutionDetail).toBeVisible();
+  await expect(resolutionDetail.getByText("Loading DNS observations…")).toBeVisible();
+  await resolutionDetail.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  const loadingBox = await resolutionDetail.boundingBox();
+  releaseDetail();
   await expect(page.getByText("300 bytes, not TTL")).toBeVisible();
+  const loadedBox = await resolutionDetail.boundingBox();
+  expect(loadingBox).not.toBeNull();
+  expect(loadedBox).not.toBeNull();
+  expect(Math.abs(loadedBox!.width - loadingBox!.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(loadedBox!.height - loadingBox!.height)).toBeLessThanOrEqual(1);
   await expect(page.getByRole("button", { name: "Copy raw" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Raw message" })).toHaveValue(
     JSON.stringify(observation.raw, null, 2),
@@ -562,8 +655,12 @@ test("anonymous delegated Log Analytics exposes temporary authentication control
 
   await page.goto("/logs");
   await page.getByRole("button", { name: "Log Analytics" }).click();
-  await expect(page.getByRole("textbox", { name: "Workspace ID*" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect to Azure" })).toBeVisible();
+  await expect(page.getByText("Tenant ID", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Workspace ID", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Grant tenant consent" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Grant query permission" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Permissions" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect to Azure" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Run query" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Leave" })).toHaveCount(0);
 });
@@ -580,7 +677,7 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   );
   await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeDisabled();
   await expect(
-    page.getByText("Log Analytics delegated authentication is not configured."),
+    page.getByText("Temporary Log Analytics app registration is not configured."),
   ).toBeVisible();
   await expect(dataSource.getByText(/visible \/ .*received/)).toHaveCount(0);
   await expect(dataSource.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
@@ -715,7 +812,7 @@ test("pane action rails align with filters and separate them", async ({ page }) 
     dnsControls.getByRole("status"),
     dnsControls.getByRole("button", { name: "Clear DNS results" }),
     page.getByRole("textbox", { name: "Domain or DNS search" }),
-    page.getByRole("combobox", { name: "DNS sort order" }),
+    page.getByRole("button", { name: "Reset", exact: true }),
   );
 });
 
@@ -726,7 +823,7 @@ test("data source rail keeps source left and view right", async ({ page }) => {
   const dataSourceControls = rail.getByRole("group", { name: "Data source" });
   const viewControls = rail.getByRole("group", { name: "View" });
   const logAnalyticsRequirement = rail.getByText(
-    "Log Analytics delegated authentication is not configured.",
+    "Temporary Log Analytics app registration is not configured.",
     { exact: true },
   );
 

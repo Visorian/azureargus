@@ -35,6 +35,7 @@ interface UseDnsTroubleshootingOptions {
   active: Readonly<Ref<boolean>>;
   draftRange: LogAnalysisDateRange;
   mode: Readonly<Ref<AnalysisMode>>;
+  queryLimit: Readonly<Ref<number>>;
   receiver: DnsReceiverSource;
   requestDetail: DetailRequest;
   requestList: ListRequest;
@@ -113,6 +114,7 @@ function matchesTransport(observation: DnsObservation, filters: DnsFilters) {
     .toLowerCase();
   return (
     (!search || searchable.includes(search)) &&
+    equals(observation.queryType, filters.queryType) &&
     includes(observation.clientIp, filters.client.trim()) &&
     equals(observation.protocol, filters.protocol) &&
     equals(observation.outcome, filters.outcome) &&
@@ -131,6 +133,23 @@ function compareEntries(left: DnsEntry, right: DnsEntry, sort: DnsSort) {
   return sort.direction === "asc" ? result : -result;
 }
 
+function transportEntry(observation: DnsObservation): DnsEntry {
+  return {
+    id: observation.id,
+    timestamp: observation.timestamp,
+    client: [observation.clientIp, observation.clientPort].filter(Boolean).join(":"),
+    protocol: observation.protocol,
+    path: observation.path,
+    outcome: observation.outcome,
+    observationCount: 1,
+    completeness: "partial",
+    confidence: "uncorrelated",
+    source: observation.source,
+    warnings: [...observation.warnings],
+    observations: [observation],
+  };
+}
+
 function hasActiveFilters(filters: DnsFilters) {
   return Object.values(filters).some((value) => value.trim().length > 0);
 }
@@ -146,10 +165,25 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
   const logFilters = reactive(defaultFilters());
   const realtimeSort = reactive(defaultSort());
   const logSort = reactive(defaultSort());
+  const realtimeShowUnidentifiedTransports = ref(false);
+  const logShowUnidentifiedTransports = ref(false);
   const filters = computed(() =>
     options.mode.value === "log-analysis" ? logFilters : realtimeFilters,
   );
   const sort = computed(() => (options.mode.value === "log-analysis" ? logSort : realtimeSort));
+  const showUnidentifiedTransports = computed({
+    get: () =>
+      options.mode.value === "log-analysis"
+        ? logShowUnidentifiedTransports.value
+        : realtimeShowUnidentifiedTransports.value,
+    set: (value: boolean) => {
+      if (options.mode.value === "log-analysis") {
+        logShowUnidentifiedTransports.value = value;
+      } else {
+        realtimeShowUnidentifiedTransports.value = value;
+      }
+    },
+  });
   const realtimeEntries = shallowRef<DnsEntry[]>([]);
   const realtimeTransports = shallowRef<DnsObservation[]>([]);
   const logResponse = shallowRef<DnsListQueryResponse | null>(null);
@@ -222,7 +256,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       ? (logResponse.value?.transportObservations ?? [])
       : realtimeTransports.value,
   );
-  const filteredEntries = computed(() => {
+  const filteredNamedEntries = computed(() => {
     const currentEntries = entries.value;
     const filtered = hasActiveFilters(filters.value)
       ? currentEntries.filter((entry) => matchesEntry(entry, filters.value))
@@ -235,6 +269,13 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       ? transports.value.filter((observation) => matchesTransport(observation, filters.value))
       : transports.value,
   );
+  const filteredEntries = computed(() => {
+    if (!showUnidentifiedTransports.value) return filteredNamedEntries.value;
+    return [
+      ...filteredNamedEntries.value,
+      ...filteredTransports.value.map((observation) => transportEntry(observation)),
+    ].toSorted((left, right) => compareEntries(left, right, sort.value));
+  });
   const filterOptions = computed<DnsFilterOptions>(() => ({
     outcomes: sortedOptions([
       ...entries.value.map((entry) => entry.outcome),
@@ -317,7 +358,12 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     logLastError.value = null;
     try {
       const response = await options.requestList(
-        { from: range.from, to: range.to, filters: { ...filters.value } },
+        {
+          from: range.from,
+          to: range.to,
+          filters: { ...filters.value },
+          limit: options.queryLimit.value,
+        },
         controller.signal,
       );
       if (
@@ -362,19 +408,22 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
   async function selectEntry(entry: DnsEntry) {
     abortDetail();
     selectedEntry.value = entry;
-    detail.value = {
-      observations: entry.observations,
-      detailTruncated: false,
-      completeness: entry.completeness,
-      warnings: entry.warnings,
-    };
-    detailStatus.value = "success";
-    if (options.mode.value !== "log-analysis" || !entry.detailSelector) return true;
+    detailError.value = null;
+    if (options.mode.value !== "log-analysis" || !entry.detailSelector) {
+      detail.value = {
+        observations: entry.observations,
+        detailTruncated: false,
+        completeness: entry.completeness,
+        warnings: entry.warnings,
+      };
+      detailStatus.value = "success";
+      return true;
+    }
+    detail.value = null;
     const controller = new AbortController();
     const generation = ++detailGeneration;
     detailController = controller;
     detailStatus.value = "loading";
-    detailError.value = null;
     try {
       const response = await options.requestDetail(
         { selector: entry.detailSelector },
@@ -394,23 +443,6 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     }
   }
 
-  function selectTransport(observation: DnsObservation) {
-    return selectEntry({
-      id: observation.id,
-      timestamp: observation.timestamp,
-      client: [observation.clientIp, observation.clientPort].filter(Boolean).join(":"),
-      protocol: observation.protocol,
-      path: observation.path,
-      outcome: observation.outcome,
-      observationCount: 1,
-      completeness: "partial",
-      confidence: "uncorrelated",
-      source: observation.source,
-      warnings: [...observation.warnings],
-      observations: [observation],
-    });
-  }
-
   function closeDetail() {
     abortDetail();
     selectedEntry.value = null;
@@ -421,6 +453,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
 
   function resetFilters() {
     Object.assign(filters.value, defaultFilters());
+    showUnidentifiedTransports.value = false;
   }
 
   function clearActiveDataset() {
@@ -479,20 +512,22 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     entriesTruncated,
     filterOptions,
     filters,
+    queriedEntryCount: computed(() => filteredNamedEntries.value.length),
     lastError,
     rangeDirty,
     rangeError,
     resetFilters,
     run,
     selectEntry,
-    selectTransport,
     selectedEntry,
+    showUnidentifiedTransports,
     sources: computed(() =>
       options.mode.value === "log-analysis" ? (logResponse.value?.sources ?? []) : [],
     ),
     status,
     sort,
     transports: filteredTransports,
+    unidentifiedTransportCount: computed(() => filteredTransports.value.length),
     transportsTruncated,
     truncated,
   };

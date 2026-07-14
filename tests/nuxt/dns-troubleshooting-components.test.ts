@@ -84,20 +84,45 @@ const SelectStub = defineComponent({
 });
 
 describe("DNS troubleshooting components", () => {
-  it("renders named entries separately from unidentified transport and emits selection", async () => {
+  it("renders enabled unidentified transport as partial DNS activity and emits selection", async () => {
     const filters = createFilters();
     const transport = {
       ...observation,
       id: "transport-1",
       source: "network-rule" as const,
       outcome: "transport-observed" as const,
+      queryName: undefined,
+      queryType: undefined,
+      serverIp: "168.63.129.16",
+      serverPort: "53",
+    };
+    const transportEntry: DnsEntry = {
+      id: transport.id,
+      timestamp: transport.timestamp,
+      client: "10.0.0.4:53000",
+      protocol: transport.protocol,
+      path: transport.path,
+      outcome: transport.outcome,
+      observationCount: 1,
+      completeness: "partial",
+      confidence: "uncorrelated",
+      source: transport.source,
+      warnings: [],
+      observations: [transport],
     };
     const wrapper = await mountSuspended(DnsTroubleshootingView, {
       props: {
-        entries: [entry],
+        entries: [entry, transportEntry],
         filters,
-        transports: [transport],
-        sources: [],
+        showUnidentifiedTransports: true,
+        sources: [
+          {
+            source: "proxy-legacy",
+            availability: "failed",
+            truncated: false,
+            warning: "Source query failed",
+          },
+        ],
         status: "success",
         error: null,
         entriesTruncated: false,
@@ -112,24 +137,27 @@ describe("DNS troubleshooting components", () => {
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     });
 
-    expect(wrapper.text()).toContain("Queried entries");
+    expect(wrapper.text()).toContain("DNS activity");
     expect(wrapper.text()).toContain("api.example.");
-    expect(wrapper.text()).toContain("Unidentified DNS transport");
+    expect(wrapper.text()).toContain("Not observed");
     expect(wrapper.text()).toContain("10.0.0.4:53000");
+    expect(wrapper.text()).toContain("168.63.129.16:53");
     expect(wrapper.text()).toContain("Observations");
     expect(wrapper.text()).toContain("Destination");
-    expect(wrapper.text()).toContain("Transport truncated");
+    expect(wrapper.text()).toContain("Unidentified transport truncated");
+    expect(wrapper.text()).toContain("Partial");
     expect(wrapper.text()).toContain("Response received");
     expect(wrapper.text()).toContain("Transport observed");
     expect(wrapper.text()).not.toContain("response-unknown");
     expect(wrapper.text()).not.toContain("Entries truncated");
+    expect(wrapper.text()).not.toContain("Source query failed");
 
     await wrapper.get('button[aria-label="Open DNS details for api.example."]').trigger("click");
     expect(wrapper.emitted("select")?.[0]).toEqual([entry]);
     await wrapper
       .get('button[aria-label="Open DNS transport details for 10.0.0.4:53000"]')
       .trigger("click");
-    expect(wrapper.emitted("selectTransport")?.[0]).toEqual([transport]);
+    expect(wrapper.emitted("select")?.[1]).toEqual([transportEntry]);
   });
 
   it("shows DNS list request errors", async () => {
@@ -137,7 +165,7 @@ describe("DNS troubleshooting components", () => {
       props: {
         entries: [],
         filters: createFilters(),
-        transports: [],
+        showUnidentifiedTransports: false,
         sources: [],
         status: "error",
         error: "DNS query failed.",
@@ -155,6 +183,49 @@ describe("DNS troubleshooting components", () => {
 
     expect(wrapper.get('[role="alert"]').text()).toBe("DNS query failed.");
     expect(wrapper.text()).not.toContain("No matching DNS entries.");
+    expect(wrapper.text()).not.toContain("Source query failed");
+  });
+
+  it("keeps matching filter actions in the filter row and query controls in the next row", async () => {
+    const wrapper = await mountSuspended(DnsTroubleshootingView, {
+      props: {
+        entries: [],
+        filters: createFilters(),
+        showUnidentifiedTransports: false,
+        sources: [],
+        status: "success",
+        error: null,
+        entriesTruncated: false,
+        transportsTruncated: false,
+        logAnalysis: true,
+        canApplyFilters: true,
+        filterOptions,
+        selectedEntryId: null,
+        sort: { key: "timestamp", direction: "desc" },
+        "onUpdate:filters": () => undefined,
+      },
+      slots: { "query-controls": "<div>Query controls</div>" },
+      global: { stubs: { RecycleScroller: RecycleScrollerStub } },
+    });
+
+    const filterRow = wrapper.get('[data-testid="log-filter-row"]');
+    const filterGrid = filterRow.get('[data-testid="dns-filter-grid"]');
+    const filterActions = wrapper.get('[data-testid="log-filter-actions"]');
+    const buttons = filterActions.findAllComponents({ name: "UButton" });
+    expect(buttons[0]?.props("label")).toBe("Apply filters");
+    expect(buttons[1]?.props("label")).toBe("Reset");
+    expect(buttons[1]?.props()).toMatchObject({ color: "neutral", variant: "ghost" });
+
+    await buttons[0]!.trigger("click");
+    await buttons[1]!.trigger("click");
+    expect(wrapper.emitted("apply")).toHaveLength(1);
+    expect(wrapper.emitted("reset")).toHaveLength(1);
+    expect(wrapper.get('[data-testid="log-query-row"]').text()).toContain("Query controls");
+    expect(filterRow.element.contains(filterGrid.element)).toBe(true);
+    expect(filterRow.element.contains(filterActions.element)).toBe(true);
+    expect(filterRow.getComponent({ name: "UCheckbox" }).props("label")).toBe(
+      "Show unidentified DNS transport",
+    );
   });
 
   it("maps explicit sort-order choices without a separate direction control", async () => {
@@ -163,7 +234,7 @@ describe("DNS troubleshooting components", () => {
       props: {
         entries: [],
         filters: createFilters(),
-        transports: [],
+        showUnidentifiedTransports: false,
         sources: [],
         status: "success",
         error: null,
@@ -218,7 +289,6 @@ describe("DNS troubleshooting components", () => {
         },
         error: null,
         loading: false,
-        sources: [],
         "onUpdate:open": () => undefined,
       },
       global: {
@@ -243,6 +313,34 @@ describe("DNS troubleshooting components", () => {
     expect(rawMessage.attributes("spellcheck")).toBe("false");
     expect(rawMessage.attributes("wrap")).toBe("off");
     expect(rawMessage.attributes("rows")).toBe("6");
+  });
+
+  it("keeps pending remote detail separate from absence evidence", async () => {
+    const wrapper = await mountSuspended(DnsDetailModal, {
+      props: {
+        open: true,
+        entry: { ...entry, observations: [] },
+        detail: null,
+        error: null,
+        loading: true,
+        "onUpdate:open": () => undefined,
+      },
+      global: {
+        stubs: {
+          UModal: { template: "<div><slot name='body' /></div>" },
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("Loading DNS observations…");
+    expect(wrapper.text()).toContain("api.example.");
+    expect(wrapper.text()).not.toContain("Observed flow");
+    expect(wrapper.text()).not.toContain("Decoded fields");
+    expect(wrapper.text()).not.toContain("Not observed: terminal response");
+
+    await wrapper.setProps({ loading: false, error: "DNS detail query failed." });
+    expect(wrapper.get('[role="alert"]').text()).toBe("DNS detail query failed.");
+    expect(wrapper.text()).not.toContain("Observed flow");
   });
 
   it("labels transport-only evidence without claiming DNS resolution", async () => {
@@ -274,10 +372,14 @@ describe("DNS troubleshooting components", () => {
           source: "network-rule",
           observations: [transport],
         },
-        detail: null,
+        detail: {
+          observations: [transport],
+          detailTruncated: false,
+          completeness: "partial",
+          warnings: [],
+        },
         error: null,
         loading: false,
-        sources: [],
         "onUpdate:open": () => undefined,
       },
       global: {

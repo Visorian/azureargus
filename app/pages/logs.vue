@@ -25,8 +25,10 @@ import type {
   DnsFilters,
   DnsListQueryRequest,
   DnsListQueryResponse,
+  DnsReadinessResponse,
   DnsSort,
 } from "#shared/types/dns";
+import type { DnsReadinessTarget } from "~/composables/useDnsSourceReadiness";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
 import { formatIcmpProtocol } from "~/utils/icmpProtocol";
 import { createLogAnalyticsAdminConsentUrl, isEntraId } from "~/utils/logAnalyticsOnboarding";
@@ -36,6 +38,7 @@ import {
   type LogAnalysisDateRange,
 } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
+import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from "#shared/utils/logAnalytics";
 
 definePageMeta({
   layout: "application",
@@ -167,6 +170,44 @@ const canRunLogAnalytics = computed(
       temporaryTenantValid.value &&
       temporaryWorkspaceValid.value),
 );
+const dnsReadinessTarget = computed<DnsReadinessTarget | null>(() => {
+  if (!import.meta.client) return null;
+  if (managedMode.value && logAnalyticsSourceAvailable.value) {
+    return { mode: "managed" };
+  }
+  if (
+    temporaryLogAnalyticsMode.value &&
+    temporaryLogAnalyticsAuth.connected.value &&
+    temporaryLogAnalyticsAuth.authorized.value &&
+    temporaryTenantValid.value &&
+    temporaryWorkspaceValid.value
+  ) {
+    return {
+      mode: "delegated",
+      tenantId: temporaryTenantId.value.trim(),
+      workspaceId: temporaryWorkspaceId.value.trim(),
+    };
+  }
+  return null;
+});
+
+async function requestDnsReadiness(target: DnsReadinessTarget, signal: AbortSignal) {
+  if (target.mode === "managed") {
+    return requestFetch<DnsReadinessResponse>("/api/log-analytics/dns/readiness", { signal });
+  }
+  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(target.tenantId, false);
+  return requestFetch<DnsReadinessResponse>("/api/log-analytics/delegated-dns/readiness", {
+    body: { workspaceId: target.workspaceId },
+    headers: { authorization: `Bearer ${accessToken}` },
+    method: "POST",
+    signal,
+  });
+}
+
+const dnsSourceReadiness = useDnsSourceReadiness({
+  request: requestDnsReadiness,
+  target: dnsReadinessTarget,
+});
 
 function temporaryLogAnalyticsRunRequirement() {
   if (!temporaryLogAnalyticsAuth.connected.value) {
@@ -204,10 +245,12 @@ const realTimeSorting = useLogSorting(realTimeQuery.filteredLogs);
 const logFilters = reactive(createDefaultLogFilters());
 const logSort = reactive(createDefaultLogSort());
 const logDraftRange = reactive(createDefaultLogAnalysisDateRange());
+const logAnalyticsQueryLimit = ref(DEFAULT_LOG_ANALYTICS_QUERY_LIMIT);
 const logQuery = useLogAnalyticsQuery({
   active: allLogsLogAnalysisActive,
   draftRange: logDraftRange,
   filters: logFilters,
+  queryLimit: logAnalyticsQueryLimit,
   onBeforeReplace: closeDetail,
   onError: (message) => {
     toast.add({
@@ -291,6 +334,7 @@ const dns = useDnsTroubleshooting({
   active: dnsLensActive,
   draftRange: logDraftRange,
   mode: analysisMode,
+  queryLimit: logAnalyticsQueryLimit,
   receiver,
   requestDetail: requestDnsDetail,
   requestList: requestDnsList,
@@ -380,6 +424,12 @@ const countLabel = computed(() => {
     ? ` / first ${logQuery.limit.value?.toLocaleString() ?? ""}`
     : "";
   return `${sortedLogs.value.length} visible${suffix}${updating ? " / updating" : ""}`;
+});
+const dnsCountLabel = computed(() => {
+  const transportCount = dns.unidentifiedTransportCount.value;
+  return `${dns.queriedEntryCount.value} queried entries · ${transportCount} unidentified ${
+    transportCount === 1 ? "transport" : "transports"
+  }`;
 });
 const logAppliedRangeLabel = computed(() => {
   if (logAppliedRange.value === null) {
@@ -713,6 +763,10 @@ async function runDnsAnalysis() {
     }
   }
   await dns.run();
+}
+
+async function applyDnsFilters() {
+  await dns.applyFilters();
 }
 
 function runActiveLogAnalysis() {
@@ -1068,7 +1122,7 @@ function statusColor(status: string) {
     >
       <UButton
         v-if="sidebarCollapsed"
-        icon="i-lucide-panel-right-open"
+        icon="i-lucide-settings"
         aria-label="Expand sidebar"
         color="neutral"
         variant="outline"
@@ -1083,7 +1137,7 @@ function statusColor(status: string) {
         class="relative flex max-h-80 min-h-0 flex-col border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:order-2 lg:max-h-none lg:border-b-0 lg:border-l"
       >
         <UButton
-          icon="i-lucide-panel-right-close"
+          icon="i-lucide-settings"
           aria-label="Collapse sidebar"
           color="neutral"
           variant="outline"
@@ -1114,14 +1168,11 @@ function statusColor(status: string) {
             v-else
             v-model:tenant-id="temporaryTenantId"
             v-model:workspace-id="temporaryWorkspaceId"
-            :draft-range="logDraftRange"
+            v-model:query-limit="logAnalyticsQueryLimit"
+            :admin-consent-url="temporaryAdminConsentUrl"
+            :dns-readiness="dnsSourceReadiness.readiness.value"
+            :dns-readiness-status="dnsSourceReadiness.status.value"
             :lens="activeLens"
-            :applied-range-label="activeAppliedRangeLabel"
-            :can-run="canRunLogAnalytics"
-            :query-status="activeQueryStatus"
-            :range-dirty="activeRangeDirty"
-            :range-error="activeRangeError"
-            :results-truncated="activeResultsTruncated"
             :temporary="temporaryLogAnalyticsMode"
             :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
             :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
@@ -1185,9 +1236,7 @@ function statusColor(status: string) {
         v-if="activeLens === 'all-logs'"
         class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 dark:bg-brand-gray-950 lg:order-1"
       >
-        <div
-          class="shrink-0 border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950"
-        >
+        <div class="shrink-0 bg-white dark:bg-brand-gray-950">
           <div
             role="group"
             aria-label="All logs status and actions"
@@ -1249,76 +1298,81 @@ function statusColor(status: string) {
             </div>
           </div>
 
-          <div class="flex flex-wrap gap-2 px-4 py-3">
-            <UInput
-              v-model="activeFilters.search"
-              icon="i-lucide-search"
-              placeholder="Search logs"
-              class="min-w-48 flex-1"
-              @keydown.enter="logAnalysisActive && applyLogFilters()"
-            />
-            <USelectMenu
-              v-model="categoryFilter"
-              :items="categories"
-              clear
-              placeholder="Category"
-              class="w-38"
-            />
-            <USelectMenu
-              v-model="actionFilter"
-              :items="actions"
-              :create-item="logAnalysisActive"
-              clear
-              placeholder="Action"
-              class="w-34"
-              @create="createAction"
-            />
-            <USelectMenu
-              v-model="protocolFilter"
-              :items="protocols"
-              :create-item="logAnalysisActive"
-              clear
-              placeholder="Protocol"
-              class="w-34"
-              @create="createProtocol"
-            />
-            <UInput
-              v-model="activeFilters.source"
-              placeholder="Source"
-              class="w-40"
-              @keydown.enter="logAnalysisActive && applyLogFilters()"
-            />
-            <UInput
-              v-model="activeFilters.destination"
-              placeholder="Destination"
-              class="w-40"
-              @keydown.enter="logAnalysisActive && applyLogFilters()"
-            />
-            <UButton
-              v-if="logAnalysisActive"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-filter"
-              label="Apply filters"
-              :disabled="!logCanApplyFilters || logRangeDirty"
-              :loading="logQueryStatus === 'refreshing'"
-              @click="applyLogFilters"
-            />
-            <UButton
-              variant="ghost"
-              color="neutral"
-              icon="i-lucide-rotate-ccw"
-              label="Reset"
-              @click="resetActiveFilters"
-            />
-          </div>
+          <LogsLogAnalysisToolbar>
+            <template #filters>
+              <UInput
+                v-model="activeFilters.search"
+                icon="i-lucide-search"
+                placeholder="Search logs"
+                class="min-w-48 flex-1"
+                @keydown.enter="logAnalysisActive && applyLogFilters()"
+              />
+              <USelectMenu
+                v-model="categoryFilter"
+                :items="categories"
+                clear
+                placeholder="Category"
+                class="w-38"
+              />
+              <USelectMenu
+                v-model="actionFilter"
+                :items="actions"
+                :create-item="logAnalysisActive"
+                clear
+                placeholder="Action"
+                class="w-34"
+                @create="createAction"
+              />
+              <USelectMenu
+                v-model="protocolFilter"
+                :items="protocols"
+                :create-item="logAnalysisActive"
+                clear
+                placeholder="Protocol"
+                class="w-34"
+                @create="createProtocol"
+              />
+              <UInput
+                v-model="activeFilters.source"
+                placeholder="Source"
+                class="w-40"
+                @keydown.enter="logAnalysisActive && applyLogFilters()"
+              />
+              <UInput
+                v-model="activeFilters.destination"
+                placeholder="Destination"
+                class="w-40"
+                @keydown.enter="logAnalysisActive && applyLogFilters()"
+              />
+              <LogsLogFilterActions
+                :show-apply="logAnalysisActive"
+                :apply-disabled="!logCanApplyFilters || logRangeDirty"
+                :apply-loading="logQueryStatus === 'refreshing'"
+                @apply="applyLogFilters"
+                @reset="resetActiveFilters"
+              />
+            </template>
+            <template v-if="logAnalysisActive" #query>
+              <LogsLogAnalyticsQueryControls
+                :draft-range="logDraftRange"
+                :applied-range-label="activeAppliedRangeLabel"
+                :can-run="canRunLogAnalytics"
+                :query-status="activeQueryStatus"
+                :range-dirty="activeRangeDirty"
+                :range-error="activeRangeError"
+                :results-truncated="activeResultsTruncated"
+                @update:draft-range="updateLogDraftRange"
+                @run="runActiveLogAnalysis"
+              />
+            </template>
+          </LogsLogAnalysisToolbar>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-hidden bg-white dark:bg-brand-gray-950">
+        <div class="min-h-0 flex-1 overflow-hidden bg-white p-4 dark:bg-brand-gray-950">
           <div
             role="table"
             aria-label="Firewall logs"
-            class="flex h-full min-h-0 flex-col overflow-hidden"
+            class="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-brand-gray-200 dark:border-brand-gray-700"
           >
             <div
               role="row"
@@ -1541,6 +1595,9 @@ function statusColor(status: string) {
             >
               {{ activeStatus }}
             </UBadge>
+            <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
+              {{ dnsCountLabel }}
+            </span>
             <UBadge
               v-if="showRealTimeLag"
               icon="i-lucide-clock-3"
@@ -1587,23 +1644,36 @@ function statusColor(status: string) {
           :filters="dns.filters.value"
           :sort="dns.sort.value"
           :entries="dns.entries.value"
-          :transports="dns.transports.value"
           :sources="dns.sources.value"
           :status="dns.status.value"
           :error="dns.lastError.value"
           :entries-truncated="dns.entriesTruncated.value"
           :transports-truncated="dns.transportsTruncated.value"
+          v-model:show-unidentified-transports="dns.showUnidentifiedTransports.value"
           :log-analysis="logAnalysisActive"
           :can-apply-filters="dns.canApplyFilters.value"
           :filter-options="dns.filterOptions.value"
           :selected-entry-id="dns.selectedEntry.value?.id ?? null"
           @update:filters="updateDnsFilters"
           @update:sort="updateDnsSort"
-          @apply="dns.applyFilters"
+          @apply="applyDnsFilters"
           @reset="dns.resetFilters"
           @select="dns.selectEntry"
-          @select-transport="dns.selectTransport"
-        />
+        >
+          <template v-if="logAnalysisActive" #query-controls>
+            <LogsLogAnalyticsQueryControls
+              :draft-range="logDraftRange"
+              :applied-range-label="activeAppliedRangeLabel"
+              :can-run="canRunLogAnalytics"
+              :query-status="activeQueryStatus"
+              :range-dirty="activeRangeDirty"
+              :range-error="activeRangeError"
+              :results-truncated="activeResultsTruncated"
+              @update:draft-range="updateLogDraftRange"
+              @run="runActiveLogAnalysis"
+            />
+          </template>
+        </LogsDnsTroubleshootingView>
       </section>
     </div>
 
@@ -1700,7 +1770,6 @@ function statusColor(status: string) {
       :detail="dns.detail.value"
       :error="dns.detailError.value"
       :loading="dns.detailStatus.value === 'loading'"
-      :sources="dns.sources.value"
     />
   </div>
 </template>

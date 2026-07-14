@@ -4,10 +4,12 @@ import { useDnsTroubleshooting } from "../../app/composables/useDnsTroubleshooti
 import { normalizeFirewallLogRecord } from "../../app/composables/useFirewallLogParser";
 import type { NormalizedLogBatchSink } from "../../app/composables/useEventHubReceiver";
 import type {
+  DnsDetailQueryRequest,
   DnsDetailQueryResponse,
   DnsEntry,
   DnsListQueryRequest,
   DnsListQueryResponse,
+  DnsObservation,
 } from "../../shared/types/dns";
 
 function createEntry(id: string, queryName = `${id}.example.`): DnsEntry {
@@ -46,20 +48,52 @@ function createResponse(...entries: DnsEntry[]): DnsListQueryResponse {
   };
 }
 
+function createTransport(): DnsObservation {
+  return {
+    id: "transport",
+    timestamp: "2026-07-12T08:31:00.000Z",
+    source: "network-rule",
+    stage: "transport",
+    path: "direct",
+    outcome: "transport-observed",
+    clientIp: "10.0.0.4",
+    clientPort: "53000",
+    serverIp: "168.63.129.16",
+    serverPort: "53",
+    protocol: "UDP",
+    parseState: "parsed",
+    warnings: [],
+    raw: {},
+    responseFlags: [],
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function createHarness(
   requestList: (body: DnsListQueryRequest, signal: AbortSignal) => Promise<DnsListQueryResponse>,
+  requestDetail: (
+    body: DnsDetailQueryRequest,
+    signal: AbortSignal,
+  ) => Promise<DnsDetailQueryResponse> = async () => ({
+    observations: [],
+    detailTruncated: false,
+    completeness: "complete",
+    warnings: [],
+  }),
 ) {
   const active = ref(true);
   const mode = ref<"real-time-analysis" | "log-analysis">("log-analysis");
   const draftRange = reactive({ from: "2026-07-12T08:00", to: "2026-07-12T09:00" });
+  const queryLimit = ref(1_000);
   const removeSink = vi.fn<() => boolean>(() => true);
   const sinkHolder: { current?: NormalizedLogBatchSink } = {};
   const scope = effectScope();
@@ -68,18 +102,14 @@ function createHarness(
       active,
       draftRange,
       mode,
+      queryLimit,
       receiver: {
         addNormalizedBatchSink: (nextSink) => {
           sinkHolder.current = nextSink;
           return removeSink;
         },
       },
-      requestDetail: async (): Promise<DnsDetailQueryResponse> => ({
-        observations: [],
-        detailTruncated: false,
-        completeness: "complete",
-        warnings: [],
-      }),
+      requestDetail,
       requestList,
     }),
   );
@@ -88,7 +118,7 @@ function createHarness(
     if (!sinkHolder.current) throw new Error("DNS sink was not registered.");
     return sinkHolder.current;
   }
-  return { active, dns, draftRange, mode, removeSink, scope, getSink };
+  return { active, dns, draftRange, mode, queryLimit, removeSink, scope, getSink };
 }
 
 describe("DNS troubleshooting client", () => {
@@ -103,11 +133,13 @@ describe("DNS troubleshooting client", () => {
     expect(harness.dns.canApplyFilters.value).toBe(false);
     await harness.dns.run();
     expect(requests).toHaveLength(1);
+    expect(requests[0]?.limit).toBe(1_000);
     expect(harness.dns.canApplyFilters.value).toBe(true);
     expect(harness.dns.entries.value).toHaveLength(1);
 
     harness.dns.filters.value.search = "missing";
     harness.dns.sort.value.key = "queryName";
+    harness.queryLimit.value = 2_000;
     await nextTick();
     expect(harness.dns.entries.value).toEqual([]);
     expect(requests).toHaveLength(1);
@@ -115,6 +147,7 @@ describe("DNS troubleshooting client", () => {
     await harness.dns.applyFilters();
     expect(requests).toHaveLength(2);
     expect(requests[1]?.filters.search).toBe("missing");
+    expect(requests[1]?.limit).toBe(2_000);
 
     harness.mode.value = "real-time-analysis";
     await nextTick();
@@ -126,6 +159,10 @@ describe("DNS troubleshooting client", () => {
     await nextTick();
     expect(harness.dns.filters.value.search).toBe("missing");
     expect(harness.dns.sort.value.key).toBe("queryName");
+
+    harness.dns.showUnidentifiedTransports.value = true;
+    harness.dns.resetFilters();
+    expect(harness.dns.showUnidentifiedTransports.value).toBe(false);
 
     harness.scope.stop();
     expect(harness.removeSink).toHaveBeenCalledOnce();
@@ -196,6 +233,32 @@ describe("DNS troubleshooting client", () => {
     harness.scope.stop();
   });
 
+  it("keeps remote detail empty while loading and assigns only completed response", async () => {
+    const detailRequest = createDeferred<DnsDetailQueryResponse>();
+    const harness = createHarness(
+      async () => createResponse(createEntry("remote")),
+      () => detailRequest.promise,
+    );
+    await harness.dns.run();
+
+    const selection = harness.dns.selectEntry(harness.dns.entries.value[0]!);
+    expect(harness.dns.selectedEntry.value?.id).toBe("remote");
+    expect(harness.dns.detailStatus.value).toBe("loading");
+    expect(harness.dns.detail.value).toBeNull();
+
+    detailRequest.resolve({
+      observations: [createTransport()],
+      detailTruncated: false,
+      completeness: "partial",
+      warnings: [],
+    });
+    await selection;
+
+    expect(harness.dns.detailStatus.value).toBe("success");
+    expect(harness.dns.detail.value?.observations).toHaveLength(1);
+    harness.scope.stop();
+  });
+
   it("does not leak Log Analytics error status into Real-time DNS", async () => {
     const harness = createHarness(async () => {
       throw new Error("Log Analytics failed");
@@ -225,6 +288,42 @@ describe("DNS troubleshooting client", () => {
     await nextTick();
 
     expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(["a"]);
+    harness.scope.stop();
+  });
+
+  it("merges enabled unidentified transport into sorted partial DNS activity", async () => {
+    const transport = createTransport();
+    const harness = createHarness(async () => ({
+      ...createResponse(createEntry("named")),
+      transportObservations: [transport],
+    }));
+    await harness.dns.run();
+
+    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(["named"]);
+    harness.dns.showUnidentifiedTransports.value = true;
+    await nextTick();
+
+    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(["transport", "named"]);
+    expect(harness.dns.entries.value[0]).toMatchObject({
+      completeness: "partial",
+      confidence: "uncorrelated",
+      observationCount: 1,
+    });
+    expect(harness.dns.entries.value[0]).not.toHaveProperty("queryName");
+
+    harness.dns.filters.value.search = "168.63.129.16";
+    await nextTick();
+    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(["transport"]);
+    await harness.dns.selectEntry(harness.dns.entries.value[0]!);
+    expect(harness.dns.detail.value).toMatchObject({
+      completeness: "partial",
+      observations: [transport],
+    });
+
+    harness.dns.filters.value.search = "";
+    harness.dns.filters.value.queryType = "A";
+    await nextTick();
+    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(["named"]);
     harness.scope.stop();
   });
 
@@ -311,20 +410,6 @@ describe("DNS troubleshooting client", () => {
       expect(harness.dns.entries.value.map((entry) => entry.queryName)).toEqual(["api.example."]);
       expect(harness.dns.filterOptions.value.outcomes).toEqual(["response-unknown"]);
 
-      const transport = harness.dns.entries.value[0]!.observations[0]!;
-      await harness.dns.selectTransport({
-        ...transport,
-        id: "transport",
-        source: "network-rule",
-        stage: "transport",
-        path: "direct",
-        outcome: "transport-observed",
-      });
-      expect(harness.dns.selectedEntry.value).toMatchObject({
-        id: "transport",
-        completeness: "partial",
-      });
-      expect(harness.dns.selectedEntry.value).not.toHaveProperty("queryName");
       harness.scope.stop();
     } finally {
       vi.useRealTimers();

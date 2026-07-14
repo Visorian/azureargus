@@ -64,6 +64,7 @@ describe("Log analysis client", () => {
     const requests: LogAnalyticsQueryRequest[] = [];
     const active = ref(true);
     const filters = reactive(createDefaultLogFilters());
+    const queryLimit = ref(1_000);
     const sort = reactive(createDefaultLogSort());
     const onBeforeReplace = vi.fn();
     const scope = effectScope();
@@ -71,6 +72,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active,
         filters,
+        queryLimit,
         onBeforeReplace,
         request: async (body) => {
           requests.push(body);
@@ -88,6 +90,7 @@ describe("Log analysis client", () => {
 
     await query.run();
     expect(requests).toHaveLength(1);
+    expect(requests[0]?.limit).toBe(1_000);
     expect(query.hasRun.value).toBe(true);
     expect(query.records.value.map((record) => record.id)).toEqual(["query-1"]);
 
@@ -95,6 +98,7 @@ describe("Log analysis client", () => {
     await Promise.resolve();
     expect(requests).toHaveLength(1);
 
+    queryLimit.value = 2_000;
     filters.action = "Deny";
     await nextTick();
     expect(query.refinementPending.value).toBe(true);
@@ -107,6 +111,7 @@ describe("Log analysis client", () => {
     await Promise.resolve();
     expect(requests).toHaveLength(2);
     expect(requests[1]?.filters.action).toBe("Deny");
+    expect(requests[1]?.limit).toBe(2_000);
 
     filters.protocol = "UDP";
     await nextTick();
@@ -149,6 +154,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active,
         filters: reactive(createDefaultLogFilters()),
+        queryLimit: ref(1_000),
         request: async () => response("unused"),
         sort: reactive(createDefaultLogSort()),
       }),
@@ -189,6 +195,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
+        queryLimit: ref(1_000),
         request: () => requests[requestIndex++]!.promise,
         sort: reactive(createDefaultLogSort()),
       }),
@@ -220,6 +227,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active: ref(true),
         filters,
+        queryLimit: ref(1_000),
         request: async (body) => {
           requests.push(body);
           return requests.length === 1 ? initial.promise : response("refined");
@@ -257,6 +265,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
+        queryLimit: ref(1_000),
         request: (_body, signal) => {
           requestSignal = signal;
           return new Promise<LogAnalyticsQueryResponse>((_resolve, reject) => {
@@ -294,6 +303,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active,
         filters,
+        queryLimit: ref(1_000),
         request,
         sort: reactive(createDefaultLogSort()),
       }),
@@ -326,7 +336,7 @@ describe("Log analysis client", () => {
     const request = vi.fn(async () => response("unused"));
     const sort = reactive(createDefaultLogSort());
     const scope = effectScope();
-    useLogAnalyticsQuery({ active, filters, request, sort });
+    useLogAnalyticsQuery({ active, filters, queryLimit: ref(1_000), request, sort });
 
     filters.action = "Deny";
     sort.key = "action";
@@ -349,6 +359,7 @@ describe("Log analysis client", () => {
         active: ref(true),
         filters,
         onError,
+        queryLimit: ref(1_000),
         request: async () => {
           requestCount += 1;
           if (requestCount === 2) {
@@ -393,6 +404,7 @@ describe("Log analysis client", () => {
       useLogAnalyticsQuery({
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
+        queryLimit: ref(1_000),
         request: (_body, signal) => {
           requestCount += 1;
           if (requestCount === 1) {

@@ -133,9 +133,14 @@ export interface DnsListQueryRequest {
   from: string;
   to: string;
   filters: DnsFilters;
+  limit: number;
 }
 
 export interface DelegatedDnsListQueryRequest extends DnsListQueryRequest {
+  workspaceId: string;
+}
+
+export interface DelegatedDnsReadinessRequest {
   workspaceId: string;
 }
 
@@ -152,6 +157,22 @@ export interface DnsSourceStatus {
   availability: DnsSourceAvailability;
   truncated: boolean;
   warning?: string;
+}
+
+export type DnsSourceReadiness =
+  | {
+      source: DnsSourceKind;
+      status: "success";
+      sampleCount: 0 | 1 | 2;
+    }
+  | {
+      source: DnsSourceKind;
+      status: "forbidden" | "failed";
+      sampleCount: null;
+    };
+
+export interface DnsReadinessResponse {
+  readiness: DnsSourceReadiness[];
 }
 
 export interface DnsListQueryResponse {

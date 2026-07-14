@@ -18,7 +18,6 @@ const delegatedConfig = {
   public: {
     logAnalyticsDelegated: {
       clientId: "11111111-1111-4111-8111-111111111111",
-      tenantId: "22222222-2222-4222-8222-222222222222",
     },
   },
 };
@@ -36,6 +35,7 @@ function createRequest(): DelegatedLogAnalyticsQueryRequest {
       source: "",
     },
     from: "2026-07-10T10:00:00.000Z",
+    limit: 1_000,
     sort: { direction: "desc", key: "timestamp" },
     to: "2026-07-10T10:15:00.000Z",
     workspaceId: "33333333-3333-4333-8333-333333333333",

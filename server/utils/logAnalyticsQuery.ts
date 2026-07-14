@@ -6,9 +6,8 @@ import type {
   LogAnalyticsQueryResponse,
   LogAnalyticsSort,
 } from "../../shared/types/logAnalytics";
+import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
 
-const INITIAL_LIMIT = 1_000;
-const REFINED_LIMIT = 5_000;
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILTER_LENGTH = 256;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -341,10 +340,11 @@ export function validateLogAnalyticsQueryRequest(
 ): value is LogAnalyticsQueryRequest {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["from", "to", "filters", "sort"]) ||
+    !hasExactKeys(value, ["from", "to", "filters", "limit", "sort"]) ||
     !isIsoTimestamp(value.from) ||
     !isIsoTimestamp(value.to) ||
     !isValidFilterObject(value.filters) ||
+    !isLogAnalyticsQueryLimit(value.limit) ||
     !isValidSortObject(value.sort)
   ) {
     return false;
@@ -358,7 +358,10 @@ export function validateLogAnalyticsQueryRequest(
 export function validateDelegatedLogAnalyticsQueryRequest(
   value: unknown,
 ): value is DelegatedLogAnalyticsQueryRequest {
-  if (!isRecord(value) || !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "sort"])) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit", "sort"])
+  ) {
     return false;
   }
 
@@ -375,9 +378,7 @@ export function encodeKqlStringLiteral(value: string) {
 }
 
 export function getLogAnalyticsResultLimit(request: LogAnalyticsQueryRequest) {
-  const hasFilter = FILTER_KEYS.some((key) => request.filters[key].trim().length > 0);
-  const hasNonDefaultSort = request.sort.key !== "timestamp" || request.sort.direction !== "desc";
-  return hasFilter || hasNonDefaultSort ? REFINED_LIMIT : INITIAL_LIMIT;
+  return request.limit;
 }
 
 export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
@@ -445,7 +446,7 @@ export interface LogAnalyticsQueryTarget {
 export async function executeLogAnalyticsRawQuery(
   target: LogAnalyticsQueryTarget,
   query: string,
-  timespan: string,
+  timespan: string | undefined,
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
 ) {
@@ -475,7 +476,7 @@ export async function executeLogAnalyticsRawQuery(
             authorization: `Bearer ${accessToken}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ query, timespan }),
+          body: JSON.stringify(timespan === undefined ? { query } : { query, timespan }),
           signal: controller.signal,
         },
       );

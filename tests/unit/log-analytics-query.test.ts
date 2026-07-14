@@ -44,6 +44,7 @@ function createRequest(): LogAnalyticsQueryRequest {
       source: "",
       destination: "",
     },
+    limit: 1_000,
     sort: { key: "timestamp", direction: "desc" },
   };
 }
@@ -71,7 +72,7 @@ describe("Log Analytics KQL builder", () => {
     expect(result.query).toContain("| take 1001");
   });
 
-  it("matches trimmed case-insensitive browser filters and uses the refined cap", () => {
+  it("matches trimmed case-insensitive browser filters and preserves requested cap", () => {
     const request = createRequest();
     request.filters.search = "  Firewall  ";
     request.filters.category = "AZFWNetworkRule";
@@ -80,6 +81,7 @@ describe("Log Analytics KQL builder", () => {
     request.filters.source = "10.0.0.4:443";
     request.filters.destination = "Example.COM:443";
     request.sort = { key: "rule", direction: "asc" };
+    request.limit = 5_000;
 
     const result = buildLogAnalyticsQuery(request);
 

@@ -22,6 +22,7 @@ type QueryRequest = (
 interface UseLogAnalyticsQueryOptions {
   active: Readonly<Ref<boolean>>;
   filters: FirewallLogFilters;
+  queryLimit: Readonly<Ref<number>>;
   onBeforeReplace?: () => void;
   onError?: (message: string) => void;
   request?: QueryRequest;
@@ -147,6 +148,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
         source: options.filters.source,
       },
       from: range.from,
+      limit: options.queryLimit.value,
       sort: {
         direction: options.sort.direction,
         key: options.sort.key,

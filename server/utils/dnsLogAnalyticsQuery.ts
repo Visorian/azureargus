@@ -1,6 +1,7 @@
 import type {
   DelegatedDnsDetailQueryRequest,
   DelegatedDnsListQueryRequest,
+  DelegatedDnsReadinessRequest,
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
   DnsDetailSelector,
@@ -8,10 +9,13 @@ import type {
   DnsListQueryRequest,
   DnsListQueryResponse,
   DnsObservation,
+  DnsReadinessResponse,
   DnsSourceKind,
+  DnsSourceReadiness,
   DnsSourceStatus,
 } from "../../shared/types/dns";
 import { createDnsEntries, parseDnsObservation } from "../../shared/utils/dns";
+import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
 import {
   encodeKqlStringLiteral,
   executeLogAnalyticsRawQuery,
@@ -22,7 +26,6 @@ import {
 
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILTER_LENGTH = 256;
-const LIST_LIMIT = 1_000;
 const DETAIL_LIMIT = 200;
 const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_TIMESTAMP_PATTERN =
@@ -34,6 +37,11 @@ const FILTER_KEYS = ["search", "queryType", "client", "protocol", "outcome", "so
 
 interface SourceQuery {
   source: DnsSourceKind;
+  query: string;
+}
+
+interface ReadinessProbe {
+  sources: readonly DnsSourceKind[];
   query: string;
 }
 
@@ -76,18 +84,19 @@ function validRange(from: string, to: string) {
 export function validateDnsListQueryRequest(value: unknown): value is DnsListQueryRequest {
   return (
     isRecord(value) &&
-    hasExactKeys(value, ["from", "to", "filters"]) &&
+    hasExactKeys(value, ["from", "to", "filters", "limit"]) &&
     isIsoTimestamp(value.from) &&
     isIsoTimestamp(value.to) &&
     validRange(value.from, value.to) &&
-    isFilters(value.filters)
+    isFilters(value.filters) &&
+    isLogAnalyticsQueryLimit(value.limit)
   );
 }
 
 export function validateDelegatedDnsListQueryRequest(
   value: unknown,
 ): value is DelegatedDnsListQueryRequest {
-  if (!isRecord(value) || !hasExactKeys(value, ["workspaceId", "from", "to", "filters"])) {
+  if (!isRecord(value) || !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit"])) {
     return false;
   }
   const { workspaceId, ...request } = value;
@@ -95,6 +104,17 @@ export function validateDelegatedDnsListQueryRequest(
     typeof workspaceId === "string" &&
     WORKSPACE_ID_PATTERN.test(workspaceId) &&
     validateDnsListQueryRequest(request)
+  );
+}
+
+export function validateDelegatedDnsReadinessRequest(
+  value: unknown,
+): value is DelegatedDnsReadinessRequest {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["workspaceId"]) &&
+    typeof value.workspaceId === "string" &&
+    WORKSPACE_ID_PATTERN.test(value.workspaceId)
   );
 }
 
@@ -211,7 +231,7 @@ function matchesCanonicalFilters(observation: DnsObservation, filters: DnsFilter
 }
 
 export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[] {
-  const take = LIST_LIMIT + 1;
+  const take = request.limit + 1;
   const commonFields = {
     search: 'strcat(QueryName, " ", SourceIp, " ", ResponseCode, " ", ErrorMessage)',
     queryType: "QueryType",
@@ -318,6 +338,49 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
     : queries;
 }
 
+export function buildDnsReadinessProbes(): ReadinessProbe[] {
+  return [
+    {
+      sources: ["proxy-structured"],
+      query: ["AZFWDnsQuery", "| take 2", "| count", "| project SampleCount = toint(Count)"].join(
+        "\n",
+      ),
+    },
+    {
+      sources: ["proxy-legacy"],
+      query: [
+        "AzureDiagnostics",
+        '| where Category == "AzureFirewallDnsProxy"',
+        '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
+        '| where ResourceType =~ "AZUREFIREWALLS"',
+        "| take 2",
+        "| count",
+        "| project SampleCount = toint(Count)",
+      ].join("\n"),
+    },
+    {
+      sources: ["flow-trace"],
+      query: [
+        "AZFWDnsFlowTrace",
+        "| take 2",
+        "| count",
+        "| project SampleCount = toint(Count)",
+      ].join("\n"),
+    },
+    {
+      sources: ["network-rule"],
+      query: [
+        "AZFWNetworkRule",
+        "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
+        '| where Protocol =~ "TCP" or Protocol =~ "UDP"',
+        "| take 2",
+        "| count",
+        "| project SampleCount = toint(Count)",
+      ].join("\n"),
+    },
+  ];
+}
+
 function tableRows(payload: unknown, maxRows: number) {
   if (!isRecord(payload) || payload.error !== undefined || !Array.isArray(payload.tables)) {
     throw new LogAnalyticsQueryError("upstream");
@@ -340,16 +403,62 @@ function tableRows(payload: unknown, maxRows: number) {
   return rows;
 }
 
+function readinessSampleCount(payload: unknown): 0 | 1 | 2 {
+  const rows = tableRows(payload, 1);
+  const value = rows[0]?.SampleCount;
+  if (rows.length !== 1 || typeof value !== "number" || !Number.isInteger(value)) {
+    throw new LogAnalyticsQueryError("upstream");
+  }
+  if (value === 0 || value === 1 || value === 2) return value;
+  throw new LogAnalyticsQueryError("upstream");
+}
+
+export async function executeDnsReadinessQuery(
+  target: LogAnalyticsQueryTarget,
+  accessToken: string,
+  options: ExecuteLogAnalyticsQueryOptions = {},
+): Promise<DnsReadinessResponse> {
+  const probes = buildDnsReadinessProbes();
+  const results = await Promise.allSettled(
+    probes.map(({ query }) =>
+      executeLogAnalyticsRawQuery(target, query, undefined, accessToken, options),
+    ),
+  );
+
+  const readiness = results.flatMap((result, index) => {
+    const sources = probes[index]!.sources;
+    if (result.status === "fulfilled") {
+      try {
+        const sampleCount = readinessSampleCount(result.value);
+        return sources.map<DnsSourceReadiness>((source) => ({
+          source,
+          status: "success",
+          sampleCount,
+        }));
+      } catch {
+        return sources.map<DnsSourceReadiness>((source) => ({
+          source,
+          status: "failed",
+          sampleCount: null,
+        }));
+      }
+    }
+    const forbidden =
+      result.reason instanceof LogAnalyticsQueryError && result.reason.kind === "authorization";
+    return sources.map<DnsSourceReadiness>((source) => ({
+      source,
+      status: forbidden ? "forbidden" : "failed",
+      sampleCount: null,
+    }));
+  });
+  return { readiness };
+}
+
 function text(value: unknown) {
   return typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
 }
 
-function mapRows(
-  payload: unknown,
-  source: DnsSourceKind,
-  queryId: string,
-  maxRows = LIST_LIMIT + 1,
-) {
+function mapRows(payload: unknown, source: DnsSourceKind, queryId: string, maxRows: number) {
   const rows = tableRows(payload, maxRows);
   const observations = rows
     .map((row, index) => {
@@ -387,21 +496,13 @@ export async function executeDnsListQuery(
   const queryId = options.queryId ?? crypto.randomUUID();
   const timespan = `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`;
   const queries = buildDnsListQueries(request);
-  if (queries.length === 0) {
-    return {
-      queriedEntries: [],
-      transportObservations: [],
-      queriedEntriesTruncated: false,
-      transportObservationsTruncated: false,
-      sources: [],
-    };
-  }
   const results = await Promise.allSettled(
     queries.map(async ({ query, source }) => {
       const mapped = mapRows(
         await executeLogAnalyticsRawQuery(target, query, timespan, accessToken, options),
         source,
         queryId,
+        request.limit + 1,
       );
       return {
         source,
@@ -415,11 +516,9 @@ export async function executeDnsListQuery(
 
   const observations: DnsObservation[] = [];
   const sources: DnsSourceStatus[] = [];
-  let firstFailure: unknown;
   for (const [index, result] of results.entries()) {
     const source = queries[index]!.source;
     if (result.status === "rejected") {
-      firstFailure ??= result.reason;
       const forbidden =
         result.reason instanceof LogAnalyticsQueryError && result.reason.kind === "authorization";
       sources.push({
@@ -431,11 +530,10 @@ export async function executeDnsListQuery(
       continue;
     }
     const truncated = result.value.truncated;
-    observations.push(...result.value.observations.slice(0, LIST_LIMIT));
+    observations.push(...result.value.observations.slice(0, request.limit));
     sources.push({ source, availability: "available", truncated });
   }
   if (sources.every((source) => source.availability !== "available")) {
-    if (sources.every((source) => source.availability === "forbidden")) throw firstFailure;
     return {
       queriedEntries: [],
       transportObservations: [],
@@ -453,15 +551,15 @@ export async function executeDnsListQuery(
   const transportSourceTruncated = sources.some(
     (source) => source.source === "network-rule" && source.truncated,
   );
-  const queriedEntries = entries.slice(0, LIST_LIMIT).map((entry) => ({
+  const queriedEntries = entries.slice(0, request.limit).map((entry) => ({
     ...entry,
     observations: [],
   }));
   return {
     queriedEntries,
-    transportObservations: transport.slice(0, LIST_LIMIT),
-    queriedEntriesTruncated: namedSourceTruncated || entries.length > LIST_LIMIT,
-    transportObservationsTruncated: transportSourceTruncated || transport.length > LIST_LIMIT,
+    transportObservations: transport.slice(0, request.limit),
+    queriedEntriesTruncated: namedSourceTruncated || entries.length > request.limit,
+    transportObservationsTruncated: transportSourceTruncated || transport.length > request.limit,
     sources,
   };
 }

@@ -22,6 +22,7 @@ export interface LogAnalyticsQueryRequest {
   from: string;
   to: string;
   filters: LogAnalyticsFilters;
+  limit: number;
   sort: LogAnalyticsSort;
 }
 

@@ -2,10 +2,13 @@ import type { DnsDetailQueryRequest, DnsListQueryRequest } from "../../shared/ty
 import {
   buildDnsDetailQuery,
   buildDnsListQueries,
+  buildDnsReadinessProbes,
   executeDnsDetailQuery,
   executeDnsListQuery,
+  executeDnsReadinessQuery,
   validateDelegatedDnsDetailQueryRequest,
   validateDelegatedDnsListQueryRequest,
+  validateDelegatedDnsReadinessRequest,
   validateDnsDetailQueryRequest,
   validateDnsListQueryRequest,
 } from "../../server/utils/dnsLogAnalyticsQuery";
@@ -26,6 +29,7 @@ function createListRequest(): DnsListQueryRequest {
       outcome: "",
       source: "",
     },
+    limit: 1_000,
   };
 }
 
@@ -62,6 +66,10 @@ function response(payload: unknown) {
   });
 }
 
+function readinessResponse(sampleCount: 0 | 1 | 2 = 2) {
+  return response(azureResponse(["SampleCount"], [[sampleCount]]));
+}
+
 describe("DNS Log Analytics request contracts", () => {
   it("keeps managed list requests strict and workspace-free", () => {
     const request = createListRequest();
@@ -88,6 +96,14 @@ describe("DNS Log Analytics request contracts", () => {
     expect(
       validateDelegatedDnsListQueryRequest({ ...request, workspaceId, query: "take 100" }),
     ).toBe(false);
+  });
+
+  it.each([99, 5_001, 1_000.5, Number.NaN])("rejects invalid list limit %s", (limit) => {
+    expect(validateDnsListQueryRequest({ ...createListRequest(), limit })).toBe(false);
+  });
+
+  it.each([100, 1_000, 5_000])("accepts bounded list limit %s", (limit) => {
+    expect(validateDnsListQueryRequest({ ...createListRequest(), limit })).toBe(true);
   });
 
   it("validates bounded selectors and keeps managed detail workspace-free", () => {
@@ -134,6 +150,12 @@ describe("DNS Log Analytics request contracts", () => {
       false,
     );
   });
+
+  it("accepts only an exact delegated readiness workspace", () => {
+    expect(validateDelegatedDnsReadinessRequest({ workspaceId })).toBe(true);
+    expect(validateDelegatedDnsReadinessRequest({ workspaceId, query: "take 100" })).toBe(false);
+    expect(validateDelegatedDnsReadinessRequest({ workspaceId: "not-a-workspace" })).toBe(false);
+  });
 });
 
 describe("DNS Log Analytics KQL", () => {
@@ -164,6 +186,38 @@ describe("DNS Log Analytics KQL", () => {
     expect(queries[1]?.query).toContain('| where ResourceType =~ "AZUREFIREWALLS"');
     expect(queries[1]?.query).toContain('| where tolower(Message) matches regex "\\\\sudp\\\\s"');
     expect(queries[3]?.query).toContain(
+      "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
+    );
+  });
+
+  it("uses requested list limit for every source query", () => {
+    const request = createListRequest();
+    request.limit = 2_500;
+
+    expect(buildDnsListQueries(request).every(({ query }) => query.includes("| take 2501"))).toBe(
+      true,
+    );
+  });
+
+  it("uses unbounded source-specific readiness probes with capped record counts", () => {
+    const probes = buildDnsReadinessProbes();
+
+    expect(probes.map(({ sources }) => sources)).toEqual([
+      ["proxy-structured"],
+      ["proxy-legacy"],
+      ["flow-trace"],
+      ["network-rule"],
+    ]);
+    expect(probes.map(({ query }) => query.split("\n")[0])).toEqual([
+      "AZFWDnsQuery",
+      "AzureDiagnostics",
+      "AZFWDnsFlowTrace",
+      "AZFWNetworkRule",
+    ]);
+    expect(probes.every(({ query }) => query.includes("| take 2\n| count"))).toBe(true);
+    expect(probes.every(({ query }) => !query.includes("TimeGenerated"))).toBe(true);
+    expect(probes[1]?.query).toContain('| where Category == "AzureFirewallDnsProxy"');
+    expect(probes[3]?.query).toContain(
       "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
     );
   });
@@ -327,6 +381,63 @@ describe("DNS Log Analytics source mapping", () => {
     expect(result.transportObservationsTruncated).toBe(true);
   });
 
+  it("keeps exact zero, one, and two-plus readiness evidence", async () => {
+    const sampleCounts = new Map<string, 0 | 1 | 2>([
+      ["AZFWDnsQuery", 0],
+      ["AzureDiagnostics", 1],
+      ["AZFWDnsFlowTrace", 2],
+      ["AZFWNetworkRule", 2],
+    ] as const);
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      return readinessResponse(sampleCounts.get(query.split("\n")[0]!) ?? 2);
+    });
+
+    const result = await executeDnsReadinessQuery({ workspaceId }, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.readiness).toEqual([
+      { source: "proxy-structured", status: "success", sampleCount: 0 },
+      { source: "proxy-legacy", status: "success", sampleCount: 1 },
+      { source: "flow-trace", status: "success", sampleCount: 2 },
+      { source: "network-rule", status: "success", sampleCount: 2 },
+    ]);
+    expect(fetchImplementation).toHaveBeenCalledTimes(4);
+    expect(
+      fetchImplementation.mock.calls.every(([, init]) => {
+        if (typeof init?.body !== "string") return false;
+        return !("timespan" in (JSON.parse(init.body) as object));
+      }),
+    ).toBe(true);
+  });
+
+  it("reports readiness authorization and query failures per source", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      if (query.startsWith("AzureDiagnostics")) return new Response(null, { status: 403 });
+      if (query.startsWith("AZFWDnsFlowTrace")) return new Response(null, { status: 500 });
+      return readinessResponse();
+    });
+
+    const result = await executeDnsReadinessQuery({ workspaceId }, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.readiness).toContainEqual({
+      source: "proxy-legacy",
+      status: "forbidden",
+      sampleCount: null,
+    });
+    expect(result.readiness).toContainEqual({
+      source: "flow-trace",
+      status: "failed",
+      sampleCount: null,
+    });
+  });
+
   it("keeps successful sources when another source is forbidden", async () => {
     const columns = [
       "TimeGenerated",
@@ -343,6 +454,7 @@ describe("DNS Log Analytics source mapping", () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
       if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
       const query = String(JSON.parse(init.body).query);
+      if (query.includes("| project SampleCount")) return readinessResponse();
       if (query.startsWith("AZFWDnsQuery")) {
         return response(
           azureResponse(columns, [
@@ -430,6 +542,7 @@ describe("DNS Log Analytics source mapping", () => {
     const listFetch = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
       if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
       const query = String(JSON.parse(init.body).query);
+      if (query.includes("| project SampleCount")) return readinessResponse();
       return response(
         query.startsWith("AZFWDnsQuery")
           ? azureResponse(columns, [row])

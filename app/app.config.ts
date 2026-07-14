@@ -13,7 +13,7 @@ export default defineAppConfig({
           color: "primary",
           variant: "solid",
           class:
-            "bg-brand-blue-600 text-white hover:bg-brand-blue-700 active:bg-brand-blue-700 disabled:bg-brand-blue-600 disabled:text-white disabled:opacity-90 dark:bg-brand-blue-500 dark:text-white dark:hover:bg-brand-blue-400 dark:active:bg-brand-blue-400",
+            "bg-brand-blue-500 text-white hover:bg-brand-blue-400 active:bg-brand-blue-400 disabled:bg-brand-blue-500 disabled:text-white disabled:opacity-90 aria-disabled:bg-brand-blue-500 aria-disabled:text-white aria-disabled:opacity-90",
         },
         {
           color: "neutral",
