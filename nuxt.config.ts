@@ -40,8 +40,26 @@ function createMsalRedirectBridgePlugin(): Plugin {
       if (id !== RESOLVED_MSAL_REDIRECT_MODULE_ID) {
         return null;
       }
-      return `import { broadcastResponseToMainFrame } from "@azure/msal-browser/redirect-bridge";
-void broadcastResponseToMainFrame();`;
+      return `const parameters = new URLSearchParams(window.location.search);
+if (parameters.get("state") === "azure-argus-admin-consent") {
+  const granted = parameters.get("admin_consent")?.toLowerCase() === "true";
+  document.title = granted ? "Tenant consent granted" : "Tenant consent not granted";
+  const message = document.querySelector("p");
+  if (message) {
+    message.textContent = granted
+      ? "Tenant consent granted. Return to Azure Argus to continue."
+      : "Tenant consent was not granted. Return to Azure Argus and try again.";
+  }
+} else {
+  void import("@azure/msal-browser/redirect-bridge").then(({ broadcastResponseToMainFrame }) => {
+    return broadcastResponseToMainFrame();
+  }).catch(() => {
+    const message = document.querySelector("p");
+    if (message) {
+      message.textContent = "Azure authentication response could not be processed. Close this window and try again.";
+    }
+  });
+}`;
     },
   };
 }
@@ -72,7 +90,6 @@ export default defineNuxtConfig({
     public: {
       defaultLookbackMinutes: 15,
       logAnalyticsDelegated: {
-        tenantId: "",
         clientId: "",
       },
       siteName: "Azure Argus",
@@ -94,6 +111,7 @@ export default defineNuxtConfig({
       },
     },
     optimizeDeps: {
+      exclude: ["@azure/msal-browser/redirect-bridge"],
       include: ["buffer", "os-browserify/browser", "path-browserify", "process"],
     },
     plugins: [

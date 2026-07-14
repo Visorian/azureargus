@@ -150,17 +150,11 @@ export function parseDeploymentCapabilities(
     }
   }
 
-  const delegatedValues = [readValue(delegated, "tenantId"), readValue(delegated, "clientId")];
-  const delegatedIntent = hasAny(delegatedValues);
+  const delegatedClientId = readValue(delegated, "clientId");
+  const delegatedIntent = delegatedClientId.length > 0;
   let temporaryLogAnalyticsAuthAvailable = false;
   if (delegatedIntent) {
-    if (!hasAll(delegatedValues)) {
-      addError(
-        errors,
-        "delegated_log_analytics_incomplete",
-        "Delegated Log Analytics configuration is incomplete",
-      );
-    } else if (!delegatedValues.every(isUuid)) {
+    if (!isUuid(delegatedClientId)) {
       addError(
         errors,
         "delegated_log_analytics_invalid",

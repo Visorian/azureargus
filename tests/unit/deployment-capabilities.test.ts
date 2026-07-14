@@ -46,12 +46,11 @@ describe("deployment capabilities", () => {
     });
   });
 
-  it("enables only temporary Log Analytics auth for complete public delegated configuration", () => {
+  it("enables only temporary Log Analytics auth for valid public client configuration", () => {
     expect(
       parse({
         public: {
           logAnalyticsDelegated: {
-            tenantId: "55555555-5555-4555-8555-555555555555",
             clientId: "66666666-6666-4666-8666-666666666666",
           },
         },
@@ -100,13 +99,6 @@ describe("deployment capabilities", () => {
       },
       "log_analytics_incomplete",
     ],
-    [
-      "delegated Log Analytics",
-      {
-        public: { logAnalyticsDelegated: { tenantId: validLogAnalytics.tenantId } },
-      },
-      "delegated_log_analytics_incomplete",
-    ],
   ])("fails closed for partial %s configuration", (_label, runtimeConfig, errorCode) => {
     const result = parse(runtimeConfig);
 
@@ -137,7 +129,6 @@ describe("deployment capabilities", () => {
       {
         public: {
           logAnalyticsDelegated: {
-            tenantId: "not-a-tenant-id",
             clientId: "not-a-client-id",
           },
         },
@@ -189,7 +180,7 @@ describe("deployment capabilities", () => {
       temporaryLogAnalyticsAuthAvailable: false,
     });
     expect(result.errors).toContainEqual(
-      expect.objectContaining({ code: "delegated_log_analytics_incomplete" }),
+      expect.objectContaining({ code: "delegated_log_analytics_invalid" }),
     );
   });
 
@@ -200,7 +191,6 @@ describe("deployment capabilities", () => {
       oidc: validOidc,
       public: {
         logAnalyticsDelegated: {
-          tenantId: "55555555-5555-4555-8555-555555555555",
           clientId: "66666666-6666-4666-8666-666666666666",
         },
       },

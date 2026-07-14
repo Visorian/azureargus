@@ -48,10 +48,10 @@ fully predefined sources. Event Hub SAS and Log Analytics client secret stay ser
 - Log Analytics: `NUXT_LOG_ANALYTICS_TENANT_ID`, `NUXT_LOG_ANALYTICS_CLIENT_ID`,
   `NUXT_LOG_ANALYTICS_CLIENT_SECRET`, and `NUXT_LOG_ANALYTICS_WORKSPACE_ID`.
 
-Anonymous deployments can optionally enable temporary Log Analytics authentication with both
-`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_TENANT_ID` and
-`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. These public identifiers do not enable application
-login or select managed mode.
+Anonymous deployments can optionally enable temporary Log Analytics authentication with central
+multitenant SPA identifier `NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. Public client ID does not
+enable application login or select managed mode. Guided connection flow derives available Azure
+directories and Log Analytics workspaces from signed-in account access.
 
 Managed deployments also require complete application-login configuration:
 `NUXT_OIDC_PROVIDERS_ENTRA_CLIENT_ID`, `NUXT_OIDC_PROVIDERS_ENTRA_CLIENT_SECRET`,
@@ -59,12 +59,15 @@ Managed deployments also require complete application-login configuration:
 `NUXT_OIDC_PROVIDERS_ENTRA_TOKEN_URL`, `NUXT_OIDC_SESSION_SECRET`,
 `NUXT_OIDC_AUTH_SESSION_SECRET`, and `NUXT_OIDC_TOKEN_KEY`.
 
-For anonymous Log Analytics, register a Microsoft Entra SPA redirect URI at
-`https://YOUR_APP/log-analytics-redirect.html`, grant delegated Log Analytics `Data.Read`, and set
-`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_TENANT_ID` plus
-`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. Signed-in user also needs permission to query selected
-workspace. Public tenant/client IDs do not enable application login. Access token and workspace input
-remain browser-memory-only and are cleared on disconnect/page exit.
+For anonymous Log Analytics, create multitenant Microsoft Entra app registration, register SPA
+redirect URI at `https://YOUR_APP/log-analytics-redirect.html`, add delegated Log Analytics API
+`Data.Read` plus Azure Service Management `user_impersonation`, and set
+`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. Guided connection flow signs into an organization,
+lists available Azure directories and workspaces, and opens target-tenant admin consent and Azure
+portal workspace access. Query authorization is completed explicitly before Run, so Run never opens
+an interactive authentication window. Assign `Log Analytics Data Reader` at workspace scope to
+signed-in user or group. Access tokens and selected tenant/workspace IDs remain browser-memory-only
+and are cleared on disconnect/page exit.
 Do not add a `Cross-Origin-Opener-Policy` response header to the redirect bridge page; MSAL popup
 communication requires that page to remain in the opener's browsing context group.
 

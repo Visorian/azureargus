@@ -15,6 +15,11 @@ import type {
   LogAnalyticsQueryResponse,
 } from "#shared/types/logAnalytics";
 import type {
+  AzureAccessibleTenant,
+  AzureAccessibleWorkspace,
+  AzureLogAnalyticsAccess,
+} from "#shared/types/azureAccess";
+import type {
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
   DnsFilters,
@@ -24,6 +29,7 @@ import type {
 } from "#shared/types/dns";
 import { createDefaultLogSort } from "~/composables/useLogSorting";
 import { formatIcmpProtocol } from "~/utils/icmpProtocol";
+import { createLogAnalyticsAdminConsentUrl, isEntraId } from "~/utils/logAnalyticsOnboarding";
 import {
   createDefaultLogAnalysisDateRange,
   LOG_ANALYSIS_CATEGORIES,
@@ -103,7 +109,16 @@ const selectedLog = ref<FirewallLogRecord | null>(null);
 const toast = useToast();
 const requestFetch = useRequestFetch();
 const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth();
+const temporaryTenantId = ref("");
 const temporaryWorkspaceId = ref("");
+const temporaryTenants = ref<AzureAccessibleTenant[]>([]);
+const temporaryWorkspaces = ref<AzureAccessibleWorkspace[]>([]);
+const temporaryAzureUsername = ref("");
+const temporaryLogAnalyticsAuthorizing = ref(false);
+const temporaryAccessStatus = ref<"idle" | "loading" | "success" | "error">("idle");
+const temporaryAccessError = ref<string | null>(null);
+let temporaryAccessGeneration = 0;
+let temporaryAuthorizationGeneration = 0;
 const logHistory = useLogHistoryPersistence();
 const ipCountryLookup = useIpCountryLookup();
 watch(allLogsLensActive, (active) => ipCountryLookup.setActive(active), { immediate: true });
@@ -130,25 +145,47 @@ const logAnalyticsRequirement = computed(() => {
   }
   return managedMode.value
     ? "Log Analytics is not configured."
-    : "Log Analytics delegated authentication is not configured.";
+    : "Temporary Log Analytics app registration is not configured.";
 });
 const temporaryLogAnalyticsMode = computed(() => capabilities.value?.mode === "anonymous");
-const temporaryWorkspaceValid = computed(() =>
-  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(temporaryWorkspaceId.value.trim()),
+const temporaryTenantValid = computed(() => isEntraId(temporaryTenantId.value));
+const temporaryWorkspaceValid = computed(() => isEntraId(temporaryWorkspaceId.value));
+const temporaryAdminConsentUrl = computed(() =>
+  import.meta.client
+    ? createLogAnalyticsAdminConsentUrl(
+        temporaryTenantId.value,
+        runtimeConfig.public.logAnalyticsDelegated.clientId,
+        window.location.origin,
+      )
+    : null,
 );
 const canRunLogAnalytics = computed(
   () =>
     managedMode.value ||
-    (temporaryLogAnalyticsAuth.connected.value && temporaryWorkspaceValid.value),
+    (temporaryLogAnalyticsAuth.connected.value &&
+      temporaryLogAnalyticsAuth.authorized.value &&
+      temporaryTenantValid.value &&
+      temporaryWorkspaceValid.value),
 );
+
+function temporaryLogAnalyticsRunRequirement() {
+  if (!temporaryLogAnalyticsAuth.connected.value) {
+    return "Connect to Azure before running a query.";
+  }
+  if (!temporaryTenantValid.value || !temporaryWorkspaceValid.value) {
+    return "Select an accessible workspace before running a query.";
+  }
+  return "Grant Log Analytics query permission before running a query.";
+}
 
 function requestTemporaryLogAnalytics(
   body: LogAnalyticsQueryRequest,
   signal: AbortSignal,
   accessToken: string,
+  workspaceId: string,
 ) {
   return requestFetch<LogAnalyticsQueryResponse>("/api/log-analytics/delegated-query", {
-    body: { ...body, workspaceId: temporaryWorkspaceId.value.trim() },
+    body: { ...body, workspaceId },
     headers: { authorization: `Bearer ${accessToken}` },
     method: "POST",
     signal,
@@ -188,8 +225,10 @@ const logQuery = useLogAnalyticsQuery({
       });
     }
 
-    const accessToken = await temporaryLogAnalyticsAuth.getAccessToken();
-    return requestTemporaryLogAnalytics(body, signal, accessToken);
+    const tenantId = temporaryTenantId.value.trim();
+    const workspaceId = temporaryWorkspaceId.value.trim();
+    const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(tenantId);
+    return requestTemporaryLogAnalytics(body, signal, accessToken, workspaceId);
   },
   sort: logSort,
 });
@@ -218,9 +257,11 @@ async function requestDnsList(body: DnsListQueryRequest, signal: AbortSignal) {
       signal,
     });
   }
-  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken();
+  const tenantId = temporaryTenantId.value.trim();
+  const workspaceId = temporaryWorkspaceId.value.trim();
+  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(tenantId);
   return requestFetch<DnsListQueryResponse>("/api/log-analytics/delegated-dns/list", {
-    body: { ...body, workspaceId: temporaryWorkspaceId.value.trim() },
+    body: { ...body, workspaceId },
     headers: { authorization: `Bearer ${accessToken}` },
     method: "POST",
     signal,
@@ -235,9 +276,11 @@ async function requestDnsDetail(body: DnsDetailQueryRequest, signal: AbortSignal
       signal,
     });
   }
-  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken();
+  const tenantId = temporaryTenantId.value.trim();
+  const workspaceId = temporaryWorkspaceId.value.trim();
+  const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(tenantId);
   return requestFetch<DnsDetailQueryResponse>("/api/log-analytics/delegated-dns/detail", {
-    body: { ...body, workspaceId: temporaryWorkspaceId.value.trim() },
+    body: { ...body, workspaceId },
     headers: { authorization: `Bearer ${accessToken}` },
     method: "POST",
     signal,
@@ -621,18 +664,20 @@ function clearActiveResults() {
 async function runLogAnalysis() {
   if (!canRunLogAnalytics.value) {
     toast.add({
-      title: temporaryLogAnalyticsAuth.connected.value
-        ? "Workspace ID is invalid."
-        : "Connect to Azure before running Log Analytics query.",
+      title: temporaryLogAnalyticsRunRequirement(),
       color: "error",
       icon: "i-lucide-circle-alert",
     });
     return;
   }
   if (temporaryLogAnalyticsMode.value) {
+    const tenantId = temporaryTenantId.value.trim();
+    const workspaceId = temporaryWorkspaceId.value.trim();
     try {
-      const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(true);
-      await logQuery.run((body, signal) => requestTemporaryLogAnalytics(body, signal, accessToken));
+      const accessToken = await temporaryLogAnalyticsAuth.getAccessToken(tenantId, false);
+      await logQuery.run((body, signal) =>
+        requestTemporaryLogAnalytics(body, signal, accessToken, workspaceId),
+      );
     } catch {
       toast.add({
         title: temporaryLogAnalyticsAuth.lastError.value ?? "Azure authentication failed.",
@@ -649,9 +694,7 @@ async function runLogAnalysis() {
 async function runDnsAnalysis() {
   if (!canRunLogAnalytics.value) {
     toast.add({
-      title: temporaryLogAnalyticsAuth.connected.value
-        ? "Workspace ID is invalid."
-        : "Connect to Azure before running DNS query.",
+      title: temporaryLogAnalyticsRunRequirement(),
       color: "error",
       icon: "i-lucide-circle-alert",
     });
@@ -659,7 +702,7 @@ async function runDnsAnalysis() {
   }
   if (temporaryLogAnalyticsMode.value) {
     try {
-      await temporaryLogAnalyticsAuth.getAccessToken(true);
+      await temporaryLogAnalyticsAuth.getAccessToken(temporaryTenantId.value.trim(), false);
     } catch {
       toast.add({
         title: temporaryLogAnalyticsAuth.lastError.value ?? "Azure authentication failed.",
@@ -677,12 +720,155 @@ function runActiveLogAnalysis() {
 }
 
 async function disconnectTemporaryLogAnalytics() {
+  temporaryAccessGeneration += 1;
+  temporaryAuthorizationGeneration += 1;
+  temporaryLogAnalyticsAuthorizing.value = false;
   logQuery.abort();
   logQuery.clear();
   dns.abort();
   dns.clearActiveDataset();
+  temporaryTenantId.value = "";
   temporaryWorkspaceId.value = "";
+  temporaryTenants.value = [];
+  temporaryWorkspaces.value = [];
+  temporaryAzureUsername.value = "";
+  temporaryAccessStatus.value = "idle";
+  temporaryAccessError.value = null;
   await temporaryLogAnalyticsAuth.disconnect();
+}
+
+async function authorizeTemporaryLogAnalytics() {
+  if (!temporaryWorkspaceValid.value || temporaryLogAnalyticsAuthorizing.value) {
+    return;
+  }
+  const generation = temporaryAuthorizationGeneration;
+  const tenantId = temporaryTenantId.value.trim();
+  const workspaceId = temporaryWorkspaceId.value.trim();
+  temporaryLogAnalyticsAuthorizing.value = true;
+  try {
+    await temporaryLogAnalyticsAuth.getAccessToken(tenantId, true);
+  } catch {
+    if (
+      generation !== temporaryAuthorizationGeneration ||
+      tenantId !== temporaryTenantId.value.trim() ||
+      workspaceId !== temporaryWorkspaceId.value.trim()
+    ) {
+      return;
+    }
+    toast.add({
+      title: temporaryLogAnalyticsAuth.lastError.value ?? "Log Analytics authorization failed.",
+      color: "error",
+      icon: "i-lucide-circle-alert",
+    });
+  } finally {
+    if (generation === temporaryAuthorizationGeneration) {
+      temporaryLogAnalyticsAuthorizing.value = false;
+    }
+  }
+}
+
+async function checkTemporaryLogAnalyticsAuthorization() {
+  const generation = ++temporaryAuthorizationGeneration;
+  const tenantId = temporaryTenantId.value.trim();
+  const workspaceId = temporaryWorkspaceId.value.trim();
+  temporaryLogAnalyticsAuth.invalidateAuthorization();
+  if (
+    !temporaryLogAnalyticsAuth.connected.value ||
+    !isEntraId(tenantId) ||
+    !isEntraId(workspaceId)
+  ) {
+    temporaryLogAnalyticsAuthorizing.value = false;
+    return;
+  }
+  temporaryLogAnalyticsAuthorizing.value = true;
+  await temporaryLogAnalyticsAuth.checkAuthorization(tenantId);
+  if (generation === temporaryAuthorizationGeneration) {
+    temporaryLogAnalyticsAuthorizing.value = false;
+  }
+}
+
+function selectTemporaryWorkspace(workspaceId: string) {
+  if (workspaceId === temporaryWorkspaceId.value) return;
+  logQuery.abort();
+  logQuery.clear();
+  dns.abort();
+  dns.clearActiveDataset();
+  temporaryWorkspaceId.value = workspaceId;
+  void checkTemporaryLogAnalyticsAuthorization();
+}
+
+function mergeCurrentTenant(tenants: AzureAccessibleTenant[], tenantId: string) {
+  if (tenants.some((tenant) => tenant.tenantId === tenantId)) {
+    return tenants;
+  }
+  return [...tenants, { defaultDomain: null, displayName: tenantId, tenantId }];
+}
+
+async function discoverTemporaryAzureAccess(
+  tenantId: string,
+  getAccessToken: () => Promise<string>,
+) {
+  const generation = ++temporaryAccessGeneration;
+  temporaryTenantId.value = tenantId;
+  selectTemporaryWorkspace("");
+  temporaryWorkspaces.value = [];
+  temporaryAccessStatus.value = "loading";
+  temporaryAccessError.value = null;
+  try {
+    const accessToken = await getAccessToken();
+    const access = await requestFetch<AzureLogAnalyticsAccess>(
+      "/api/log-analytics/delegated-access",
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    );
+    if (generation !== temporaryAccessGeneration || temporaryTenantId.value !== tenantId) {
+      return;
+    }
+    temporaryTenants.value = mergeCurrentTenant(access.tenants, tenantId);
+    temporaryWorkspaces.value = access.workspaces;
+    if (access.workspaces.length === 1) {
+      selectTemporaryWorkspace(access.workspaces[0]?.workspaceId ?? "");
+    }
+    temporaryAccessStatus.value = "success";
+  } catch {
+    if (generation !== temporaryAccessGeneration) {
+      return;
+    }
+    temporaryAccessStatus.value = "error";
+    temporaryAccessError.value = "Could not discover Azure directories and workspaces.";
+  }
+}
+
+async function connectTemporaryLogAnalytics() {
+  const connection = await temporaryLogAnalyticsAuth.connect();
+  if (!connection) {
+    return;
+  }
+  temporaryAzureUsername.value = connection.username;
+  await discoverTemporaryAzureAccess(connection.tenantId, async () => connection.accessToken);
+}
+
+function changeTemporaryTenant(tenantId: string) {
+  if (!isEntraId(tenantId) || tenantId === temporaryTenantId.value) {
+    return;
+  }
+  void discoverTemporaryAzureAccess(tenantId, () =>
+    temporaryLogAnalyticsAuth.getManagementAccessToken(tenantId),
+  );
+}
+
+function changeTemporaryWorkspace(workspaceId: string) {
+  if (isEntraId(workspaceId)) {
+    selectTemporaryWorkspace(workspaceId);
+  }
+}
+
+function refreshTemporaryAzureAccess() {
+  if (!temporaryTenantValid.value) {
+    return;
+  }
+  void discoverTemporaryAzureAccess(temporaryTenantId.value, () =>
+    temporaryLogAnalyticsAuth.getManagementAccessToken(temporaryTenantId.value),
+  );
 }
 
 function applyLogFilters() {
@@ -926,6 +1112,7 @@ function statusColor(status: string) {
           />
           <LogsLogAnalyticsSettingsPanel
             v-else
+            v-model:tenant-id="temporaryTenantId"
             v-model:workspace-id="temporaryWorkspaceId"
             :draft-range="logDraftRange"
             :lens="activeLens"
@@ -938,10 +1125,19 @@ function statusColor(status: string) {
             :temporary="temporaryLogAnalyticsMode"
             :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
             :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
-            @update:draft-range="updateLogDraftRange"
-            @connect-azure="temporaryLogAnalyticsAuth.connect"
+            :temporary-access-error="temporaryAccessError"
+            :temporary-access-status="temporaryAccessStatus"
+            :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
+            :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
+            :temporary-azure-username="temporaryAzureUsername"
+            :tenant-options="temporaryTenants"
+            :workspace-options="temporaryWorkspaces"
+            @change-tenant="changeTemporaryTenant"
+            @change-workspace="changeTemporaryWorkspace"
+            @connect-azure="connectTemporaryLogAnalytics"
             @disconnect-azure="disconnectTemporaryLogAnalytics"
-            @run="runActiveLogAnalysis"
+            @authorize-log-analytics="authorizeTemporaryLogAnalytics"
+            @refresh-azure-access="refreshTemporaryAzureAccess"
           />
         </section>
 

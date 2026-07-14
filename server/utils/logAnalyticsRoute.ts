@@ -33,17 +33,21 @@ export function createIncomingRequestSignal(event: H3Event) {
   };
 }
 
-export function readDelegatedLogAnalyticsBearerToken(event: H3Event) {
+export function readBearerToken(event: H3Event, missingMessage: string) {
   const authorization = getHeader(event, "authorization");
   const match = authorization?.match(BEARER_AUTHORIZATION_PATTERN);
   const token = match?.[1];
   if (!token) {
     throw createError({
       statusCode: 401,
-      message: "Delegated Log Analytics access token is required",
+      message: missingMessage,
     });
   }
   return token;
+}
+
+export function readDelegatedLogAnalyticsBearerToken(event: H3Event) {
+  return readBearerToken(event, "Delegated Log Analytics access token is required");
 }
 
 function throwThrottledError(event: H3Event, retryAfterSeconds?: number): never {
