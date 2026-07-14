@@ -275,9 +275,14 @@ describe("LogAnalyticsSettingsPanel", () => {
     expect(wrapper.text()).toContain("Query DNS diagnostics");
     expect(wrapper.text()).toContain("DNS source readiness");
     expect(wrapper.text()).toContain("Structured DNS proxy logs");
-    expect(wrapper.text()).toContain("Legacy DNS proxy logs");
     expect(wrapper.text()).toContain("DNS flow trace logs");
+    expect(wrapper.text()).toContain("Internal FQDN resolution failures");
     expect(wrapper.text()).toContain("DNS transport logs");
+    expect(wrapper.text()).toContain("Related firewall evidence");
+    expect(wrapper.text()).toContain("Application rule evidence");
+    expect(wrapper.text()).toContain("TCP flow trace evidence");
+    expect(wrapper.text()).toContain("NAT rule evidence");
+    expect(wrapper.text()).not.toContain("Legacy DNS proxy logs");
     expect(wrapper.text()).toContain("Not checked");
     expect(wrapper.text()).toContain("independent of selected query range and filters");
     expect(wrapper.text()).toContain("Updated after workspace selection changes");
@@ -293,17 +298,26 @@ describe("LogAnalyticsSettingsPanel", () => {
       dnsReadinessStatus: "success",
       dnsReadiness: [
         { source: "proxy-structured", status: "success", sampleCount: 2 },
-        { source: "proxy-legacy", status: "success", sampleCount: 0 },
-        { source: "flow-trace", status: "success", sampleCount: 1 },
+        { source: "dns-flow-trace", status: "success", sampleCount: 1 },
+        { source: "internal-fqdn-failure", status: "success", sampleCount: 0 },
         { source: "network-rule", status: "forbidden", sampleCount: null },
+        { source: "application-rule", status: "success", sampleCount: 2 },
+        { source: "flow-trace", status: "failed", sampleCount: null },
+        { source: "nat-rule", status: "success", sampleCount: 0 },
       ],
     });
     expect(wrapper.text()).toContain("2+ records");
-    expect(wrapper.text()).toContain("0 records");
     expect(wrapper.text()).toContain("1 record");
+    expect(wrapper.text()).toContain("0 records");
     expect(wrapper.text()).toContain("Access denied");
+    expect(wrapper.text()).toContain("Check failed");
     expect(wrapper.text()).toContain("AZFWDnsQuery");
-    expect(wrapper.text()).toContain("AzureDiagnostics · AzureFirewallDnsProxy record");
+    expect(wrapper.text()).toContain("AZFWDnsFlowTrace");
+    expect(wrapper.text()).toContain("AZFWInternalFqdnResolutionFailure");
+    expect(wrapper.text()).toContain("AZFWNetworkRule · TCP or UDP port 53 record");
+    expect(wrapper.text()).toContain("AZFWApplicationRule · FQDN-bearing record");
+    expect(wrapper.text()).toContain("AZFWFlowTrace · TCP port 53 record");
+    expect(wrapper.text()).toContain("AZFWNatRule · original or translated port 53 record");
     expect(wrapper.text()).not.toContain("Partial");
 
     await wrapper.setProps({ lens: "all-logs" });

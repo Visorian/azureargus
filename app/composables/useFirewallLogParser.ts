@@ -9,6 +9,7 @@ export interface FirewallLogInput {
   offset?: number | string;
   index?: number;
   eventRecordIndex?: number;
+  applicationProperties?: Record<string, unknown>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -265,9 +266,11 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     offset,
     eventRecordIndex,
     enqueuedTimeUtc,
+    applicationProperties: input.applicationProperties,
     dns: parseDnsObservation({
       id,
       timestamp,
+      enqueuedTimeUtc,
       category,
       action,
       protocol,
@@ -275,6 +278,10 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
       sourcePort,
       destinationIp,
       destinationPort,
+      policy,
+      ruleCollectionGroup,
+      ruleCollection,
+      rule,
       resourceId,
       message,
       raw: input.raw,

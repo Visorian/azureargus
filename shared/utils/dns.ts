@@ -19,21 +19,23 @@ export const DNS_OUTCOME_LABELS: Readonly<Record<DnsOutcome, string>> = {
   pending: "Pending or partial",
 };
 
-const LEGACY_SUCCESS_PATTERN =
-  /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>\d+(?:\.\d+)?)s$/i;
-const LEGACY_ERROR_PATTERN =
-  /^\s*Error:\s*(?<errorNumber>\d+)\s+(?<queryName>\S+)\s+(?<queryType>[^:]+):\s*(?<errorMessage>.+)$/i;
-const BRACKETED_ENDPOINT_PATTERN = /^\[(?<ip>.+)](?::(?<port>\d+))?$/;
 const RAW_FIELD_LIMIT = 2_048;
 const RAW_PROJECTION_LIMIT = 8_192;
+const DNS_PROXY_MESSAGE_LIMIT = 8_192;
 const QUERY_NAME_LIMIT = 1_024;
 const CANONICAL_TEXT_LIMIT = 2_048;
 const SHORT_TEXT_LIMIT = 256;
 const CODE_LIMIT = 64;
+const DNS_PROXY_SUCCESS_PATTERN =
+  /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>\d+(?:\.\d+)?)s$/i;
+const DNS_PROXY_ERROR_PATTERN =
+  /^\s*Error:\s*(?<errorNumber>\d+)\s+(?<queryName>\S+)\s+(?<queryType>[^:]+):\s*(?<errorMessage>.+)$/i;
+const BRACKETED_ENDPOINT_PATTERN = /^\[(?<ip>.+)](?::(?<port>\d+))?$/;
 
 export interface DnsRecordInput {
   id: string;
   timestamp: string;
+  enqueuedTimeUtc?: string;
   category: string;
   action: string;
   protocol: string;
@@ -41,6 +43,10 @@ export interface DnsRecordInput {
   sourcePort?: string;
   destinationIp?: string;
   destinationPort?: string;
+  policy?: string;
+  ruleCollectionGroup?: string;
+  ruleCollection?: string;
+  rule?: string;
   resourceId?: string;
   message: string;
   raw: unknown;
@@ -124,9 +130,7 @@ function splitEndpoint(value: string | undefined) {
     return { ip: match?.groups?.ip, port: match?.groups?.port };
   }
   const separator = value.lastIndexOf(":");
-  if (separator <= 0 || value.indexOf(":") !== separator) {
-    return { ip: value };
-  }
+  if (separator <= 0 || value.indexOf(":") !== separator) return { ip: value };
   return { ip: value.slice(0, separator), port: value.slice(separator + 1) };
 }
 
@@ -169,6 +173,12 @@ function projectRaw(raw: unknown) {
     "SourcePort",
     "DestinationIp",
     "DestinationPort",
+    "ServerIp",
+    "ServerPort",
+    "Policy",
+    "RuleCollectionGroup",
+    "RuleCollection",
+    "Rule",
     "ResponseCode",
     "ResponseFlags",
     "RequestSize",
@@ -176,8 +186,13 @@ function projectRaw(raw: unknown) {
     "RequestDurationSecs",
     "ErrorNumber",
     "ErrorMessage",
+    "Error",
+    "Fqdn",
     "QueryMessage",
+    "QueryTime",
+    "ResponseTime",
     "ServerMessage",
+    "SocketFamily",
     "msg",
     "Message",
   ]) {
@@ -232,9 +247,15 @@ function baseObservation(
   return {
     id: input.id,
     timestamp: input.timestamp,
+    enqueuedTimeUtc: input.enqueuedTimeUtc,
     source,
     stage,
-    path: source === "network-rule" ? "direct" : source === "flow-trace" ? "flow-trace" : "proxy",
+    path:
+      source === "network-rule"
+        ? "direct"
+        : source === "internal-fqdn-failure"
+          ? "internal"
+          : "proxy",
     outcome: "pending",
     resourceId: canonicalText(input.resourceId, "Resource ID", warnings, 1_024),
     protocol:
@@ -248,43 +269,36 @@ function baseObservation(
   };
 }
 
-function parseLegacy(input: DnsRecordInput): DnsObservation {
-  const observation = baseObservation(input, "proxy-legacy", "proxy-exchange");
-  const match = input.message.match(LEGACY_SUCCESS_PATTERN);
+function parseDnsProxyMessage(input: DnsRecordInput): DnsObservation | undefined {
+  if (input.message.length > DNS_PROXY_MESSAGE_LIMIT) return undefined;
+  const observation = baseObservation(input, "dns-proxy", "proxy-exchange");
+  const match = input.message.match(DNS_PROXY_SUCCESS_PATTERN);
   if (!match?.groups) {
-    const errorMatch = input.message.match(LEGACY_ERROR_PATTERN);
-    if (errorMatch?.groups) {
-      const warnings = [...observation.warnings];
-      return {
-        ...observation,
-        queryName: canonicalText(
-          errorMatch.groups.queryName,
-          "Query name",
-          warnings,
-          QUERY_NAME_LIMIT,
-        ),
-        queryType: canonicalText(errorMatch.groups.queryType?.trim(), "Query type", warnings),
-        errorNumber: canonicalText(
-          errorMatch.groups.errorNumber,
-          "Error number",
-          warnings,
-          CODE_LIMIT,
-        ),
-        errorMessage: canonicalText(errorMatch.groups.errorMessage, "Error message", warnings),
-        outcome: "transport-error",
-        warnings,
-      };
-    }
+    const errorMatch = input.message.match(DNS_PROXY_ERROR_PATTERN);
+    if (!errorMatch?.groups) return undefined;
+    const warnings = [...observation.warnings];
     return {
       ...observation,
-      outcome: "pending",
-      parseState: "unparsed",
-      warnings: [...observation.warnings, "Unrecognized AzureFirewallDnsProxy message"],
+      queryName: canonicalText(
+        errorMatch.groups.queryName,
+        "Query name",
+        warnings,
+        QUERY_NAME_LIMIT,
+      ),
+      queryType: canonicalText(errorMatch.groups.queryType?.trim(), "Query type", warnings),
+      errorNumber: canonicalText(
+        errorMatch.groups.errorNumber,
+        "Error number",
+        warnings,
+        CODE_LIMIT,
+      ),
+      errorMessage: canonicalText(errorMatch.groups.errorMessage, "Error message", warnings),
+      outcome: "transport-error",
+      warnings,
     };
   }
 
   const client = splitEndpoint(match.groups.client);
-  const responseCode = match.groups.responseCode;
   const warnings = [...observation.warnings];
   const requestSizeBytes = Number(match.groups.requestSize);
   const ednsBufferSizeBytes = Number(match.groups.ednsBuffer);
@@ -296,13 +310,14 @@ function parseLegacy(input: DnsRecordInput): DnsObservation {
     !Number.isFinite(responseSizeBytes) ||
     !Number.isFinite(durationSeconds)
   ) {
-    return {
-      ...observation,
-      outcome: "pending",
-      parseState: "unparsed",
-      warnings: [...warnings, "Invalid numeric value in AzureFirewallDnsProxy message"],
-    };
+    return undefined;
   }
+  const responseCode = canonicalText(
+    match.groups.responseCode,
+    "Response code",
+    warnings,
+    CODE_LIMIT,
+  );
   return {
     ...observation,
     clientIp: canonicalText(client.ip, "Client IP", warnings, SHORT_TEXT_LIMIT),
@@ -315,11 +330,132 @@ function parseLegacy(input: DnsRecordInput): DnsObservation {
     requestSizeBytes,
     dnssecOk: match.groups.dnssecOk?.toLowerCase() === "true",
     ednsBufferSizeBytes,
-    responseCode: canonicalText(responseCode, "Response code", warnings, CODE_LIMIT),
+    responseCode,
     responseFlags: canonicalFlags(match.groups.flags, warnings),
     responseSizeBytes,
     durationSeconds,
     outcome: getOutcome(responseCode),
+    warnings,
+  };
+}
+
+function parseDnsFlowTrace(input: DnsRecordInput): DnsObservation {
+  const { properties, record } = readRecord(input.raw);
+  const observation = baseObservation(input, "dns-flow-trace", "dns-flow-trace");
+  const warnings = [...observation.warnings];
+  return {
+    ...observation,
+    clientIp: canonicalText(
+      readText(record, properties, ["SourceIp"]),
+      "Client IP",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    clientPort: canonicalText(
+      readText(record, properties, ["SourcePort"]),
+      "Client port",
+      warnings,
+      CODE_LIMIT,
+    ),
+    serverIp: canonicalText(
+      readText(record, properties, ["ServerIp"]),
+      "Server IP",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    serverPort: canonicalText(
+      readText(record, properties, ["ServerPort"]),
+      "Server port",
+      warnings,
+      CODE_LIMIT,
+    ),
+    msgType: canonicalText(
+      readText(record, properties, ["MsgType"]),
+      "Message type",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    queryMessage: canonicalText(
+      readText(record, properties, ["QueryMessage"]),
+      "Query message",
+      warnings,
+    ),
+    serverMessage: canonicalText(
+      readText(record, properties, ["ServerMessage"]),
+      "Server message",
+      warnings,
+    ),
+    queryTime: canonicalText(
+      readText(record, properties, ["QueryTime"]),
+      "Query time",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    responseTime: canonicalText(
+      readText(record, properties, ["ResponseTime"]),
+      "Response time",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    socketFamily: canonicalText(
+      readText(record, properties, ["SocketFamily"]),
+      "Socket family",
+      warnings,
+      CODE_LIMIT,
+    ),
+    outcome: "pending",
+    parseState: "partial",
+    warnings,
+  };
+}
+
+function parseInternalFqdnFailure(input: DnsRecordInput): DnsObservation {
+  const { properties, record } = readRecord(input.raw);
+  const observation = baseObservation(input, "internal-fqdn-failure", "internal-resolution");
+  const warnings = [...observation.warnings];
+  const queryName = canonicalText(
+    readText(record, properties, ["Fqdn"]),
+    "FQDN",
+    warnings,
+    QUERY_NAME_LIMIT,
+  );
+  const errorMessage = canonicalText(
+    readText(record, properties, ["Error"]),
+    "Error message",
+    warnings,
+  );
+  return {
+    ...observation,
+    queryName,
+    serverIp: canonicalText(
+      readText(record, properties, ["ServerIp"]),
+      "Server IP",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    serverPort: canonicalText(
+      readText(record, properties, ["ServerPort"]),
+      "Server port",
+      warnings,
+      CODE_LIMIT,
+    ),
+    errorMessage,
+    policy: canonicalText(input.policy, "Policy", warnings, SHORT_TEXT_LIMIT),
+    ruleCollectionGroup: canonicalText(
+      input.ruleCollectionGroup,
+      "Rule collection group",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    ruleCollection: canonicalText(
+      input.ruleCollection,
+      "Rule collection",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    rule: canonicalText(input.rule, "Rule", warnings, SHORT_TEXT_LIMIT),
+    outcome: "dns-error",
+    parseState: queryName && errorMessage ? "parsed" : "partial",
     warnings,
   };
 }
@@ -388,87 +524,6 @@ function parseStructured(input: DnsRecordInput): DnsObservation {
   };
 }
 
-function flowStage(value: string | undefined): DnsStage {
-  const normalized = value?.replaceAll(/[^a-z]/gi, "").toLowerCase();
-  if (normalized === "clientquery") return "client-query";
-  if (normalized === "forwarderquery") return "forwarder-query";
-  if (normalized === "forwarderresponse") return "forwarder-response";
-  if (normalized === "clientresponse") return "client-response";
-  return "error";
-}
-
-function parseFlow(input: DnsRecordInput): DnsObservation {
-  const { properties, record } = readRecord(input.raw);
-  const messageType = readText(record, properties, ["MsgType", "MessageType"]);
-  const stage = flowStage(messageType);
-  const observation = baseObservation(input, "flow-trace", stage);
-  const warnings = [...observation.warnings];
-  return {
-    ...observation,
-    queryName: canonicalText(
-      readText(record, properties, ["QueryName"]),
-      "Query name",
-      warnings,
-      QUERY_NAME_LIMIT,
-    ),
-    queryId: canonicalText(
-      readText(record, properties, ["QueryId"]),
-      "Query ID",
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    clientIp: canonicalText(
-      readText(record, properties, ["SourceIp", "ClientIp"]),
-      "Client IP",
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    clientPort: canonicalText(
-      readText(record, properties, ["SourcePort", "ClientPort"]),
-      "Client port",
-      warnings,
-      CODE_LIMIT,
-    ),
-    serverIp: canonicalText(
-      readText(record, properties, ["DestinationIp", "ServerIp"]),
-      "Server IP",
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    serverPort: canonicalText(
-      readText(record, properties, ["DestinationPort", "ServerPort"]),
-      "Server port",
-      warnings,
-      CODE_LIMIT,
-    ),
-    queryMessage: canonicalText(
-      readText(record, properties, ["QueryMessage"]),
-      "Query message",
-      warnings,
-    ),
-    serverMessage: canonicalText(
-      readText(record, properties, ["ServerMessage"]),
-      "Server message",
-      warnings,
-    ),
-    queryTime: canonicalText(
-      readText(record, properties, ["QueryTime"]),
-      "Query time",
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    responseTime: canonicalText(
-      readText(record, properties, ["ResponseTime"]),
-      "Response time",
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    outcome: stage === "client-response" ? "response-unknown" : "pending",
-    parseState: stage === "error" ? "partial" : "parsed",
-    warnings: stage === "error" ? [...warnings, "Unknown DNS Flow Trace stage"] : warnings,
-  };
-}
-
 function parseNetwork(input: DnsRecordInput): DnsObservation | undefined {
   const protocol = input.protocol.toUpperCase();
   if (
@@ -480,13 +535,66 @@ function parseNetwork(input: DnsRecordInput): DnsObservation | undefined {
   const observation = baseObservation(input, "network-rule", "transport");
   const warnings = [...observation.warnings];
   const denied = input.action.toLowerCase().includes("deny");
+  const sourceIsServer = input.sourcePort === "53" && input.destinationPort !== "53";
+  const destinationIsServer = input.destinationPort === "53" && input.sourcePort !== "53";
+  if (!sourceIsServer && !destinationIsServer) {
+    warnings.push("DNS transport direction is ambiguous");
+  }
   return {
     ...observation,
     action: canonicalText(input.action, "Action", warnings, SHORT_TEXT_LIMIT),
-    clientIp: canonicalText(input.sourceIp, "Client IP", warnings, SHORT_TEXT_LIMIT),
-    clientPort: canonicalText(input.sourcePort, "Client port", warnings, CODE_LIMIT),
-    serverIp: canonicalText(input.destinationIp, "Server IP", warnings, SHORT_TEXT_LIMIT),
-    serverPort: canonicalText(input.destinationPort, "Server port", warnings, CODE_LIMIT),
+    clientIp: canonicalText(
+      destinationIsServer ? input.sourceIp : sourceIsServer ? input.destinationIp : undefined,
+      "Client IP",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    clientPort: canonicalText(
+      destinationIsServer ? input.sourcePort : sourceIsServer ? input.destinationPort : undefined,
+      "Client port",
+      warnings,
+      CODE_LIMIT,
+    ),
+    serverIp: canonicalText(
+      destinationIsServer ? input.destinationIp : sourceIsServer ? input.sourceIp : undefined,
+      "Server IP",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    serverPort: canonicalText(
+      destinationIsServer ? input.destinationPort : sourceIsServer ? input.sourcePort : undefined,
+      "Server port",
+      warnings,
+      CODE_LIMIT,
+    ),
+    networkSourceIp: canonicalText(input.sourceIp, "Source IP", warnings, SHORT_TEXT_LIMIT),
+    networkSourcePort: canonicalText(input.sourcePort, "Source port", warnings, CODE_LIMIT),
+    networkDestinationIp: canonicalText(
+      input.destinationIp,
+      "Destination IP",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    networkDestinationPort: canonicalText(
+      input.destinationPort,
+      "Destination port",
+      warnings,
+      CODE_LIMIT,
+    ),
+    policy: canonicalText(input.policy, "Policy", warnings, SHORT_TEXT_LIMIT),
+    ruleCollectionGroup: canonicalText(
+      input.ruleCollectionGroup,
+      "Rule collection group",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    ruleCollection: canonicalText(
+      input.ruleCollection,
+      "Rule collection",
+      warnings,
+      SHORT_TEXT_LIMIT,
+    ),
+    rule: canonicalText(input.rule, "Rule", warnings, SHORT_TEXT_LIMIT),
     protocol,
     outcome: denied ? "blocked" : "transport-observed",
     warnings,
@@ -495,19 +603,79 @@ function parseNetwork(input: DnsRecordInput): DnsObservation | undefined {
 
 export function parseDnsObservation(input: DnsRecordInput): DnsObservation | undefined {
   const category = input.category.toLowerCase();
-  if (category === "azurefirewalldnsproxy") return parseLegacy(input);
+  if (category === "azurefirewalldnsproxy") {
+    return input.origin === "event-hub" ? parseDnsProxyMessage(input) : undefined;
+  }
   if (category === "azfwdnsquery")
     return input.origin === "log-analytics" ? parseStructured(input) : undefined;
   if (category === "azfwdnsflowtrace")
-    return input.origin === "log-analytics" ? parseFlow(input) : undefined;
+    return input.origin === "log-analytics" ? parseDnsFlowTrace(input) : undefined;
+  if (category === "azfwinternalfqdnresolutionfailure")
+    return input.origin === "log-analytics" ? parseInternalFqdnFailure(input) : undefined;
   if (category === "azfwnetworkrule" || category === "azurefirewallnetworkrule") {
     return parseNetwork(input);
   }
   return undefined;
 }
 
-function detailSelector(observation: DnsObservation): DnsDetailSelector | undefined {
+export function createDnsDetailSelector(
+  observation: DnsObservation,
+): DnsDetailSelector | undefined {
   if (!observation.resourceId) return undefined;
+  if (observation.source === "dns-proxy") return undefined;
+  if (observation.source === "network-rule") {
+    if (
+      !observation.protocol ||
+      !observation.networkSourceIp ||
+      !observation.networkSourcePort ||
+      !observation.networkDestinationIp ||
+      !observation.networkDestinationPort
+    ) {
+      return undefined;
+    }
+    return {
+      source: observation.source,
+      resourceId: observation.resourceId,
+      timestamp: observation.timestamp,
+      protocol: observation.protocol,
+      networkSourceIp: observation.networkSourceIp,
+      networkSourcePort: observation.networkSourcePort,
+      networkDestinationIp: observation.networkDestinationIp,
+      networkDestinationPort: observation.networkDestinationPort,
+    };
+  }
+  if (observation.source === "dns-flow-trace") {
+    return {
+      source: observation.source,
+      resourceId: observation.resourceId,
+      timestamp: observation.timestamp,
+      msgType: observation.msgType,
+      queryMessage: observation.queryMessage,
+      serverMessage: observation.serverMessage,
+      queryTime: observation.queryTime,
+      responseTime: observation.responseTime,
+      socketFamily: observation.socketFamily,
+      clientIp: observation.clientIp,
+      clientPort: observation.clientPort,
+      serverIp: observation.serverIp,
+      serverPort: observation.serverPort,
+    };
+  }
+  if (observation.source === "internal-fqdn-failure") {
+    return {
+      source: observation.source,
+      resourceId: observation.resourceId,
+      timestamp: observation.timestamp,
+      queryName: observation.queryName,
+      serverIp: observation.serverIp,
+      serverPort: observation.serverPort,
+      errorMessage: observation.errorMessage,
+      policy: observation.policy,
+      ruleCollectionGroup: observation.ruleCollectionGroup,
+      ruleCollection: observation.ruleCollection,
+      rule: observation.rule,
+    };
+  }
   return {
     source: observation.source,
     resourceId: observation.resourceId,
@@ -525,9 +693,11 @@ export function createDnsEntries(observations: readonly DnsObservation[]): DnsEn
     .map<DnsEntry>((observation) => ({
       id: observation.id,
       timestamp: observation.timestamp,
+      displayText: observation.queryName ?? observation.queryMessage ?? observation.msgType,
       queryName: observation.queryName,
       queryType: observation.queryType,
       client: [observation.clientIp, observation.clientPort].filter(Boolean).join(":"),
+      destination: [observation.serverIp, observation.serverPort].filter(Boolean).join(":"),
       protocol: observation.protocol,
       path: observation.path,
       outcome: observation.outcome,
@@ -538,7 +708,7 @@ export function createDnsEntries(observations: readonly DnsObservation[]): DnsEn
       source: observation.source,
       warnings: [...observation.warnings],
       observations: [observation],
-      detailSelector: detailSelector(observation),
+      detailSelector: createDnsDetailSelector(observation),
     }))
     .toSorted((left, right) => {
       const timestampOrder = right.timestamp.localeCompare(left.timestamp);

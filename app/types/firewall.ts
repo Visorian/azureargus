@@ -22,6 +22,7 @@ export interface FirewallLogRecord {
   offset?: string;
   eventRecordIndex?: number;
   enqueuedTimeUtc?: string;
+  applicationProperties?: Record<string, unknown>;
   dns?: DnsObservation;
   searchableText: string;
 }

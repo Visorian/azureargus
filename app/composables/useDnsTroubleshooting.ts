@@ -9,7 +9,7 @@ import type {
   DnsObservation,
   DnsSort,
 } from "#shared/types/dns";
-import { DNS_QUERY_TYPE_LABELS } from "#shared/utils/dns";
+import { createDnsDetailSelector, DNS_QUERY_TYPE_LABELS } from "#shared/utils/dns";
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from "vue";
 import { createDnsObservationStore } from "~/utils/dnsObservationStore";
 import { parseLogAnalysisDateRange, type LogAnalysisDateRange } from "~/utils/logAnalysis";
@@ -80,6 +80,7 @@ function matchesEntry(entry: DnsEntry, filters: DnsFilters) {
   const search = filters.search.trim().toLowerCase();
   const searchable = [
     entry.queryName,
+    entry.displayText,
     entry.queryType,
     entry.client,
     entry.protocol,
@@ -108,6 +109,10 @@ function matchesTransport(observation: DnsObservation, filters: DnsFilters) {
     observation.serverPort,
     observation.protocol,
     observation.action,
+    observation.policy,
+    observation.ruleCollectionGroup,
+    observation.ruleCollection,
+    observation.rule,
   ]
     .filter(Boolean)
     .join(" ")
@@ -128,7 +133,10 @@ function compareEntries(left: DnsEntry, right: DnsEntry, sort: DnsSort) {
   else if (sort.key === "duration")
     result = (left.durationSeconds ?? -1) - (right.durationSeconds ?? -1);
   else if (sort.key === "observations") result = left.observationCount - right.observationCount;
-  else result = (left.queryName ?? "").localeCompare(right.queryName ?? "");
+  else
+    result = (left.displayText ?? left.queryName ?? "").localeCompare(
+      right.displayText ?? right.queryName ?? "",
+    );
   if (result === 0) result = left.id.localeCompare(right.id);
   return sort.direction === "asc" ? result : -result;
 }
@@ -138,6 +146,7 @@ function transportEntry(observation: DnsObservation): DnsEntry {
     id: observation.id,
     timestamp: observation.timestamp,
     client: [observation.clientIp, observation.clientPort].filter(Boolean).join(":"),
+    destination: [observation.serverIp, observation.serverPort].filter(Boolean).join(":"),
     protocol: observation.protocol,
     path: observation.path,
     outcome: observation.outcome,
@@ -147,6 +156,7 @@ function transportEntry(observation: DnsObservation): DnsEntry {
     source: observation.source,
     warnings: [...observation.warnings],
     observations: [observation],
+    detailSelector: createDnsDetailSelector(observation),
   };
 }
 

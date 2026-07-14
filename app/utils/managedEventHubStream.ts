@@ -31,7 +31,8 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
         typeof event.enqueuedTimeUtc !== "string" ||
         typeof event.partitionId !== "string" ||
         typeof event.sequenceNumber !== "number" ||
-        (event.offset !== undefined && typeof event.offset !== "string")
+        (event.offset !== undefined && typeof event.offset !== "string") ||
+        (event.applicationProperties !== undefined && !isRecord(event.applicationProperties))
       ) {
         throw new Error("Managed Event Hub stream returned invalid event");
       }
@@ -41,6 +42,7 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
         offset: event.offset,
         partitionId: event.partitionId,
         sequenceNumber: event.sequenceNumber,
+        applicationProperties: event.applicationProperties,
       };
     });
     return { type: "events", events };

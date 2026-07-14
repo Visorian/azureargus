@@ -276,6 +276,14 @@ test("managed Event Hub uses configured server stream without exposing credentia
                   Protocol: "TCP",
                   TimeGenerated: "2026-07-12T14:30:00.000Z",
                 },
+                {
+                  category: "AzureFirewallDnsProxy",
+                  operationName: "AzureFirewallDnsProxyLog",
+                  properties: {
+                    msg: "DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s",
+                  },
+                  time: "2026-07-12T14:30:00.500Z",
+                },
               ],
             },
             enqueuedTimeUtc: "2026-07-12T14:30:01.000Z",
@@ -294,7 +302,7 @@ test("managed Event Hub uses configured server stream without exposing credentia
   await expect(page.getByRole("textbox", { name: "Event Hub name" })).toBeDisabled();
   await expect(page.getByRole("checkbox", { name: "Remember connection string" })).toHaveCount(0);
   await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.getByText("1 visible / 1 received")).toBeVisible();
+  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
   await expect(
     page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
   ).toBeVisible();
@@ -303,6 +311,18 @@ test("managed Event Hub uses configured server stream without exposing credentia
   expect(tableBox?.x).toBeGreaterThanOrEqual(15);
   await expect(firewallTable).toHaveCSS("border-top-width", "1px");
   await expect(firewallTable).toHaveCSS("border-radius", "6px");
+
+  await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+  await expect(
+    page
+      .getByRole("group", { name: "DNS troubleshooting status and actions" })
+      .getByText("1 queried entries · 0 unidentified transports"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "Open DNS details for winatp-gw-neu3.microsoft.com.",
+    }),
+  ).toBeVisible();
 });
 
 test("managed Log Analytics-only deployment starts in configured query mode", async ({ page }) => {
@@ -421,9 +441,12 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
       json: {
         readiness: [
           { source: "proxy-structured", status: "success", sampleCount: 2 },
-          { source: "proxy-legacy", status: "failed", sampleCount: null },
-          { source: "flow-trace", status: "success", sampleCount: 2 },
+          { source: "dns-flow-trace", status: "success", sampleCount: 2 },
+          { source: "internal-fqdn-failure", status: "success", sampleCount: 2 },
           { source: "network-rule", status: "success", sampleCount: 2 },
+          { source: "application-rule", status: "success", sampleCount: 2 },
+          { source: "flow-trace", status: "success", sampleCount: 2 },
+          { source: "nat-rule", status: "success", sampleCount: 2 },
         ],
       },
     });
@@ -431,6 +454,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
 
   await page.route("**/api/log-analytics/dns/list", async (route) => {
     listRequests += 1;
+    const partialResult = listRequests === 1;
     const requestBody = route.request().postDataJSON();
     expect(requestBody).not.toHaveProperty("workspaceId");
     expect(requestBody).toMatchObject({
@@ -484,18 +508,27 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
             observations: [],
           },
         ],
-        transportObservations: [transportObservation],
+        transportObservations: partialResult ? [] : [transportObservation],
         queriedEntriesTruncated: false,
         transportObservationsTruncated: false,
-        sources: [
-          { source: "proxy-structured", availability: "available", truncated: false },
-          {
-            source: "proxy-legacy",
-            availability: "failed",
-            truncated: false,
-            warning: "Source query failed",
-          },
-        ],
+        sources: partialResult
+          ? [
+              { source: "proxy-structured", availability: "available", truncated: false },
+              { source: "dns-flow-trace", availability: "available", truncated: false },
+              { source: "internal-fqdn-failure", availability: "available", truncated: false },
+              {
+                source: "network-rule",
+                availability: "failed",
+                truncated: false,
+                warning: "DNS transport query failed",
+              },
+            ]
+          : [
+              { source: "proxy-structured", availability: "available", truncated: false },
+              { source: "dns-flow-trace", availability: "available", truncated: false },
+              { source: "internal-fqdn-failure", availability: "available", truncated: false },
+              { source: "network-rule", availability: "available", truncated: false },
+            ],
       },
     });
   });
@@ -529,8 +562,11 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await expect(
     page.getByTestId("log-query-row").getByRole("button", { name: "Run query" }),
   ).toBeVisible();
-  await expect(page.getByText("2+ records", { exact: true })).toHaveCount(3);
-  await expect(page.getByText("Check failed", { exact: true })).toBeVisible();
+  await expect(page.getByText("2+ records", { exact: true })).toHaveCount(7);
+  await expect(page.getByText("Legacy DNS proxy logs", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("DNS flow trace logs", { exact: true })).toBeVisible();
+  await expect(page.getByText("Internal FQDN resolution failures", { exact: true })).toBeVisible();
+  await expect(page.getByText("Related firewall evidence", { exact: true })).toBeVisible();
   expect(readinessRequests).toBe(1);
   expect(listRequests).toBe(0);
   expect(detailRequests).toBe(0);
@@ -541,11 +577,22 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
     name: "DNS troubleshooting status and actions",
   });
   await expect(
-    dnsStatusRail.getByText("2 queried entries · 1 unidentified transport"),
+    dnsStatusRail.getByText("2 queried entries · 0 unidentified transports"),
   ).toBeVisible();
   await expect(dnsStatusRail.getByRole("status")).toHaveCount(1);
   await expect.poll(() => listRequests).toBe(1);
   await expect(page.getByText("Response received", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText("Some DNS sources could not be queried.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("DNS transport query failed", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Run query" }).click();
+  expect(readinessRequests).toBe(1);
+  await expect.poll(() => listRequests).toBe(2);
+  await expect(
+    dnsStatusRail.getByText("2 queried entries · 1 unidentified transport"),
+  ).toBeVisible();
   await expect(page.getByText("Transport observed", { exact: true })).toHaveCount(0);
   const showUnidentified = page.getByRole("checkbox", {
     name: "Show unidentified DNS transport",
@@ -561,7 +608,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await expect(page.getByText("response-unknown", { exact: true })).toHaveCount(0);
   await expect(page.getByText("DNS results may be incomplete", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/could not be queried/)).toHaveCount(0);
-  await expect(page.getByText("Source query failed", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("DNS transport query failed", { exact: true })).toHaveCount(0);
 
   const resultFilter = page.getByLabel("DNS result");
   await resultFilter.click();
@@ -613,6 +660,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await expect(transportDetail.getByText("168.63.129.16:53", { exact: true })).toBeVisible();
   await expect.poll(() => detailRequests).toBe(0);
   await page.keyboard.press("Escape");
+  await expect(transportRow).toBeFocused();
 
   await page.getByRole("button", { name: "Open DNS details for example.com." }).click();
 
@@ -635,6 +683,8 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
     JSON.stringify(observation.raw, null, 2),
   );
   await expect.poll(() => detailRequests).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(entryRow).toBeFocused();
 });
 
 test("anonymous delegated Log Analytics exposes temporary authentication controls", async ({

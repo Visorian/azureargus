@@ -1,176 +1,284 @@
 import { createDnsEntries, parseDnsObservation } from "#shared/utils/dns";
 
-const LEGACY_MESSAGE =
-  "DNS Request: 192.168.179.30:52338 - 22213 AAAA IN sc1.agt.eu1.thousandeyes.com. udp 57 false 1224 NOERROR qr,rd,ra 300 0.011877665s";
+const EVENT_HUB_DNS_REQUEST =
+  "DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s";
 
 function input(overrides: Partial<Parameters<typeof parseDnsObservation>[0]> = {}) {
   return {
     id: "dns-1",
     timestamp: "2026-07-12T16:36:42.076Z",
-    category: "AzureFirewallDnsProxy",
+    category: "AZFWDnsQuery",
     action: "DNS query",
     protocol: "UDP",
-    message: LEGACY_MESSAGE,
+    message: "",
     raw: {
-      category: "AzureFirewallDnsProxy",
+      category: "AZFWDnsQuery",
       resourceId:
         "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
-      properties: { msg: LEGACY_MESSAGE },
+      properties: {
+        SourceIp: "10.0.0.4",
+        SourcePort: 53_000,
+        QueryId: 42,
+        QueryName: "missing.example.",
+        QueryType: "HTTPS",
+        QueryClass: "IN",
+        Protocol: "udp",
+        ResponseCode: "NXDOMAIN",
+        ResponseFlags: "qr,rd,ra,cd",
+        RequestDurationSecs: 0.000_038,
+      },
     },
     resourceId:
       "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
+    origin: "log-analytics" as const,
     ...overrides,
   };
 }
 
 describe("DNS parser", () => {
-  it("decodes supplied legacy proxy transaction", () => {
+  it("parses retained structured Log Analytics query fields and DNS errors", () => {
     const observation = parseDnsObservation(input());
 
     expect(observation).toMatchObject({
-      source: "proxy-legacy",
+      source: "proxy-structured",
       stage: "proxy-exchange",
-      clientIp: "192.168.179.30",
-      clientPort: "52338",
-      queryId: "22213",
-      queryType: "AAAA",
+      clientIp: "10.0.0.4",
+      clientPort: "53000",
+      queryId: "42",
+      queryName: "missing.example.",
+      queryType: "HTTPS",
       queryClass: "IN",
-      queryName: "sc1.agt.eu1.thousandeyes.com.",
       protocol: "UDP",
-      requestSizeBytes: 57,
-      dnssecOk: false,
-      ednsBufferSizeBytes: 1224,
-      responseCode: "NOERROR",
-      responseFlags: ["qr", "rd", "ra"],
-      responseSizeBytes: 300,
-      durationSeconds: 0.011877665,
-      outcome: "response-unknown",
+      responseCode: "NXDOMAIN",
+      responseFlags: ["qr", "rd", "ra", "cd"],
+      durationSeconds: 0.000_038,
+      outcome: "dns-error",
     });
   });
 
-  it("keeps malformed DNS proxy messages visible", () => {
-    const observation = parseDnsObservation(input({ message: "DNS Request: malformed" }));
-
-    expect(observation).toMatchObject({
-      parseState: "unparsed",
-      outcome: "pending",
-      warnings: ["Unrecognized AzureFirewallDnsProxy message"],
-    });
+  it("does not map structured DNS queries delivered through Event Hub", () => {
+    expect(parseDnsObservation(input({ origin: "event-hub" }))).toBeUndefined();
   });
 
-  it("rejects malformed legacy duration values instead of exposing NaN", () => {
-    const observation = parseDnsObservation(
-      input({ message: LEGACY_MESSAGE.replace("0.011877665s", "1..2s") }),
-    );
-
-    expect(observation).toMatchObject({
-      parseState: "unparsed",
-      outcome: "pending",
-      warnings: ["Unrecognized AzureFirewallDnsProxy message"],
-    });
-    expect(observation?.durationSeconds).toBeUndefined();
-  });
-
-  it("rejects overflowing legacy numeric values", () => {
-    const observation = parseDnsObservation(
-      input({ message: LEGACY_MESSAGE.replace("57 false", `${"9".repeat(400)} false`) }),
-    );
-
-    expect(observation).toMatchObject({
-      parseState: "unparsed",
-      outcome: "pending",
-      warnings: ["Invalid numeric value in AzureFirewallDnsProxy message"],
-    });
-    expect(observation?.requestSizeBytes).toBeUndefined();
-  });
-
-  it("reports bounded response flag values", () => {
-    const flags = Array.from({ length: 33 }, (_, index) =>
-      index === 0 ? "x".repeat(65) : `f${index}`,
-    ).join(",");
-    const observation = parseDnsObservation(
-      input({ message: LEGACY_MESSAGE.replace("qr,rd,ra", flags) }),
-    );
-
-    expect(observation?.responseFlags).toHaveLength(32);
-    expect(observation?.warnings).toEqual(
-      expect.arrayContaining(["Response flag count truncated", "Response flag truncated"]),
-    );
-  });
-
-  it("parses documented legacy proxy transport errors without treating error number as RCODE", () => {
+  it("maps Event Hub DNS proxy requests into active named entries", () => {
     const observation = parseDnsObservation(
       input({
-        message:
-          " Error: 2 time.windows.com.reddog.microsoft.com. A: read udp 10.0.1.5:49126->168.63.129.160:53: i/o timeout",
-      }),
-    );
-
-    expect(observation).toMatchObject({
-      errorNumber: "2",
-      errorMessage: "read udp 10.0.1.5:49126->168.63.129.160:53: i/o timeout",
-      queryName: "time.windows.com.reddog.microsoft.com.",
-      queryType: "A",
-      outcome: "transport-error",
-    });
-    expect(observation?.responseCode).toBeUndefined();
-  });
-
-  it("parses structured query fields and DNS errors", () => {
-    const observation = parseDnsObservation(
-      input({
-        category: "AZFWDnsQuery",
-        origin: "log-analytics",
-        message: "",
+        category: "AzureFirewallDnsProxy",
+        origin: "event-hub",
+        message: EVENT_HUB_DNS_REQUEST,
+        enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
         raw: {
-          properties: {
-            SourceIp: "10.0.0.4",
-            SourcePort: 53000,
-            QueryId: 42,
-            QueryName: "missing.example.",
-            QueryType: "HTTPS",
-            QueryClass: "IN",
-            Protocol: "udp",
-            ResponseCode: "NXDOMAIN",
-            ResponseFlags: "qr,rd,ra,cd",
-            RequestDurationSecs: 0.000_038,
-          },
+          category: "AzureFirewallDnsProxy",
+          properties: { msg: EVENT_HUB_DNS_REQUEST },
         },
       }),
     );
 
     expect(observation).toMatchObject({
-      source: "proxy-structured",
-      clientPort: "53000",
-      queryId: "42",
-      queryType: "HTTPS",
-      responseFlags: ["qr", "rd", "ra", "cd"],
-      outcome: "dns-error",
+      source: "dns-proxy",
+      stage: "proxy-exchange",
+      path: "proxy",
+      clientIp: "10.140.16.133",
+      clientPort: "29135",
+      queryId: "50772",
+      queryName: "winatp-gw-neu3.microsoft.com.",
+      queryType: "A",
+      queryClass: "IN",
+      protocol: "UDP",
+      requestSizeBytes: 57,
+      dnssecOk: false,
+      ednsBufferSizeBytes: 1232,
+      responseCode: "NOERROR",
+      responseFlags: ["qr", "rd", "ra"],
+      responseSizeBytes: 336,
+      durationSeconds: 0.0032,
+      outcome: "response-unknown",
+      parseState: "parsed",
+      enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+      raw: { msg: EVENT_HUB_DNS_REQUEST },
     });
+    expect(createDnsEntries([observation!])).toMatchObject([
+      {
+        source: "dns-proxy",
+        displayText: "winatp-gw-neu3.microsoft.com.",
+        queryName: "winatp-gw-neu3.microsoft.com.",
+        completeness: "complete",
+        observations: [{ enqueuedTimeUtc: "2026-07-12T16:36:43.000Z" }],
+      },
+    ]);
   });
+
+  it.each([
+    "DNS Request: malformed",
+    `DNS Request: ${"x".repeat(20_000)}`,
+    "unrelated diagnostic text",
+  ])("does not create blank DNS entries for malformed or oversized proxy message", (message) => {
+    expect(
+      parseDnsObservation(
+        input({
+          category: "AzureFirewallDnsProxy",
+          origin: "event-hub",
+          message,
+          raw: { category: "AzureFirewallDnsProxy", properties: { msg: message } },
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("preserves documented DNS Flow Trace fields without inferring message semantics", () => {
+    const observation = parseDnsObservation(
+      input({
+        category: "AZFWDnsFlowTrace",
+        protocol: "TCP",
+        raw: {
+          MsgType: "future message type",
+          Protocol: "TCP",
+          QueryMessage: "opaque query details for example.test",
+          QueryTime: "2026-07-12T16:36:42.000Z",
+          ResponseTime: "2026-07-12T16:36:42.012Z",
+          ServerIp: "168.63.129.16",
+          ServerMessage: "opaque server response",
+          ServerPort: 53,
+          SocketFamily: "IPv4",
+          SourceIp: "10.0.0.4",
+          SourcePort: 53_000,
+        },
+      }),
+    );
+
+    expect(observation).toMatchObject({
+      source: "dns-flow-trace",
+      stage: "dns-flow-trace",
+      path: "proxy",
+      outcome: "pending",
+      parseState: "partial",
+      protocol: "TCP",
+      clientIp: "10.0.0.4",
+      clientPort: "53000",
+      serverIp: "168.63.129.16",
+      serverPort: "53",
+      msgType: "future message type",
+      queryMessage: "opaque query details for example.test",
+      serverMessage: "opaque server response",
+      queryTime: "2026-07-12T16:36:42.000Z",
+      responseTime: "2026-07-12T16:36:42.012Z",
+      socketFamily: "IPv4",
+    });
+    expect(observation?.queryName).toBeUndefined();
+    expect(createDnsEntries([observation!])).toMatchObject([
+      {
+        source: "dns-flow-trace",
+        completeness: "partial",
+        detailSelector: {
+          msgType: "future message type",
+          queryMessage: "opaque query details for example.test",
+          serverMessage: "opaque server response",
+        },
+      },
+    ]);
+  });
+
+  it("maps internal firewall FQDN resolution failures without implying a client query", () => {
+    const observation = parseDnsObservation(
+      input({
+        category: "AZFWInternalFqdnResolutionFailure",
+        protocol: "Unknown",
+        policy: "hub-policy",
+        ruleCollectionGroup: "hub-group",
+        ruleCollection: "application-rules",
+        rule: "allow-service",
+        raw: {
+          Fqdn: "service.example.test",
+          Error: "resolver timed out",
+          ServerIp: "168.63.129.16",
+          ServerPort: 53,
+        },
+      }),
+    );
+
+    expect(observation).toMatchObject({
+      source: "internal-fqdn-failure",
+      stage: "internal-resolution",
+      path: "internal",
+      queryName: "service.example.test",
+      serverIp: "168.63.129.16",
+      serverPort: "53",
+      errorMessage: "resolver timed out",
+      policy: "hub-policy",
+      ruleCollectionGroup: "hub-group",
+      ruleCollection: "application-rules",
+      rule: "allow-service",
+      outcome: "dns-error",
+      parseState: "parsed",
+    });
+    expect(observation?.clientIp).toBeUndefined();
+    expect(createDnsEntries([observation!])).toMatchObject([
+      {
+        source: "internal-fqdn-failure",
+        queryName: "service.example.test",
+        completeness: "partial",
+        detailSelector: {
+          queryName: "service.example.test",
+          errorMessage: "resolver timed out",
+          serverIp: "168.63.129.16",
+          serverPort: "53",
+        },
+      },
+    ]);
+  });
+
+  it.each(["AZFWDnsFlowTrace", "AZFWInternalFqdnResolutionFailure"])(
+    "does not map Log Analytics-only %s records from Event Hub",
+    (category) => {
+      expect(parseDnsObservation(input({ category, origin: "event-hub" }))).toBeUndefined();
+    },
+  );
 
   it("treats unknown nonzero response codes conservatively as DNS errors", () => {
     const observation = parseDnsObservation(
-      input({
-        category: "AZFWDnsQuery",
-        origin: "log-analytics",
-        message: "",
-        raw: { QueryName: "future.example.", ResponseCode: "FUTURE_RCODE" },
-      }),
+      input({ raw: { QueryName: "future.example.", ResponseCode: "FUTURE_RCODE" } }),
     );
 
     expect(observation?.outcome).toBe("dns-error");
   });
 
   it.each([
-    ["53", "53000", "Allow", "transport-observed"],
-    ["53000", "53", "Deny", "blocked"],
+    {
+      sourcePort: "53000",
+      destinationPort: "53",
+      action: "Allow",
+      clientIp: "10.0.0.4",
+      clientPort: "53000",
+      serverIp: "10.0.0.5",
+      serverPort: "53",
+      outcome: "transport-observed",
+    },
+    {
+      sourcePort: "53",
+      destinationPort: "53000",
+      action: "Deny",
+      clientIp: "10.0.0.5",
+      clientPort: "53000",
+      serverIp: "10.0.0.4",
+      serverPort: "53",
+      outcome: "blocked",
+    },
   ])(
-    "recognizes source and destination port 53",
-    (sourcePort, destinationPort, action, outcome) => {
+    "normalizes TCP DNS direction when exactly one endpoint uses port 53",
+    ({
+      sourcePort,
+      destinationPort,
+      action,
+      clientIp,
+      clientPort,
+      serverIp,
+      serverPort,
+      outcome,
+    }) => {
       const observation = parseDnsObservation(
         input({
           category: "AZFWNetworkRule",
+          origin: "event-hub",
           action,
           protocol: "TCP",
           sourceIp: "10.0.0.4",
@@ -180,24 +288,92 @@ describe("DNS parser", () => {
         }),
       );
 
-      expect(observation).toMatchObject({ source: "network-rule", outcome });
+      expect(observation).toMatchObject({
+        source: "network-rule",
+        protocol: "TCP",
+        clientIp,
+        clientPort,
+        serverIp,
+        serverPort,
+        networkSourceIp: "10.0.0.4",
+        networkSourcePort: sourcePort,
+        networkDestinationIp: "10.0.0.5",
+        networkDestinationPort: destinationPort,
+        outcome,
+      });
     },
   );
 
+  it("keeps both-port-53 transport orientation without assigning client and server roles", () => {
+    const observation = parseDnsObservation(
+      input({
+        category: "AZFWNetworkRule",
+        origin: "event-hub",
+        action: "Allow",
+        protocol: "UDP",
+        sourceIp: "10.0.0.4",
+        sourcePort: "53",
+        destinationIp: "10.0.0.5",
+        destinationPort: "53",
+      }),
+    );
+
+    expect(observation).toMatchObject({
+      networkSourceIp: "10.0.0.4",
+      networkSourcePort: "53",
+      networkDestinationIp: "10.0.0.5",
+      networkDestinationPort: "53",
+      warnings: ["DNS transport direction is ambiguous"],
+    });
+    expect(observation?.clientIp).toBeUndefined();
+    expect(observation?.clientPort).toBeUndefined();
+    expect(observation?.serverIp).toBeUndefined();
+    expect(observation?.serverPort).toBeUndefined();
+  });
+
+  it("preserves network-rule metadata and Event Hub enqueue time", () => {
+    const observation = parseDnsObservation(
+      input({
+        category: "AZFWNetworkRule",
+        origin: "event-hub",
+        action: "Allow",
+        protocol: "UDP",
+        sourceIp: "10.0.0.4",
+        sourcePort: "53000",
+        destinationIp: "168.63.129.16",
+        destinationPort: "53",
+        enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+        policy: "hub-policy",
+        ruleCollectionGroup: "hub-group",
+        ruleCollection: "dns-rules",
+        rule: "allow-dns",
+      }),
+    );
+
+    expect(observation).toMatchObject({
+      enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+      policy: "hub-policy",
+      ruleCollectionGroup: "hub-group",
+      ruleCollection: "dns-rules",
+      rule: "allow-dns",
+    });
+  });
+
   it("keeps transport observations outside queried entries", () => {
-    const proxy = parseDnsObservation(input());
+    const query = parseDnsObservation(input());
     const transport = parseDnsObservation(
       input({
         id: "transport-1",
         category: "AZFWNetworkRule",
+        origin: "event-hub",
         protocol: "UDP",
         sourcePort: "53000",
         destinationPort: "53",
       }),
     );
 
-    expect(createDnsEntries([proxy!, transport!])).toHaveLength(1);
-    expect(createDnsEntries([proxy!, transport!])[0]?.id).toBe("dns-1");
+    expect(createDnsEntries([query!, transport!])).toHaveLength(1);
+    expect(createDnsEntries([query!, transport!])[0]?.id).toBe("dns-1");
   });
 
   it("does not classify unrelated network records as DNS", () => {
@@ -205,6 +381,7 @@ describe("DNS parser", () => {
       parseDnsObservation(
         input({
           category: "AZFWNetworkRule",
+          origin: "event-hub",
           protocol: "TCP",
           sourcePort: "50000",
           destinationPort: "443",
@@ -213,44 +390,14 @@ describe("DNS parser", () => {
     ).toBeUndefined();
   });
 
-  it("preserves documented Flow Trace messages and timing without correlating rows", () => {
-    const observation = parseDnsObservation(
-      input({
-        category: "AZFWDnsFlowTrace",
-        origin: "log-analytics",
-        message: "query payload",
-        raw: {
-          MsgType: "Forwarder Query",
-          QueryMessage: "example.com. IN A",
-          QueryTime: "2026-07-12T16:36:42.000Z",
-          ServerIp: "168.63.129.16",
-          ServerPort: 53,
-          SourceIp: "10.0.0.4",
-        },
-      }),
-    );
-
-    expect(observation).toMatchObject({
-      source: "flow-trace",
-      stage: "forwarder-query",
-      queryMessage: "example.com. IN A",
-      queryTime: "2026-07-12T16:36:42.000Z",
-      serverIp: "168.63.129.16",
-      serverPort: "53",
-    });
-    expect(createDnsEntries([observation!])[0]?.confidence).toBe("uncorrelated");
-  });
-
-  it("marks oversized canonical and raw values as truncated", () => {
+  it("marks oversized retained structured values as truncated", () => {
     const longName = `${"a".repeat(1_100)}.example.`;
     const observation = parseDnsObservation(
       input({
-        category: "AZFWDnsQuery",
-        origin: "log-analytics",
-        message: "",
         raw: {
           QueryName: longName,
           ErrorMessage: "x".repeat(3_000),
+          ErrorNumber: "1".repeat(100),
           ResponseCode: "SERVFAIL",
         },
       }),
@@ -258,33 +405,14 @@ describe("DNS parser", () => {
 
     expect(observation?.queryName).toHaveLength(1_024);
     expect(observation?.errorMessage).toHaveLength(2_048);
+    expect(observation?.errorNumber).toHaveLength(64);
+    expect(observation?.outcome).toBe("transport-error");
     expect(observation?.warnings).toEqual(
-      expect.arrayContaining(["Query name truncated", "Error message truncated"]),
+      expect.arrayContaining([
+        "Query name truncated",
+        "Error message truncated",
+        "Error number truncated",
+      ]),
     );
-  });
-
-  it("bounds canonical error and flow timing fields", () => {
-    const structured = parseDnsObservation(
-      input({
-        category: "AZFWDnsQuery",
-        origin: "log-analytics",
-        message: "",
-        raw: { QueryName: "bounded.example.", ErrorNumber: "1".repeat(100) },
-      }),
-    );
-    const flow = parseDnsObservation(
-      input({
-        category: "AZFWDnsFlowTrace",
-        origin: "log-analytics",
-        message: "",
-        raw: { MsgType: "Client Query", QueryTime: "x".repeat(300) },
-      }),
-    );
-
-    expect(structured?.errorNumber).toHaveLength(64);
-    expect(structured?.outcome).toBe("transport-error");
-    expect(structured?.warnings).toContain("Error number truncated");
-    expect(flow?.queryTime).toHaveLength(256);
-    expect(flow?.warnings).toContain("Query time truncated");
   });
 });

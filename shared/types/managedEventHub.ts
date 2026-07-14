@@ -15,6 +15,7 @@ export interface ManagedEventHubEventEnvelope {
     partitionId: string;
     sequenceNumber: number;
     offset?: string;
+    applicationProperties?: Record<string, unknown>;
   }>;
 }
 

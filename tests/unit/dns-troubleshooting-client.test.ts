@@ -345,13 +345,19 @@ describe("DNS troubleshooting client", () => {
     try {
       const harness = createHarness(async () => createResponse());
       harness.mode.value = "real-time-analysis";
+      harness.dns.showUnidentifiedTransports.value = true;
       await nextTick();
       const record = normalizeFirewallLogRecord({
         raw: {
           time: "2026-07-12T08:30:00.000Z",
-          category: "AzureFirewallDnsProxy",
+          category: "AZFWNetworkRule",
           properties: {
-            msg: "DNS Request: 10.0.0.4:53000 - 1 A IN api.example. udp 40 false 1224 NOERROR qr,rd,ra 80 0.001s",
+            Action: "Allow",
+            Protocol: "TCP",
+            SourceIp: "10.0.0.4",
+            SourcePort: 53_000,
+            DestinationIp: "168.63.129.16",
+            DestinationPort: 53,
           },
         },
         partitionId: "0",
@@ -383,6 +389,7 @@ describe("DNS troubleshooting client", () => {
     try {
       const harness = createHarness(async () => createResponse());
       harness.mode.value = "real-time-analysis";
+      harness.dns.showUnidentifiedTransports.value = true;
       harness.active.value = false;
       await nextTick();
 
@@ -390,11 +397,16 @@ describe("DNS troubleshooting client", () => {
         normalizeFirewallLogRecord({
           raw: {
             time: "2026-07-12T08:30:00.000Z",
-            category: "AzureFirewallDnsProxy",
+            category: "AZFWNetworkRule",
             resourceId:
               "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
             properties: {
-              msg: "DNS Request: 10.0.0.4:53000 - 1 A IN api.example. udp 40 false 1224 NOERROR qr,rd,ra 80 0.001s",
+              Action: "Allow",
+              Protocol: "UDP",
+              SourceIp: "10.0.0.4",
+              SourcePort: 53_000,
+              DestinationIp: "168.63.129.16",
+              DestinationPort: 53,
             },
           },
           partitionId: "0",
@@ -407,8 +419,14 @@ describe("DNS troubleshooting client", () => {
       await nextTick();
       vi.runOnlyPendingTimers();
 
-      expect(harness.dns.entries.value.map((entry) => entry.queryName)).toEqual(["api.example."]);
-      expect(harness.dns.filterOptions.value.outcomes).toEqual(["response-unknown"]);
+      expect(harness.dns.entries.value).toEqual([
+        expect.objectContaining({
+          source: "network-rule",
+          outcome: "transport-observed",
+          client: "10.0.0.4:53000",
+        }),
+      ]);
+      expect(harness.dns.filterOptions.value.outcomes).toEqual(["transport-observed"]);
 
       harness.scope.stop();
     } finally {

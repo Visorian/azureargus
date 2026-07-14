@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { DnsDetailQueryResponse, DnsEntry, DnsObservation } from "#shared/types/dns";
+import type {
+  DnsDetailQueryResponse,
+  DnsEntry,
+  DnsObservation,
+  DnsRelatedEvidence,
+  DnsRelatedSourceKind,
+} from "#shared/types/dns";
 import {
   DNS_CLASS_LABELS,
   DNS_FLAG_LABELS,
@@ -16,31 +22,41 @@ const props = defineProps<{
 }>();
 const open = defineModel<boolean>("open", { required: true });
 const toast = useToast();
-const transportOnly = computed(() => props.entry !== null && !props.entry.queryName);
 const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? []);
+const relatedEvidence = computed(() => props.detail?.relatedEvidence ?? []);
+const modalTitle = computed(() => {
+  if (props.entry?.source === "network-rule") return "DNS transport detail";
+  if (props.entry?.source === "dns-flow-trace") return "DNS flow trace detail";
+  if (props.entry?.source === "internal-fqdn-failure") return "Internal FQDN failure detail";
+  return "DNS resolution detail";
+});
 
 function stageLabel(observation: DnsObservation) {
   if (observation.stage === "proxy-exchange") return "Proxy exchange";
-  return observation.stage.replaceAll("-", " ");
+  if (observation.stage === "dns-flow-trace") return "DNS flow trace";
+  if (observation.stage === "internal-resolution") return "Internal resolution failure";
+  return "Transport";
 }
 
-function rawJson(observation: DnsObservation) {
-  return JSON.stringify(observation.raw, null, 2);
+function rawJson(item: DnsObservation | DnsRelatedEvidence) {
+  return JSON.stringify(item.raw, null, 2);
 }
 
-function rawRowCount(observation: DnsObservation) {
-  return Math.min(Math.max(rawJson(observation).split("\n").length, 6), 24);
+function rawRowCount(item: DnsObservation | DnsRelatedEvidence) {
+  return Math.min(Math.max(rawJson(item).split("\n").length, 6), 24);
 }
 
 function stageActor(observation: DnsObservation) {
-  if (observation.stage === "client-query" || observation.stage === "client-response") {
-    return "Client";
-  }
-  if (observation.stage === "forwarder-query" || observation.stage === "forwarder-response") {
-    return "DNS server";
-  }
+  if (observation.stage === "transport") return "Network rule";
+  if (observation.stage === "internal-resolution") return "Azure Firewall resolver";
   return "Azure Firewall";
 }
+
+const relatedSourceLabels: Record<DnsRelatedSourceKind, string> = {
+  "application-rule": "Application rule",
+  "flow-trace": "TCP flow trace",
+  "nat-rule": "NAT rule",
+};
 
 function duration(seconds: number | undefined) {
   if (seconds === undefined) return undefined;
@@ -53,9 +69,9 @@ function outcomeLabel(observation: DnsObservation) {
   return DNS_OUTCOME_LABELS[observation.outcome];
 }
 
-async function copyRaw(observation: DnsObservation) {
+async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
   try {
-    await navigator.clipboard.writeText(rawJson(observation));
+    await navigator.clipboard.writeText(rawJson(item));
     toast.add({
       title: "Raw message copied",
       color: "success",
@@ -74,7 +90,7 @@ async function copyRaw(observation: DnsObservation) {
 <template>
   <UModal
     v-model:open="open"
-    :title="transportOnly ? 'DNS transport detail' : 'DNS resolution detail'"
+    :title="modalTitle"
     :ui="{
       content:
         'h-[min(46rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-5xl select-none sm:h-[min(46rem,calc(100dvh-4rem))]',
@@ -85,8 +101,10 @@ async function copyRaw(observation: DnsObservation) {
       <div v-if="entry" class="flex h-full min-h-0 flex-col">
         <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3 sm:gap-x-6">
           <div>
-            <p class="text-xs text-brand-gray-500">Query</p>
-            <p class="break-all font-mono">{{ entry.queryName ?? "Not observed" }}</p>
+            <p class="text-xs text-brand-gray-500">DNS name or message</p>
+            <p class="break-all font-mono">
+              {{ entry.displayText ?? entry.queryName ?? "Not observed" }}
+            </p>
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Type</p>
@@ -170,15 +188,22 @@ async function copyRaw(observation: DnsObservation) {
                     <span class="capitalize">{{ stageLabel(observation) }}</span>
                     <span class="text-brand-gray-600 dark:text-brand-gray-300">
                       {{ stageActor(observation) }}
-                      <span v-if="observation.attempt"> · attempt {{ observation.attempt }}</span>
                     </span>
                     <div class="min-w-0">
+                      <p class="text-xs text-brand-gray-500">Event time</p>
                       <NuxtTime
                         :datetime="observation.timestamp"
-                        hour="2-digit"
-                        minute="2-digit"
-                        second="2-digit"
+                        date-style="medium"
+                        time-style="medium"
                       />
+                      <template v-if="observation.enqueuedTimeUtc">
+                        <p class="mt-1 text-xs text-brand-gray-500">Event Hub enqueued</p>
+                        <NuxtTime
+                          :datetime="observation.enqueuedTimeUtc"
+                          date-style="medium"
+                          time-style="medium"
+                        />
+                      </template>
                       <p v-if="observation.serverIp" class="truncate font-mono text-xs">
                         Server {{ observation.serverIp
                         }}<span v-if="observation.serverPort">:{{ observation.serverPort }}</span>
@@ -190,11 +215,8 @@ async function copyRaw(observation: DnsObservation) {
               </ol>
               <p
                 v-if="
-                  !observations.some(
-                    (observation) =>
-                      observation.stage === 'client-response' ||
-                      observation.stage === 'proxy-exchange',
-                  )
+                  entry.source === 'proxy-structured' &&
+                  !observations.some((observation) => observation.stage === 'proxy-exchange')
                 "
                 class="mt-2 text-sm text-brand-gray-600 dark:text-brand-gray-300"
               >
@@ -270,7 +292,7 @@ async function copyRaw(observation: DnsObservation) {
                   <dd>{{ observation.dnssecOk ? "Set" : "Not set" }}</dd>
                 </div>
                 <div v-if="observation.durationSeconds !== undefined">
-                  <dt class="text-xs text-brand-gray-500">Duration</dt>
+                  <dt class="text-xs text-brand-gray-500">Azure-reported transaction duration</dt>
                   <dd>
                     {{ duration(observation.durationSeconds) }} ·
                     {{ observation.durationSeconds }} s exact
@@ -284,13 +306,9 @@ async function copyRaw(observation: DnsObservation) {
                   <dt class="text-xs text-brand-gray-500">Error message</dt>
                   <dd>{{ observation.errorMessage }}</dd>
                 </div>
-                <div v-if="observation.queryTime">
-                  <dt class="text-xs text-brand-gray-500">Query time</dt>
-                  <dd>{{ observation.queryTime }}</dd>
-                </div>
-                <div v-if="observation.responseTime">
-                  <dt class="text-xs text-brand-gray-500">Response time</dt>
-                  <dd>{{ observation.responseTime }}</dd>
+                <div v-if="observation.msgType">
+                  <dt class="text-xs text-brand-gray-500">Message type</dt>
+                  <dd>{{ observation.msgType }}</dd>
                 </div>
                 <div v-if="observation.queryMessage" class="sm:col-span-2 lg:col-span-3">
                   <dt class="text-xs text-brand-gray-500">Query message</dt>
@@ -299,6 +317,34 @@ async function copyRaw(observation: DnsObservation) {
                 <div v-if="observation.serverMessage" class="sm:col-span-2 lg:col-span-3">
                   <dt class="text-xs text-brand-gray-500">Server message</dt>
                   <dd class="break-all font-mono text-xs">{{ observation.serverMessage }}</dd>
+                </div>
+                <div v-if="observation.queryTime">
+                  <dt class="text-xs text-brand-gray-500">Azure query time</dt>
+                  <dd>{{ observation.queryTime }}</dd>
+                </div>
+                <div v-if="observation.responseTime">
+                  <dt class="text-xs text-brand-gray-500">Azure response time</dt>
+                  <dd>{{ observation.responseTime }}</dd>
+                </div>
+                <div v-if="observation.socketFamily">
+                  <dt class="text-xs text-brand-gray-500">Socket family</dt>
+                  <dd>{{ observation.socketFamily }}</dd>
+                </div>
+                <div v-if="observation.policy">
+                  <dt class="text-xs text-brand-gray-500">Firewall policy</dt>
+                  <dd>{{ observation.policy }}</dd>
+                </div>
+                <div v-if="observation.ruleCollectionGroup">
+                  <dt class="text-xs text-brand-gray-500">Rule collection group</dt>
+                  <dd>{{ observation.ruleCollectionGroup }}</dd>
+                </div>
+                <div v-if="observation.ruleCollection">
+                  <dt class="text-xs text-brand-gray-500">Rule collection</dt>
+                  <dd>{{ observation.ruleCollection }}</dd>
+                </div>
+                <div v-if="observation.rule">
+                  <dt class="text-xs text-brand-gray-500">Rule</dt>
+                  <dd>{{ observation.rule }}</dd>
                 </div>
                 <div v-if="observation.resourceId" class="sm:col-span-2 lg:col-span-3">
                   <dt class="text-xs text-brand-gray-500">Azure resource</dt>
@@ -310,6 +356,107 @@ async function copyRaw(observation: DnsObservation) {
                 </div>
               </dl>
             </section>
+
+            <section
+              v-if="detail.relatedSources?.length"
+              aria-labelledby="dns-related-heading"
+              class="space-y-3"
+            >
+              <div>
+                <h3 id="dns-related-heading" class="text-sm font-semibold">
+                  Nearby firewall evidence
+                </h3>
+                <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+                  Fixed-window matches from same firewall and available endpoint or FQDN anchors.
+                  Azure provides no explicit correlation ID; these records are not asserted to
+                  belong to this DNS transaction.
+                </p>
+              </div>
+              <ul class="grid gap-2 text-xs sm:grid-cols-3">
+                <li
+                  v-for="source in detail.relatedSources"
+                  :key="source.source"
+                  class="rounded-md border border-brand-gray-200 p-2 dark:border-brand-gray-700"
+                >
+                  <span class="font-medium">{{ relatedSourceLabels[source.source] }}</span>
+                  <span class="ml-1 text-brand-gray-600 dark:text-brand-gray-300">
+                    · {{ source.availability
+                    }}<template v-if="source.truncated"> · truncated</template>
+                  </span>
+                  <p v-if="source.warning" class="mt-1 text-amber-700 dark:text-amber-300">
+                    {{ source.warning }}
+                  </p>
+                </li>
+              </ul>
+              <p
+                v-if="relatedEvidence.length === 0"
+                class="text-sm text-brand-gray-600 dark:text-brand-gray-300"
+              >
+                No nearby firewall evidence matched available anchors.
+              </p>
+              <article
+                v-for="evidence in relatedEvidence"
+                :key="evidence.id"
+                class="space-y-3 rounded-md border border-brand-gray-200 p-3 text-sm dark:border-brand-gray-700"
+              >
+                <div>
+                  <p class="font-medium">{{ relatedSourceLabels[evidence.source] }}</p>
+                  <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+                    Matched on {{ evidence.matchBasis }}. Uncorrelated nearby evidence.
+                  </p>
+                </div>
+                <dl class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <dt class="text-xs text-brand-gray-500">Event time</dt>
+                    <dd>
+                      <NuxtTime
+                        :datetime="evidence.timestamp"
+                        date-style="medium"
+                        time-style="medium"
+                      />
+                    </dd>
+                  </div>
+                  <div v-if="evidence.action">
+                    <dt class="text-xs text-brand-gray-500">Action</dt>
+                    <dd>
+                      {{ evidence.action
+                      }}<span v-if="evidence.actionReason"> · {{ evidence.actionReason }}</span>
+                    </dd>
+                  </div>
+                  <div v-if="evidence.flag">
+                    <dt class="text-xs text-brand-gray-500">TCP flag</dt>
+                    <dd>{{ evidence.flag }}</dd>
+                  </div>
+                  <div v-if="evidence.queryName">
+                    <dt class="text-xs text-brand-gray-500">FQDN</dt>
+                    <dd class="break-all font-mono text-xs">{{ evidence.queryName }}</dd>
+                  </div>
+                  <div v-if="evidence.targetUrl" class="sm:col-span-2">
+                    <dt class="text-xs text-brand-gray-500">Target URL</dt>
+                    <dd class="break-all font-mono text-xs">{{ evidence.targetUrl }}</dd>
+                  </div>
+                  <div v-if="evidence.translatedIp">
+                    <dt class="text-xs text-brand-gray-500">Translated endpoint</dt>
+                    <dd class="font-mono text-xs">
+                      {{ evidence.translatedIp
+                      }}<span v-if="evidence.translatedPort">:{{ evidence.translatedPort }}</span>
+                    </dd>
+                  </div>
+                </dl>
+                <details>
+                  <summary class="cursor-pointer text-xs font-medium">Raw related record</summary>
+                  <textarea
+                    :value="rawJson(evidence)"
+                    :rows="rawRowCount(evidence)"
+                    readonly
+                    spellcheck="false"
+                    wrap="off"
+                    class="mt-2 block max-h-96 w-full resize-none overflow-auto border-0 bg-brand-gray-50 p-3 font-mono text-xs leading-5 select-text text-brand-gray-950 focus:outline-none dark:bg-brand-gray-900 dark:text-brand-gray-50"
+                  />
+                </details>
+              </article>
+            </section>
+
             <section
               v-for="(observation, index) in observations"
               :key="`${observation.id}-raw`"

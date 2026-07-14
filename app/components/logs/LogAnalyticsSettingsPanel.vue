@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from "#shared/types/azureAccess";
-import type { DnsSourceKind, DnsSourceReadiness } from "#shared/types/dns";
+import type { DnsReadinessSourceKind, DnsSourceReadiness } from "#shared/types/dns";
 import type { DnsReadinessStatus } from "~/composables/useDnsSourceReadiness";
 import {
   MAX_LOG_ANALYTICS_QUERY_LIMIT,
@@ -112,7 +112,7 @@ const readinessStyle: Record<ReadinessState, { icon: string; label: string; text
   },
 };
 
-function sourceState(source: DnsSourceKind): ReadinessState {
+function sourceState(source: DnsReadinessSourceKind): ReadinessState {
   const readiness = props.dnsReadiness.find((item) => item.source === source);
   if (
     props.dnsReadinessStatus === "idle" ||
@@ -127,26 +127,51 @@ function sourceState(source: DnsSourceKind): ReadinessState {
   return "multiple-records";
 }
 
-const readinessItems = computed<ReadinessItem[]>(() => [
+const readinessGroups = computed(() => [
   {
-    label: "Structured DNS proxy logs",
-    description: "AZFWDnsQuery · any record in selected workspace",
-    state: sourceState("proxy-structured"),
+    label: "DNS sources",
+    items: [
+      {
+        label: "Structured DNS proxy logs",
+        description: "AZFWDnsQuery · any record in selected workspace",
+        state: sourceState("proxy-structured"),
+      },
+      {
+        label: "DNS flow trace logs",
+        description: "AZFWDnsFlowTrace · any record in selected workspace",
+        state: sourceState("dns-flow-trace"),
+      },
+      {
+        label: "Internal FQDN resolution failures",
+        description: "AZFWInternalFqdnResolutionFailure · any record in selected workspace",
+        state: sourceState("internal-fqdn-failure"),
+      },
+      {
+        label: "DNS transport logs",
+        description: "AZFWNetworkRule · TCP or UDP port 53 record",
+        state: sourceState("network-rule"),
+      },
+    ] satisfies ReadinessItem[],
   },
   {
-    label: "Legacy DNS proxy logs",
-    description: "AzureDiagnostics · AzureFirewallDnsProxy record",
-    state: sourceState("proxy-legacy"),
-  },
-  {
-    label: "DNS flow trace logs",
-    description: "AZFWDnsFlowTrace · any record in selected workspace",
-    state: sourceState("flow-trace"),
-  },
-  {
-    label: "DNS transport logs",
-    description: "AZFWNetworkRule · TCP or UDP port 53 record",
-    state: sourceState("network-rule"),
+    label: "Related firewall evidence",
+    items: [
+      {
+        label: "Application rule evidence",
+        description: "AZFWApplicationRule · FQDN-bearing record",
+        state: sourceState("application-rule"),
+      },
+      {
+        label: "TCP flow trace evidence",
+        description: "AZFWFlowTrace · TCP port 53 record",
+        state: sourceState("flow-trace"),
+      },
+      {
+        label: "NAT rule evidence",
+        description: "AZFWNatRule · original or translated port 53 record",
+        state: sourceState("nat-rule"),
+      },
+    ] satisfies ReadinessItem[],
   },
 ]);
 </script>
@@ -445,25 +470,30 @@ const readinessItems = computed<ReadinessItem[]>(() => [
               DNS source readiness check failed.
             </p>
           </div>
-          <ul class="space-y-2">
-            <li v-for="item in readinessItems" :key="item.label" class="flex items-start gap-2">
-              <UIcon
-                :name="readinessStyle[item.state].icon"
-                :class="['mt-0.5 size-4 shrink-0', readinessStyle[item.state].text]"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-baseline justify-between gap-x-2">
-                  <span class="text-xs font-medium">{{ item.label }}</span>
-                  <span :class="['text-xs', readinessStyle[item.state].text]">
-                    {{ readinessStyle[item.state].label }}
-                  </span>
+          <div v-for="group in readinessGroups" :key="group.label" class="space-y-2">
+            <h4 class="text-xs font-semibold text-brand-gray-700 dark:text-brand-gray-200">
+              {{ group.label }}
+            </h4>
+            <ul class="space-y-2">
+              <li v-for="item in group.items" :key="item.label" class="flex items-start gap-2">
+                <UIcon
+                  :name="readinessStyle[item.state].icon"
+                  :class="['mt-0.5 size-4 shrink-0', readinessStyle[item.state].text]"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline justify-between gap-x-2">
+                    <span class="text-xs font-medium">{{ item.label }}</span>
+                    <span :class="['text-xs', readinessStyle[item.state].text]">
+                      {{ readinessStyle[item.state].label }}
+                    </span>
+                  </div>
+                  <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+                    {{ item.description }}
+                  </p>
                 </div>
-                <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                  {{ item.description }}
-                </p>
-              </div>
-            </li>
-          </ul>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>

@@ -10,7 +10,7 @@ import {
 
 type ManagedEventHubReceivedEvent = Pick<
   ReceivedEventData,
-  "body" | "enqueuedTimeUtc" | "sequenceNumber"
+  "body" | "enqueuedTimeUtc" | "sequenceNumber" | "properties"
 > &
   Partial<Pick<ReceivedEventData, "offset">>;
 
@@ -260,6 +260,7 @@ export function createManagedEventHubStream({
                     partitionId: context.partitionId,
                     sequenceNumber: event.sequenceNumber,
                     offset: event.offset === undefined ? undefined : String(event.offset),
+                    applicationProperties: event.properties,
                   })),
                 });
               },

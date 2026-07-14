@@ -25,6 +25,7 @@ export interface EventHubLogEvent {
   enqueuedTimeUtc?: Date | string;
   sequenceNumber?: number | string;
   offset?: number | string;
+  properties?: Record<string, unknown>;
 }
 
 interface ReceiverPartitionContext {
@@ -122,6 +123,7 @@ function eventToFirewallLogs(
       partitionId,
       sequenceNumber: event.sequenceNumber,
       offset: event.offset,
+      applicationProperties: event.properties,
       index: baseIndex + index,
       eventRecordIndex: index,
     }),
@@ -416,7 +418,11 @@ export function useEventHubReceiver({
             }
 
             for (const event of envelope.events) {
-              const result = eventsToFirewallLogs([event], event.partitionId, nextRecordIndex);
+              const result = eventsToFirewallLogs(
+                [{ ...event, properties: event.applicationProperties }],
+                event.partitionId,
+                nextRecordIndex,
+              );
               nextRecordIndex = result.nextIndex;
               batcher.pushMany(result.records);
             }

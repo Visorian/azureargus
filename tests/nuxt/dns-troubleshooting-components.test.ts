@@ -15,13 +15,13 @@ const filterOptions = {
   outcomes: ["response-unknown", "transport-observed"],
   protocols: ["TCP", "UDP"],
   queryTypes: ["A", "AAAA"],
-  sources: ["network-rule", "proxy-legacy"],
+  sources: ["network-rule", "proxy-structured"],
 } satisfies DnsFilterOptions;
 
 const observation: DnsObservation = {
   id: "observation-1",
   timestamp: "2026-07-12T08:30:00.000Z",
-  source: "proxy-legacy",
+  source: "proxy-structured",
   stage: "proxy-exchange",
   path: "proxy",
   outcome: "response-unknown",
@@ -50,7 +50,7 @@ const entry: DnsEntry = {
   observationCount: 1,
   completeness: "complete",
   confidence: "explicit",
-  source: "proxy-legacy",
+  source: "proxy-structured",
   warnings: [],
   observations: [observation],
 };
@@ -115,14 +115,7 @@ describe("DNS troubleshooting components", () => {
         entries: [entry, transportEntry],
         filters,
         showUnidentifiedTransports: true,
-        sources: [
-          {
-            source: "proxy-legacy",
-            availability: "failed",
-            truncated: false,
-            warning: "Source query failed",
-          },
-        ],
+        sources: [],
         status: "success",
         error: null,
         entriesTruncated: false,
@@ -158,6 +151,47 @@ describe("DNS troubleshooting components", () => {
       .get('button[aria-label="Open DNS transport details for 10.0.0.4:53000"]')
       .trigger("click");
     expect(wrapper.emitted("select")?.[1]).toEqual([transportEntry]);
+  });
+
+  it("keeps retained DNS results visible and reports partial source failures", async () => {
+    const wrapper = await mountSuspended(DnsTroubleshootingView, {
+      props: {
+        entries: [entry],
+        filters: createFilters(),
+        showUnidentifiedTransports: false,
+        sources: [
+          {
+            source: "proxy-structured",
+            availability: "available",
+            truncated: false,
+          },
+          {
+            source: "network-rule",
+            availability: "failed",
+            truncated: false,
+            warning: "DNS transport query failed",
+          },
+        ],
+        status: "success",
+        error: null,
+        entriesTruncated: false,
+        transportsTruncated: false,
+        logAnalysis: true,
+        canApplyFilters: false,
+        filterOptions,
+        selectedEntryId: null,
+        sort: { key: "timestamp", direction: "desc" },
+        "onUpdate:filters": () => undefined,
+      },
+      global: { stubs: { RecycleScroller: RecycleScrollerStub } },
+    });
+
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "Some DNS sources could not be queried.",
+    );
+    expect(wrapper.get('[role="status"]').text()).toContain("DNS transport query failed");
+    expect(wrapper.text()).toContain("api.example.");
+    expect(wrapper.text()).not.toContain("No entries returned by available DNS sources.");
   });
 
   it("shows DNS list request errors", async () => {
@@ -343,6 +377,61 @@ describe("DNS troubleshooting components", () => {
     expect(wrapper.text()).not.toContain("Observed flow");
   });
 
+  it("renders related firewall evidence separately with explicit uncorrelated status", async () => {
+    const wrapper = await mountSuspended(DnsDetailModal, {
+      props: {
+        open: true,
+        entry,
+        detail: {
+          observations: [observation],
+          relatedEvidence: [
+            {
+              id: "related-application-1",
+              timestamp: "2026-07-12T08:30:10.000Z",
+              source: "application-rule",
+              matchBasis: "same firewall, client IP, FQDN, and -5s/+60s window",
+              action: "Allow",
+              queryName: "api.example.",
+              targetUrl: "https://api.example/health",
+              raw: { Category: "AZFWApplicationRule", Action: "Allow" },
+            },
+          ],
+          relatedSources: [
+            { source: "application-rule", availability: "available", truncated: false },
+            {
+              source: "flow-trace",
+              availability: "forbidden",
+              truncated: false,
+              warning: "Related source query forbidden",
+            },
+            { source: "nat-rule", availability: "not-applicable", truncated: false },
+          ],
+          detailTruncated: false,
+          completeness: "complete",
+          warnings: [],
+        },
+        error: null,
+        loading: false,
+        "onUpdate:open": () => undefined,
+      },
+      global: {
+        stubs: {
+          UModal: { template: "<div><slot name='body' /></div>" },
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("Nearby firewall evidence");
+    expect(wrapper.text()).toContain("no explicit correlation ID");
+    expect(wrapper.text()).toContain("not asserted to belong to this DNS transaction");
+    expect(wrapper.text()).toContain("same firewall, client IP, FQDN, and -5s/+60s window");
+    expect(wrapper.text()).toContain("Uncorrelated nearby evidence");
+    expect(wrapper.text()).toContain("Related source query forbidden");
+    expect(wrapper.text()).toContain("https://api.example/health");
+    expect(wrapper.text()).toContain("not-applicable");
+    expect(wrapper.text()).toContain("Observed flow");
+  });
+
   it("labels transport-only evidence without claiming DNS resolution", async () => {
     const transport = {
       ...observation,
@@ -352,6 +441,10 @@ describe("DNS troubleshooting components", () => {
       path: "direct" as const,
       outcome: "blocked" as const,
       action: "Deny",
+      policy: "firewall-policy",
+      ruleCollectionGroup: "dns-collection-group",
+      ruleCollection: "dns-collection",
+      rule: "deny-external-dns",
       queryName: undefined,
       queryType: undefined,
       serverIp: "168.63.129.16",
@@ -395,6 +488,18 @@ describe("DNS troubleshooting components", () => {
     expect(wrapper.text()).toContain("DNS transport detail");
     expect(wrapper.text()).toContain("Not observed");
     expect(wrapper.text()).toContain("168.63.129.16:53");
+    expect(wrapper.findAll("dt").map((label) => label.text())).toEqual(
+      expect.arrayContaining([
+        "Firewall policy",
+        "Rule collection group",
+        "Rule collection",
+        "Rule",
+      ]),
+    );
+    expect(wrapper.text()).toContain("firewall-policy");
+    expect(wrapper.text()).toContain("dns-collection-group");
+    expect(wrapper.text()).toContain("dns-collection");
+    expect(wrapper.text()).toContain("deny-external-dns");
     expect(wrapper.text()).not.toContain("DNS resolution detail");
   });
 });

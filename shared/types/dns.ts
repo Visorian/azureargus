@@ -1,15 +1,17 @@
-export type DnsSourceKind = "proxy-legacy" | "proxy-structured" | "flow-trace" | "network-rule";
+export type DnsSourceKind =
+  | "dns-proxy"
+  | "proxy-structured"
+  | "dns-flow-trace"
+  | "internal-fqdn-failure"
+  | "network-rule";
 
-export type DnsStage =
-  | "client-query"
-  | "forwarder-query"
-  | "forwarder-response"
-  | "client-response"
-  | "proxy-exchange"
-  | "transport"
-  | "error";
+export type DnsRelatedSourceKind = "application-rule" | "flow-trace" | "nat-rule";
 
-export type DnsPathKind = "proxy" | "direct" | "flow-trace" | "unknown";
+export type DnsReadinessSourceKind = DnsSourceKind | DnsRelatedSourceKind;
+
+export type DnsStage = "proxy-exchange" | "dns-flow-trace" | "internal-resolution" | "transport";
+
+export type DnsPathKind = "proxy" | "direct" | "internal" | "unknown";
 
 export type DnsOutcome =
   | "answer-observed"
@@ -29,12 +31,7 @@ export type DnsTraceCompleteness =
 
 export type DnsCorrelationConfidence = "explicit" | "exact-derived" | "likely" | "uncorrelated";
 
-export type DnsSourceAvailability =
-  | "available"
-  | "not-configured"
-  | "unsupported-table-plan"
-  | "forbidden"
-  | "failed";
+export type DnsSourceAvailability = "available" | "forbidden" | "failed";
 
 export interface DnsRawProjection {
   [key: string]: boolean | number | string | null | undefined;
@@ -43,6 +40,7 @@ export interface DnsRawProjection {
 export interface DnsObservation {
   id: string;
   timestamp: string;
+  enqueuedTimeUtc?: string;
   source: DnsSourceKind;
   stage: DnsStage;
   path: DnsPathKind;
@@ -56,6 +54,10 @@ export interface DnsObservation {
   clientPort?: string;
   serverIp?: string;
   serverPort?: string;
+  networkSourceIp?: string;
+  networkSourcePort?: string;
+  networkDestinationIp?: string;
+  networkDestinationPort?: string;
   protocol?: string;
   requestSizeBytes?: number;
   responseSizeBytes?: number;
@@ -66,12 +68,17 @@ export interface DnsObservation {
   durationSeconds?: number;
   errorNumber?: string;
   errorMessage?: string;
+  msgType?: string;
   queryMessage?: string;
   serverMessage?: string;
   queryTime?: string;
   responseTime?: string;
+  socketFamily?: string;
   action?: string;
-  attempt?: number;
+  policy?: string;
+  ruleCollectionGroup?: string;
+  ruleCollection?: string;
+  rule?: string;
   parseState: "parsed" | "partial" | "unparsed";
   warnings: string[];
   raw: DnsRawProjection;
@@ -85,14 +92,34 @@ export interface DnsDetailSelector {
   queryName?: string;
   clientIp?: string;
   clientPort?: string;
+  protocol?: string;
+  networkSourceIp?: string;
+  networkSourcePort?: string;
+  networkDestinationIp?: string;
+  networkDestinationPort?: string;
+  msgType?: string;
+  queryMessage?: string;
+  serverMessage?: string;
+  queryTime?: string;
+  responseTime?: string;
+  socketFamily?: string;
+  serverIp?: string;
+  serverPort?: string;
+  errorMessage?: string;
+  policy?: string;
+  ruleCollectionGroup?: string;
+  ruleCollection?: string;
+  rule?: string;
 }
 
 export interface DnsEntry {
   id: string;
   timestamp: string;
+  displayText?: string;
   queryName?: string;
   queryType?: string;
   client?: string;
+  destination?: string;
   protocol?: string;
   path: DnsPathKind;
   outcome: DnsOutcome;
@@ -161,12 +188,12 @@ export interface DnsSourceStatus {
 
 export type DnsSourceReadiness =
   | {
-      source: DnsSourceKind;
+      source: DnsReadinessSourceKind;
       status: "success";
       sampleCount: 0 | 1 | 2;
     }
   | {
-      source: DnsSourceKind;
+      source: DnsReadinessSourceKind;
       status: "forbidden" | "failed";
       sampleCount: null;
     };
@@ -183,8 +210,42 @@ export interface DnsListQueryResponse {
   sources: DnsSourceStatus[];
 }
 
+export interface DnsRelatedEvidence {
+  id: string;
+  timestamp: string;
+  source: DnsRelatedSourceKind;
+  matchBasis: string;
+  action?: string;
+  actionReason?: string;
+  protocol?: string;
+  sourceIp?: string;
+  sourcePort?: string;
+  destinationIp?: string;
+  destinationPort?: string;
+  queryName?: string;
+  targetUrl?: string;
+  flag?: string;
+  translatedIp?: string;
+  translatedPort?: string;
+  policy?: string;
+  ruleCollectionGroup?: string;
+  ruleCollection?: string;
+  rule?: string;
+  resourceId?: string;
+  raw: DnsRawProjection;
+}
+
+export interface DnsRelatedSourceStatus {
+  source: DnsRelatedSourceKind;
+  availability: DnsSourceAvailability | "not-applicable";
+  truncated: boolean;
+  warning?: string;
+}
+
 export interface DnsDetailQueryResponse {
   observations: DnsObservation[];
+  relatedEvidence?: DnsRelatedEvidence[];
+  relatedSources?: DnsRelatedSourceStatus[];
   detailTruncated: boolean;
   completeness: DnsTraceCompleteness;
   warnings: string[];

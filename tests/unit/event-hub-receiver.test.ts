@@ -137,7 +137,7 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
-  it("publishes managed DNS batches with stable Event Hub offsets", async () => {
+  it("publishes managed network-rule DNS with Event Hub metadata", async () => {
     vi.useFakeTimers();
     installNuxtMocks();
     const encoder = new TextEncoder();
@@ -150,9 +150,18 @@ describe("Event Hub receiver helpers", () => {
               events: [
                 {
                   body: {
-                    category: "AzureFirewallDnsProxy",
+                    category: "AZFWNetworkRule",
                     properties: {
-                      msg: "DNS Request: 192.168.179.30:52338 - 22213 AAAA IN example.com. udp 57 false 1224 NOERROR qr,rd,ra 300 0.011877665s",
+                      Action: "Allow",
+                      Protocol: "TCP",
+                      SourceIp: "10.0.0.4",
+                      SourcePort: 53_000,
+                      DestinationIp: "168.63.129.16",
+                      DestinationPort: 53,
+                      Policy: "hub-policy",
+                      RuleCollectionGroup: "hub-group",
+                      RuleCollection: "dns-rules",
+                      Rule: "allow-dns",
                     },
                     time: "2026-07-12T12:00:00.000Z",
                   },
@@ -160,6 +169,7 @@ describe("Event Hub receiver helpers", () => {
                   offset: "123",
                   partitionId: "0",
                   sequenceNumber: 42,
+                  applicationProperties: { schemaVersion: "1", source: "managed" },
                 },
               ],
             })}\n`,
@@ -180,7 +190,18 @@ describe("Event Hub receiver helpers", () => {
     expect(onRecords).toHaveBeenCalledOnce();
     expect(onRecords.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
-        dns: expect.objectContaining({ queryId: "22213", queryName: "example.com." }),
+        dns: expect.objectContaining({
+          source: "network-rule",
+          protocol: "TCP",
+          clientIp: "10.0.0.4",
+          serverIp: "168.63.129.16",
+          policy: "hub-policy",
+          ruleCollectionGroup: "hub-group",
+          ruleCollection: "dns-rules",
+          rule: "allow-dns",
+        }),
+        enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+        applicationProperties: { schemaVersion: "1", source: "managed" },
         offset: "123",
         partitionId: "0",
         sequenceNumber: "42",
@@ -220,6 +241,60 @@ describe("Event Hub receiver helpers", () => {
       "0:10:1:2026-07-09T12:00:01.000Z:resource:unknown",
       "0:11:0:2026-07-09T12:00:02.000Z:resource:unknown",
     ]);
+  });
+
+  it("normalizes equivalent manual and managed Event Hub DNS envelopes identically", () => {
+    const body = {
+      time: "2026-07-12T12:00:00.000Z",
+      category: "AZFWNetworkRule",
+      properties: {
+        Action: "Allow",
+        Protocol: "TCP",
+        SourceIp: "10.0.0.4",
+        SourcePort: 53_000,
+        DestinationIp: "168.63.129.16",
+        DestinationPort: 53,
+      },
+    };
+    const properties = { schemaVersion: "1", diagnosticCategory: "network" };
+    const manual = eventsToFirewallLogs(
+      [
+        {
+          body,
+          enqueuedTimeUtc: new Date("2026-07-12T12:00:01.000Z"),
+          offset: "123",
+          sequenceNumber: 42,
+          properties,
+        },
+      ],
+      "0",
+      0,
+    );
+    const managed = eventsToFirewallLogs(
+      [
+        {
+          body,
+          enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+          offset: "123",
+          sequenceNumber: 42,
+          properties,
+        },
+      ],
+      "0",
+      0,
+    );
+
+    expect(managed).toEqual(manual);
+    expect(managed.records[0]).toMatchObject({
+      applicationProperties: properties,
+      enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+      dns: {
+        source: "network-rule",
+        protocol: "TCP",
+        clientIp: "10.0.0.4",
+        serverIp: "168.63.129.16",
+      },
+    });
   });
 
   it("does not create or subscribe a client after connect is invalidated", async () => {
@@ -368,7 +443,7 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
-  it("publishes normalized manual batches to sinks and clears them", async () => {
+  it("publishes normalized manual network-rule DNS with equivalent metadata and clears", async () => {
     vi.useFakeTimers();
     installNuxtMocks();
     let handlers: ReceiverHandlers | undefined;
@@ -392,13 +467,25 @@ describe("Event Hub receiver helpers", () => {
       [
         {
           body: {
-            category: "AzureFirewallDnsProxy",
+            category: "AZFWNetworkRule",
             properties: {
-              msg: "DNS Request: 192.168.179.30:52338 - 22213 AAAA IN example.com. udp 57 false 1224 NOERROR qr,rd,ra 300 0.011877665s",
+              Action: "Allow",
+              Protocol: "TCP",
+              SourceIp: "10.0.0.4",
+              SourcePort: 53_000,
+              DestinationIp: "168.63.129.16",
+              DestinationPort: 53,
+              Policy: "hub-policy",
+              RuleCollectionGroup: "hub-group",
+              RuleCollection: "dns-rules",
+              Rule: "allow-dns",
             },
             time: "2026-07-12T12:00:00.000Z",
           },
+          enqueuedTimeUtc: new Date("2026-07-12T12:00:01.000Z"),
           sequenceNumber: 42,
+          offset: "123",
+          properties: { schemaVersion: "1", source: "manual" },
         },
       ],
       { partitionId: "0" },
@@ -409,10 +496,22 @@ describe("Event Hub receiver helpers", () => {
     expect(onRecords).toHaveBeenCalledOnce();
     expect(onRecords.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
-        category: "AzureFirewallDnsProxy",
-        dns: expect.objectContaining({ queryId: "22213", queryName: "example.com." }),
+        category: "AZFWNetworkRule",
+        dns: expect.objectContaining({
+          source: "network-rule",
+          protocol: "TCP",
+          clientIp: "10.0.0.4",
+          serverIp: "168.63.129.16",
+          policy: "hub-policy",
+          ruleCollectionGroup: "hub-group",
+          ruleCollection: "dns-rules",
+          rule: "allow-dns",
+        }),
+        enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+        applicationProperties: { schemaVersion: "1", source: "manual" },
         partitionId: "0",
         sequenceNumber: "42",
+        offset: "123",
       }),
     ]);
 

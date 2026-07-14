@@ -61,7 +61,10 @@ describe("firewall log parser", () => {
     expect(log.ruleCollectionGroup).toBe("legacy-collection-group");
   });
 
-  it("labels legacy Azure Firewall DNS proxy requests as DNS queries", () => {
+  it("maps live Event Hub DNS proxy requests and preserves delivery metadata", () => {
+    const message =
+      "DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s";
+    const applicationProperties = { schemaVersion: "1", diagnosticCategory: "dns" };
     const log = normalizeFirewallLogRecord({
       raw: {
         time: "2026-07-12T16:36:42.076008+00:00",
@@ -69,24 +72,112 @@ describe("firewall log parser", () => {
           "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
         operationName: "AzureFirewallDnsProxyLog",
         properties: {
-          msg: "DNS Request: 192.168.179.30:52100 - 46151 A IN eu-v20.events.endpoint.security.microsoft.com. udp 74 false 1224 NOERROR qr,rd,ra 390 0.003378648s",
+          msg: message,
         },
         category: "AzureFirewallDnsProxy",
       },
+      enqueuedTimeUtc: new Date("2026-07-12T16:36:43.000Z"),
+      partitionId: "2",
+      sequenceNumber: 99,
+      offset: "1200",
+      applicationProperties,
     });
 
     expect(log.action).toBe("DNS query");
     expect(log.category).toBe("AzureFirewallDnsProxy");
     expect(log.protocol).toBe("UDP");
-    expect(log.sourceIp).toBe("192.168.179.30");
-    expect(log.sourcePort).toBe("52100");
+    expect(log.sourceIp).toBe("10.140.16.133");
+    expect(log.sourcePort).toBe("29135");
     expect(log.resourceId).toContain("/AZUREFIREWALLS/");
-    expect(log.dns).toMatchObject({
-      queryId: "46151",
-      queryName: "eu-v20.events.endpoint.security.microsoft.com.",
-      responseSizeBytes: 390,
+    expect(log).toMatchObject({
+      enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+      applicationProperties,
+      partitionId: "2",
+      sequenceNumber: "99",
+      offset: "1200",
+      dns: {
+        source: "dns-proxy",
+        stage: "proxy-exchange",
+        queryId: "50772",
+        queryName: "winatp-gw-neu3.microsoft.com.",
+        queryType: "A",
+        queryClass: "IN",
+        protocol: "UDP",
+        clientIp: "10.140.16.133",
+        clientPort: "29135",
+        responseCode: "NOERROR",
+        responseFlags: ["qr", "rd", "ra"],
+        requestSizeBytes: 57,
+        responseSizeBytes: 336,
+        durationSeconds: 0.0032,
+        enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+        raw: { msg: message },
+      },
     });
     expect(log.searchableText).toContain("dns query");
+  });
+
+  it("keeps malformed Event Hub DNS proxy records in All logs without a DNS entry", () => {
+    const log = normalizeFirewallLogRecord({
+      raw: {
+        category: "AzureFirewallDnsProxy",
+        properties: { msg: "DNS Request: malformed" },
+      },
+    });
+
+    expect(log.category).toBe("AzureFirewallDnsProxy");
+    expect(log.action).toBe("DNS query");
+    expect(log.dns).toBeUndefined();
+    expect(log.searchableText).toContain("dns request: malformed");
+  });
+
+  it("maps retained Event Hub network-rule DNS with transport metadata", () => {
+    const applicationProperties = { schemaVersion: "1", diagnosticCategory: "network" };
+    const log = normalizeFirewallLogRecord({
+      raw: {
+        time: "2026-07-12T16:36:42.076Z",
+        category: "AZFWNetworkRule",
+        resourceId:
+          "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
+        properties: {
+          Action: "Allow",
+          Protocol: "TCP",
+          SourceIp: "10.0.0.4",
+          SourcePort: 53_000,
+          DestinationIp: "168.63.129.16",
+          DestinationPort: 53,
+          Policy: "hub-policy",
+          RuleCollectionGroup: "hub-group",
+          RuleCollection: "dns-rules",
+          Rule: "allow-dns",
+        },
+      },
+      enqueuedTimeUtc: new Date("2026-07-12T16:36:43.000Z"),
+      partitionId: "2",
+      sequenceNumber: 99,
+      offset: "1200",
+      applicationProperties,
+    });
+
+    expect(log).toMatchObject({
+      enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+      applicationProperties,
+      partitionId: "2",
+      sequenceNumber: "99",
+      offset: "1200",
+      dns: {
+        source: "network-rule",
+        protocol: "TCP",
+        clientIp: "10.0.0.4",
+        clientPort: "53000",
+        serverIp: "168.63.129.16",
+        serverPort: "53",
+        policy: "hub-policy",
+        ruleCollectionGroup: "hub-group",
+        ruleCollection: "dns-rules",
+        rule: "allow-dns",
+      },
+    });
   });
 
   it("uses EventData-local record index in stable identity", () => {

@@ -9,11 +9,17 @@ import type {
   DnsListQueryRequest,
   DnsListQueryResponse,
   DnsObservation,
+  DnsRawProjection,
   DnsReadinessResponse,
+  DnsReadinessSourceKind,
+  DnsRelatedEvidence,
+  DnsRelatedSourceKind,
+  DnsRelatedSourceStatus,
   DnsSourceKind,
   DnsSourceReadiness,
   DnsSourceStatus,
 } from "../../shared/types/dns";
+import { createHash } from "node:crypto";
 import { createDnsEntries, parseDnsObservation } from "../../shared/utils/dns";
 import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
 import {
@@ -26,13 +32,22 @@ import {
 
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILTER_LENGTH = 256;
+const MAX_SELECTOR_TEXT_LENGTH = 2_048;
 const DETAIL_LIMIT = 200;
+const RELATED_DETAIL_LIMIT = 50;
 const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const TRAILING_DOTS_PATTERN = /\.+$/;
 const FIREWALL_RESOURCE_ID_PATTERN =
   /^\/subscriptions\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/resourceGroups\/[^/]{1,90}\/providers\/Microsoft\.Network\/azureFirewalls\/[^/]{1,260}$/i;
-const SOURCE_KINDS = ["proxy-legacy", "proxy-structured", "flow-trace", "network-rule"] as const;
+const SOURCE_KINDS = [
+  "proxy-structured",
+  "dns-flow-trace",
+  "internal-fqdn-failure",
+  "network-rule",
+] as const;
+const RELATED_SOURCE_KINDS = ["application-rule", "flow-trace", "nat-rule"] as const;
 const FILTER_KEYS = ["search", "queryType", "client", "protocol", "outcome", "source"] as const;
 
 interface SourceQuery {
@@ -41,8 +56,15 @@ interface SourceQuery {
 }
 
 interface ReadinessProbe {
-  sources: readonly DnsSourceKind[];
+  sources: readonly DnsReadinessSourceKind[];
   query: string;
+}
+
+interface RelatedEvidenceQuery {
+  source: DnsRelatedSourceKind;
+  query: string;
+  timespan: string;
+  matchBasis: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -119,25 +141,91 @@ export function validateDelegatedDnsReadinessRequest(
 }
 
 function isDetailSelector(value: unknown): value is DnsDetailSelector {
-  const source = isRecord(value) ? value.source : undefined;
-  const optionalKeys =
-    source === "flow-trace" || source === "network-rule"
-      ? ["clientIp", "clientPort"]
-      : ["queryId", "queryName", "clientIp", "clientPort"];
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["source", "resourceId", "timestamp", ...optionalKeys]) ||
-    !SOURCE_KINDS.includes(value.source as DnsSourceKind) ||
+    !SOURCE_KINDS.includes(value.source as (typeof SOURCE_KINDS)[number]) ||
     typeof value.resourceId !== "string" ||
     !FIREWALL_RESOURCE_ID_PATTERN.test(value.resourceId) ||
     !isIsoTimestamp(value.timestamp)
   ) {
     return false;
   }
+  if (value.source === "network-rule") {
+    const keys = [
+      "source",
+      "resourceId",
+      "timestamp",
+      "protocol",
+      "networkSourceIp",
+      "networkSourcePort",
+      "networkDestinationIp",
+      "networkDestinationPort",
+    ] as const;
+    return (
+      hasExactKeys(value, keys) &&
+      keys.slice(3).every((key) => {
+        const field = value[key];
+        return typeof field === "string" && field.length > 0 && field.length <= 256;
+      })
+    );
+  }
+  if (value.source === "dns-flow-trace") {
+    const optionalKeys = [
+      "msgType",
+      "queryMessage",
+      "serverMessage",
+      "queryTime",
+      "responseTime",
+      "socketFamily",
+      "clientIp",
+      "clientPort",
+      "serverIp",
+      "serverPort",
+    ] as const;
+    if (!hasOnlyKeys(value, ["source", "resourceId", "timestamp", ...optionalKeys])) return false;
+    return (
+      optionalKeys.some((key) => value[key] !== undefined) &&
+      optionalKeys.every(
+        (key) =>
+          value[key] === undefined ||
+          (typeof value[key] === "string" &&
+            value[key].length > 0 &&
+            value[key].length <= MAX_SELECTOR_TEXT_LENGTH),
+      )
+    );
+  }
+  if (value.source === "internal-fqdn-failure") {
+    const optionalKeys = [
+      "queryName",
+      "serverIp",
+      "serverPort",
+      "errorMessage",
+      "policy",
+      "ruleCollectionGroup",
+      "ruleCollection",
+      "rule",
+    ] as const;
+    if (!hasOnlyKeys(value, ["source", "resourceId", "timestamp", ...optionalKeys])) return false;
+    return (
+      typeof value.queryName === "string" &&
+      value.queryName.length > 0 &&
+      optionalKeys.every(
+        (key) =>
+          value[key] === undefined ||
+          (typeof value[key] === "string" &&
+            value[key].length > 0 &&
+            value[key].length <= MAX_SELECTOR_TEXT_LENGTH),
+      )
+    );
+  }
+  const optionalKeys = ["queryId", "queryName", "clientIp", "clientPort"] as const;
+  if (!hasOnlyKeys(value, ["source", "resourceId", "timestamp", ...optionalKeys])) return false;
   return optionalKeys.every(
     (key) =>
       value[key] === undefined ||
-      (typeof value[key] === "string" && value[key].length > 0 && value[key].length <= 256),
+      (typeof value[key] === "string" &&
+        value[key].length > 0 &&
+        value[key].length <= MAX_SELECTOR_TEXT_LENGTH),
   );
 }
 
@@ -174,11 +262,6 @@ function filterClauses(
   return clauses;
 }
 
-function regexTokenClause(field: string, value: string) {
-  const escaped = value.toLowerCase().replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return `| where tolower(${field}) matches regex ${encodeKqlStringLiteral(`\\s${escaped}\\s`)}`;
-}
-
 function outcomeClauses(source: DnsSourceKind, outcome: string) {
   if (!outcome) return [];
   const normalized = outcome.toLowerCase();
@@ -199,19 +282,6 @@ function outcomeClauses(source: DnsSourceKind, outcome: string) {
       return [
         '| where isempty(ResponseCode) and isempty(ErrorMessage) and (isempty(tostring(ErrorNumber)) or tostring(ErrorNumber) == "0")',
       ];
-    return ["| where false"];
-  }
-  if (source === "proxy-legacy") {
-    if (normalized === "response-unknown") return ['| where Message contains " NOERROR "'];
-    if (normalized === "transport-error")
-      return ['| where trim_start(@"\\s+", Message) startswith "Error:"'];
-    if (normalized === "dns-error")
-      return ['| where Message startswith "DNS Request:" and Message !contains " NOERROR "'];
-    return ["| where false"];
-  }
-  if (source === "flow-trace") {
-    if (normalized === "response-unknown") return ['| where MsgType =~ "Client Response"'];
-    if (normalized === "pending") return ['| where MsgType !~ "Client Response"'];
     return ["| where false"];
   }
   if (normalized === "blocked") return ['| where Action contains "Deny"'];
@@ -241,43 +311,51 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
     source: "Category",
   };
   const structuredFilters = filterClauses(request.filters, commonFields, ["queryType", "protocol"]);
-  const legacyFilters = filterClauses(request.filters, {
-    ...commonFields,
-    search: "Message",
-    queryType: "Message",
-    client: "Message",
-    protocol: "Message",
-    outcome: "Message",
-  });
-  if (request.filters.queryType.trim()) {
-    legacyFilters.push(regexTokenClause("Message", request.filters.queryType.trim()));
-  }
-  if (request.filters.protocol.trim()) {
-    legacyFilters.push(regexTokenClause("Message", request.filters.protocol.trim()));
-  }
-  const flowFilters = filterClauses(
-    request.filters,
-    {
-      ...commonFields,
-      search: 'strcat(QueryMessage, " ", ServerMessage, " ", SourceIp, " ", ServerIp)',
-      queryType: "QueryMessage",
-      client: 'strcat(SourceIp, ":", SourcePort)',
-      protocol: "Protocol",
-      outcome: "ServerMessage",
-    },
-    ["protocol"],
-  );
   const networkFilters = filterClauses(
     request.filters,
     {
       ...commonFields,
-      search: 'strcat(SourceIp, " ", DestinationIp, " ", Action, " ", Protocol)',
+      search:
+        'strcat(SourceIp, " ", SourcePort, " ", DestinationIp, " ", DestinationPort, " ", Action, " ", Protocol, " ", Policy, " ", RuleCollectionGroup, " ", RuleCollection, " ", Rule)',
       queryType: '""',
-      client: 'strcat(SourceIp, ":", SourcePort)',
+      client:
+        'iff(toint(DestinationPort) == 53 and toint(SourcePort) != 53, strcat(SourceIp, ":", SourcePort), iff(toint(SourcePort) == 53 and toint(DestinationPort) != 53, strcat(DestinationIp, ":", DestinationPort), ""))',
       outcome: "Action",
     },
     ["queryType", "protocol"],
   );
+  const flowFilters = filterClauses(
+    request.filters,
+    {
+      ...commonFields,
+      search:
+        'strcat(MsgType, " ", QueryMessage, " ", ServerMessage, " ", SourceIp, " ", SourcePort, " ", ServerIp, " ", ServerPort)',
+      queryType: '""',
+      client: 'strcat(SourceIp, ":", SourcePort)',
+      outcome: '""',
+    },
+    ["protocol"],
+  );
+  if (request.filters.queryType.trim() || request.filters.outcome.trim()) {
+    flowFilters.push("| where false");
+  }
+  const internalFilters = filterClauses(request.filters, {
+    ...commonFields,
+    search:
+      'strcat(Fqdn, " ", Error, " ", ServerIp, " ", ServerPort, " ", Policy, " ", RuleCollectionGroup, " ", RuleCollection, " ", Rule)',
+    queryType: '""',
+    client: '""',
+    protocol: '""',
+    outcome: '""',
+  });
+  if (
+    request.filters.queryType.trim() ||
+    request.filters.client.trim() ||
+    request.filters.protocol.trim() ||
+    (request.filters.outcome.trim() && request.filters.outcome.trim() !== "dns-error")
+  ) {
+    internalFilters.push("| where false");
+  }
 
   const queries: SourceQuery[] = [
     {
@@ -292,27 +370,21 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
       ].join("\n"),
     },
     {
-      source: "proxy-legacy",
+      source: "dns-flow-trace",
       query: [
-        "AzureDiagnostics",
-        '| where Category == "AzureFirewallDnsProxy"',
-        '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
-        '| where ResourceType =~ "AZUREFIREWALLS"',
-        "| project TimeGenerated, Category, ResourceId=_ResourceId, Message=tostring(msg_s)",
-        ...legacyFilters,
-        ...outcomeClauses("proxy-legacy", request.filters.outcome.trim()),
+        "AZFWDnsFlowTrace",
+        ...flowFilters,
+        '| project TimeGenerated, Category="AZFWDnsFlowTrace", ResourceId=_ResourceId, MsgType, Protocol, QueryMessage, QueryTime, ResponseTime, ServerIp, ServerPort, ServerMessage, SocketFamily, SourceIp, SourcePort',
         "| order by TimeGenerated desc",
         `| take ${take}`,
       ].join("\n"),
     },
     {
-      source: "flow-trace",
+      source: "internal-fqdn-failure",
       query: [
-        "AZFWDnsFlowTrace",
-        '| extend Category="AZFWDnsFlowTrace"',
-        ...flowFilters,
-        ...outcomeClauses("flow-trace", request.filters.outcome.trim()),
-        "| project TimeGenerated, Category, ResourceId=_ResourceId, MsgType, Protocol, QueryMessage, QueryTime, ResponseTime, ServerIp, ServerMessage, ServerPort, SocketFamily, SourceIp, SourcePort",
+        "AZFWInternalFqdnResolutionFailure",
+        ...internalFilters,
+        '| project TimeGenerated, Category="AZFWInternalFqdnResolutionFailure", ResourceId=_ResourceId, Fqdn, Error, ServerIp, ServerPort, Policy, RuleCollectionGroup, RuleCollection, Rule',
         "| order by TimeGenerated desc",
         `| take ${take}`,
       ].join("\n"),
@@ -347,21 +419,18 @@ export function buildDnsReadinessProbes(): ReadinessProbe[] {
       ),
     },
     {
-      sources: ["proxy-legacy"],
+      sources: ["dns-flow-trace"],
       query: [
-        "AzureDiagnostics",
-        '| where Category == "AzureFirewallDnsProxy"',
-        '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
-        '| where ResourceType =~ "AZUREFIREWALLS"',
+        "AZFWDnsFlowTrace",
         "| take 2",
         "| count",
         "| project SampleCount = toint(Count)",
       ].join("\n"),
     },
     {
-      sources: ["flow-trace"],
+      sources: ["internal-fqdn-failure"],
       query: [
-        "AZFWDnsFlowTrace",
+        "AZFWInternalFqdnResolutionFailure",
         "| take 2",
         "| count",
         "| project SampleCount = toint(Count)",
@@ -373,6 +442,38 @@ export function buildDnsReadinessProbes(): ReadinessProbe[] {
         "AZFWNetworkRule",
         "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
         '| where Protocol =~ "TCP" or Protocol =~ "UDP"',
+        "| take 2",
+        "| count",
+        "| project SampleCount = toint(Count)",
+      ].join("\n"),
+    },
+    {
+      sources: ["application-rule"],
+      query: [
+        "AZFWApplicationRule",
+        "| where isnotempty(Fqdn)",
+        "| take 2",
+        "| count",
+        "| project SampleCount = toint(Count)",
+      ].join("\n"),
+    },
+    {
+      sources: ["flow-trace"],
+      query: [
+        "AZFWFlowTrace",
+        '| where Protocol =~ "TCP"',
+        "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
+        "| take 2",
+        "| count",
+        "| project SampleCount = toint(Count)",
+      ].join("\n"),
+    },
+    {
+      sources: ["nat-rule"],
+      query: [
+        "AZFWNatRule",
+        '| where Protocol =~ "TCP" or Protocol =~ "UDP"',
+        "| where toint(DestinationPort) == 53 or toint(TranslatedPort) == 53",
         "| take 2",
         "| count",
         "| project SampleCount = toint(Count)",
@@ -458,17 +559,73 @@ function text(value: unknown) {
   return typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
 }
 
-function mapRows(payload: unknown, source: DnsSourceKind, queryId: string, maxRows: number) {
+function canonicalValue(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return `string:${JSON.stringify(value)}`;
+  if (typeof value === "number") return `number:${Object.is(value, -0) ? "-0" : String(value)}`;
+  if (typeof value === "boolean") return `boolean:${String(value)}`;
+  if (Array.isArray(value)) return `array:[${value.map(canonicalValue).join(",")}]`;
+  if (isRecord(value)) {
+    return `object:{${Object.keys(value)
+      .toSorted()
+      .map((key) => `${JSON.stringify(key)}:${canonicalValue(value[key])}`)
+      .join(",")}}`;
+  }
+  throw new LogAnalyticsQueryError("upstream");
+}
+
+function defaultIdentityDigest(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function assignStableLogAnalyticsRowIds(
+  source: DnsReadinessSourceKind,
+  rows: readonly Record<string, unknown>[],
+  digest: (value: string) => string = defaultIdentityDigest,
+) {
+  const prepared = rows.map((row, index) => {
+    const canonical = canonicalValue({ source, row });
+    return { canonical, digest: digest(canonical), index, row };
+  });
+  const byDigest = Map.groupBy(prepared, (item) => item.digest);
+  const assigned: Array<{
+    collision: boolean;
+    id: string;
+    row: Record<string, unknown>;
+  }> = [];
+
+  for (const [identityDigest, digestGroup] of byDigest) {
+    const byCanonical = Map.groupBy(digestGroup, (item) => item.canonical);
+    const canonicalKeys = [...byCanonical.keys()].toSorted();
+    const collision = canonicalKeys.length > 1;
+    for (const [collisionIndex, canonical] of canonicalKeys.entries()) {
+      const occurrences = byCanonical.get(canonical)!;
+      const collisionSuffix = collision ? `:collision-${collisionIndex + 1}` : "";
+      for (const [occurrenceIndex, item] of occurrences.entries()) {
+        assigned[item.index] = {
+          collision,
+          id: `la:${source}:${identityDigest}${collisionSuffix}:${occurrenceIndex + 1}`,
+          row: item.row,
+        };
+      }
+    }
+  }
+
+  return assigned;
+}
+
+function mapRows(payload: unknown, source: DnsSourceKind, maxRows: number) {
   const rows = tableRows(payload, maxRows);
-  const observations = rows
-    .map((row, index) => {
+  const observations = assignStableLogAnalyticsRowIds(source, rows)
+    .map(({ collision, id, row }) => {
       const timestamp = text(row.TimeGenerated);
       if (!timestamp || !Number.isFinite(Date.parse(timestamp)))
         throw new LogAnalyticsQueryError("upstream");
       const category = text(row.Category) ?? "Unknown";
       const message = text(row.Message) ?? text(row.QueryMessage) ?? text(row.ServerMessage) ?? "";
-      return parseDnsObservation({
-        id: `${queryId}:${source}:${index}`,
+      const observation = parseDnsObservation({
+        id,
         timestamp: new Date(timestamp).toISOString(),
         category,
         action: text(row.Action) ?? (source === "network-rule" ? "Unknown" : "DNS query"),
@@ -477,11 +634,20 @@ function mapRows(payload: unknown, source: DnsSourceKind, queryId: string, maxRo
         sourcePort: text(row.SourcePort),
         destinationIp: text(row.DestinationIp) ?? text(row.ServerIp),
         destinationPort: text(row.DestinationPort) ?? text(row.ServerPort),
+        policy: text(row.Policy),
+        ruleCollectionGroup: text(row.RuleCollectionGroup),
+        ruleCollection: text(row.RuleCollection),
+        rule: text(row.Rule),
         resourceId: text(row.ResourceId),
         message,
         raw: { ...row, properties: row },
         origin: "log-analytics",
       });
+      if (!observation || !collision) return observation;
+      return {
+        ...observation,
+        warnings: [...observation.warnings, "Log Analytics observation identity hash collision"],
+      };
     })
     .filter((observation): observation is DnsObservation => observation !== undefined);
   return { observations, truncated: rows.length >= maxRows };
@@ -493,7 +659,6 @@ export async function executeDnsListQuery(
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
 ): Promise<DnsListQueryResponse> {
-  const queryId = options.queryId ?? crypto.randomUUID();
   const timespan = `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`;
   const queries = buildDnsListQueries(request);
   const results = await Promise.allSettled(
@@ -501,7 +666,6 @@ export async function executeDnsListQuery(
       const mapped = mapRows(
         await executeLogAnalyticsRawQuery(target, query, timespan, accessToken, options),
         source,
-        queryId,
         request.limit + 1,
       );
       return {
@@ -566,16 +730,56 @@ export async function executeDnsListQuery(
 
 function selectorClauses(selector: DnsDetailSelector) {
   const timestamp = new Date(selector.timestamp);
-  const from = new Date(timestamp.getTime() - 5_000).toISOString();
-  const to = new Date(timestamp.getTime() + 5_000).toISOString();
   const nextMillisecond = new Date(timestamp.getTime() + 1).toISOString();
   const clauses = [
-    selector.source === "flow-trace"
-      ? `| where TimeGenerated between (datetime(${from}) .. datetime(${to}))`
-      : `| where TimeGenerated >= datetime(${timestamp.toISOString()}) and TimeGenerated < datetime(${nextMillisecond})`,
+    `| where TimeGenerated >= datetime(${timestamp.toISOString()}) and TimeGenerated < datetime(${nextMillisecond})`,
     `| where _ResourceId =~ ${encodeKqlStringLiteral(selector.resourceId)}`,
   ];
-  if (selector.source !== "proxy-legacy") {
+  if (selector.source === "network-rule") {
+    clauses.push(
+      `| where Protocol =~ ${encodeKqlStringLiteral(selector.protocol!)}`,
+      `| where SourceIp == ${encodeKqlStringLiteral(selector.networkSourceIp!)}`,
+      `| where tostring(SourcePort) == ${encodeKqlStringLiteral(selector.networkSourcePort!)}`,
+      `| where DestinationIp == ${encodeKqlStringLiteral(selector.networkDestinationIp!)}`,
+      `| where tostring(DestinationPort) == ${encodeKqlStringLiteral(selector.networkDestinationPort!)}`,
+    );
+  } else if (selector.source === "dns-flow-trace") {
+    const fields = [
+      ["MsgType", selector.msgType, false],
+      ["QueryMessage", selector.queryMessage, false],
+      ["ServerMessage", selector.serverMessage, false],
+      ["QueryTime", selector.queryTime, false],
+      ["ResponseTime", selector.responseTime, false],
+      ["SocketFamily", selector.socketFamily, true],
+      ["SourceIp", selector.clientIp, false],
+      ["SourcePort", selector.clientPort, false],
+      ["ServerIp", selector.serverIp, false],
+      ["ServerPort", selector.serverPort, false],
+    ] as const;
+    for (const [field, value, caseInsensitive] of fields) {
+      if (!value) continue;
+      clauses.push(
+        `| where tostring(${field}) ${caseInsensitive ? "=~" : "=="} ${encodeKqlStringLiteral(value)}`,
+      );
+    }
+  } else if (selector.source === "internal-fqdn-failure") {
+    const fields = [
+      ["Fqdn", selector.queryName, true],
+      ["Error", selector.errorMessage, false],
+      ["ServerIp", selector.serverIp, false],
+      ["ServerPort", selector.serverPort, false],
+      ["Policy", selector.policy, false],
+      ["RuleCollectionGroup", selector.ruleCollectionGroup, false],
+      ["RuleCollection", selector.ruleCollection, false],
+      ["Rule", selector.rule, false],
+    ] as const;
+    for (const [field, value, caseInsensitive] of fields) {
+      if (!value) continue;
+      clauses.push(
+        `| where tostring(${field}) ${caseInsensitive ? "=~" : "=="} ${encodeKqlStringLiteral(value)}`,
+      );
+    }
+  } else {
     if (selector.queryId)
       clauses.push(`| where tostring(QueryId) == ${encodeKqlStringLiteral(selector.queryId)}`);
     if (selector.queryName)
@@ -591,28 +795,27 @@ function selectorClauses(selector: DnsDetailSelector) {
 }
 
 export function buildDnsDetailQuery(selector: DnsDetailSelector) {
+  if (selector.source === "dns-proxy") {
+    throw new TypeError("Event Hub DNS proxy entries do not use Log Analytics detail queries");
+  }
   const sourceShape = {
-    "proxy-legacy": {
-      table: "AzureDiagnostics",
-      before: [
-        '| where Category == "AzureFirewallDnsProxy"',
-        '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
-        '| where ResourceType =~ "AZUREFIREWALLS"',
-      ],
-      projection:
-        "| project TimeGenerated, Category, ResourceId=_ResourceId, Message=tostring(msg_s)",
-    },
     "proxy-structured": {
       table: "AZFWDnsQuery",
       before: [],
       projection:
         '| project TimeGenerated, Category="AZFWDnsQuery", ResourceId=_ResourceId, SourceIp, SourcePort, QueryId, QueryType, QueryClass, QueryName, Protocol, RequestSize, DnssecOkBit, EDNS0BufferSize, ResponseCode, ResponseFlags, ResponseSize, RequestDurationSecs, ErrorNumber, ErrorMessage',
     },
-    "flow-trace": {
+    "dns-flow-trace": {
       table: "AZFWDnsFlowTrace",
       before: [],
       projection:
-        '| project TimeGenerated, Category="AZFWDnsFlowTrace", ResourceId=_ResourceId, MsgType, Protocol, QueryMessage, QueryTime, ResponseTime, ServerIp, ServerMessage, ServerPort, SocketFamily, SourceIp, SourcePort',
+        '| project TimeGenerated, Category="AZFWDnsFlowTrace", ResourceId=_ResourceId, MsgType, Protocol, QueryMessage, QueryTime, ResponseTime, ServerIp, ServerPort, ServerMessage, SocketFamily, SourceIp, SourcePort',
+    },
+    "internal-fqdn-failure": {
+      table: "AZFWInternalFqdnResolutionFailure",
+      before: [],
+      projection:
+        '| project TimeGenerated, Category="AZFWInternalFqdnResolutionFailure", ResourceId=_ResourceId, Fqdn, Error, ServerIp, ServerPort, Policy, RuleCollectionGroup, RuleCollection, Rule',
     },
     "network-rule": {
       table: "AZFWNetworkRule",
@@ -638,8 +841,154 @@ function matchesSelector(observation: DnsObservation, selector: DnsDetailSelecto
     (!selector.queryName ||
       observation.queryName?.toLowerCase() === selector.queryName.toLowerCase()) &&
     (!selector.clientIp || observation.clientIp === selector.clientIp) &&
-    (!selector.clientPort || observation.clientPort === selector.clientPort)
+    (!selector.clientPort || observation.clientPort === selector.clientPort) &&
+    (!selector.protocol || observation.protocol === selector.protocol) &&
+    (!selector.networkSourceIp || observation.networkSourceIp === selector.networkSourceIp) &&
+    (!selector.networkSourcePort || observation.networkSourcePort === selector.networkSourcePort) &&
+    (!selector.networkDestinationIp ||
+      observation.networkDestinationIp === selector.networkDestinationIp) &&
+    (!selector.networkDestinationPort ||
+      observation.networkDestinationPort === selector.networkDestinationPort) &&
+    (!selector.msgType || observation.msgType === selector.msgType) &&
+    (!selector.queryMessage || observation.queryMessage === selector.queryMessage) &&
+    (!selector.serverMessage || observation.serverMessage === selector.serverMessage) &&
+    (!selector.queryTime || observation.queryTime === selector.queryTime) &&
+    (!selector.responseTime || observation.responseTime === selector.responseTime) &&
+    (!selector.socketFamily ||
+      observation.socketFamily?.toLowerCase() === selector.socketFamily.toLowerCase()) &&
+    (!selector.serverIp || observation.serverIp === selector.serverIp) &&
+    (!selector.serverPort || observation.serverPort === selector.serverPort) &&
+    (!selector.errorMessage || observation.errorMessage === selector.errorMessage) &&
+    (!selector.policy || observation.policy === selector.policy) &&
+    (!selector.ruleCollectionGroup ||
+      observation.ruleCollectionGroup === selector.ruleCollectionGroup) &&
+    (!selector.ruleCollection || observation.ruleCollection === selector.ruleCollection) &&
+    (!selector.rule || observation.rule === selector.rule)
   );
+}
+
+function relatedTimespan(timestamp: string, beforeMs: number, afterMs: number) {
+  const time = Date.parse(timestamp);
+  return `${new Date(time - beforeMs).toISOString()}/${new Date(time + afterMs).toISOString()}`;
+}
+
+export function buildDnsRelatedEvidenceQueries(
+  observation: DnsObservation,
+): RelatedEvidenceQuery[] {
+  if (!observation.resourceId) return [];
+  const resourceClause = `| where _ResourceId =~ ${encodeKqlStringLiteral(observation.resourceId)}`;
+  const queries: RelatedEvidenceQuery[] = [];
+  const fqdn = observation.queryName?.replace(TRAILING_DOTS_PATTERN, "");
+  if (fqdn && observation.clientIp) {
+    queries.push({
+      source: "application-rule",
+      timespan: relatedTimespan(observation.timestamp, 5_000, 60_000),
+      matchBasis: "same firewall, client IP, FQDN, and -5s/+60s window",
+      query: [
+        "AZFWApplicationRule",
+        resourceClause,
+        `| where SourceIp == ${encodeKqlStringLiteral(observation.clientIp)}`,
+        `| where Fqdn in~ (${encodeKqlStringLiteral(fqdn)}, ${encodeKqlStringLiteral(`${fqdn}.`)})`,
+        '| project TimeGenerated, Category="AZFWApplicationRule", ResourceId=_ResourceId, Action, ActionReason, Protocol, SourceIp, SourcePort, DestinationPort, Fqdn, TargetUrl, Policy, RuleCollectionGroup, RuleCollection, Rule',
+        "| order by TimeGenerated asc",
+        `| take ${RELATED_DETAIL_LIMIT + 1}`,
+      ].join("\n"),
+    });
+  }
+  if (
+    observation.protocol?.toUpperCase() === "TCP" &&
+    observation.clientIp &&
+    observation.clientPort &&
+    observation.serverIp
+  ) {
+    queries.push({
+      source: "flow-trace",
+      timespan: relatedTimespan(observation.timestamp, 5_000, 5_000),
+      matchBasis: "same firewall, TCP client socket, DNS server, and ±5s window",
+      query: [
+        "AZFWFlowTrace",
+        resourceClause,
+        '| where Protocol =~ "TCP"',
+        `| where (SourceIp == ${encodeKqlStringLiteral(observation.clientIp)} and tostring(SourcePort) == ${encodeKqlStringLiteral(observation.clientPort)} and DestinationIp == ${encodeKqlStringLiteral(observation.serverIp)} and toint(DestinationPort) == 53) or (DestinationIp == ${encodeKqlStringLiteral(observation.clientIp)} and tostring(DestinationPort) == ${encodeKqlStringLiteral(observation.clientPort)} and SourceIp == ${encodeKqlStringLiteral(observation.serverIp)} and toint(SourcePort) == 53)`,
+        '| project TimeGenerated, Category="AZFWFlowTrace", ResourceId=_ResourceId, Action, ActionReason, Flag, Protocol, SourceIp, SourcePort, DestinationIp, DestinationPort',
+        "| order by TimeGenerated asc",
+        `| take ${RELATED_DETAIL_LIMIT + 1}`,
+      ].join("\n"),
+    });
+  }
+  if (
+    (observation.protocol?.toUpperCase() === "TCP" ||
+      observation.protocol?.toUpperCase() === "UDP") &&
+    observation.clientIp &&
+    observation.clientPort &&
+    observation.serverIp
+  ) {
+    queries.push({
+      source: "nat-rule",
+      timespan: relatedTimespan(observation.timestamp, 5_000, 5_000),
+      matchBasis: "same firewall, client socket, DNS server, protocol, and ±5s window",
+      query: [
+        "AZFWNatRule",
+        resourceClause,
+        `| where Protocol =~ ${encodeKqlStringLiteral(observation.protocol)}`,
+        `| where SourceIp == ${encodeKqlStringLiteral(observation.clientIp)} and tostring(SourcePort) == ${encodeKqlStringLiteral(observation.clientPort)}`,
+        "| where toint(DestinationPort) == 53 or toint(TranslatedPort) == 53",
+        `| where DestinationIp == ${encodeKqlStringLiteral(observation.serverIp)} or TranslatedIp == ${encodeKqlStringLiteral(observation.serverIp)}`,
+        '| project TimeGenerated, Category="AZFWNatRule", ResourceId=_ResourceId, Protocol, SourceIp, SourcePort, DestinationIp, DestinationPort, TranslatedIp, TranslatedPort, Policy, RuleCollectionGroup, RuleCollection, Rule',
+        "| order by TimeGenerated asc",
+        `| take ${RELATED_DETAIL_LIMIT + 1}`,
+      ].join("\n"),
+    });
+  }
+  return queries;
+}
+
+function mapRelatedRows(
+  payload: unknown,
+  source: DnsRelatedSourceKind,
+  matchBasis: string,
+): { evidence: DnsRelatedEvidence[]; truncated: boolean } {
+  const rows = tableRows(payload, RELATED_DETAIL_LIMIT + 1);
+  const evidence = assignStableLogAnalyticsRowIds(source, rows)
+    .slice(0, RELATED_DETAIL_LIMIT)
+    .map<DnsRelatedEvidence>(({ id, row }) => {
+      const timestamp = text(row.TimeGenerated);
+      if (!timestamp || !Number.isFinite(Date.parse(timestamp))) {
+        throw new LogAnalyticsQueryError("upstream");
+      }
+      const raw: DnsRawProjection = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (typeof value === "string") raw[key] = value.slice(0, 2_048);
+        else if (typeof value === "number" || typeof value === "boolean" || value === null) {
+          raw[key] = value;
+        }
+      }
+      return {
+        id,
+        timestamp: new Date(timestamp).toISOString(),
+        source,
+        matchBasis,
+        action: text(row.Action),
+        actionReason: text(row.ActionReason),
+        protocol: text(row.Protocol),
+        sourceIp: text(row.SourceIp),
+        sourcePort: text(row.SourcePort),
+        destinationIp: text(row.DestinationIp),
+        destinationPort: text(row.DestinationPort),
+        queryName: text(row.Fqdn),
+        targetUrl: text(row.TargetUrl),
+        flag: text(row.Flag),
+        translatedIp: text(row.TranslatedIp),
+        translatedPort: text(row.TranslatedPort),
+        policy: text(row.Policy),
+        ruleCollectionGroup: text(row.RuleCollectionGroup),
+        ruleCollection: text(row.RuleCollection),
+        rule: text(row.Rule),
+        resourceId: text(row.ResourceId),
+        raw,
+      };
+    });
+  return { evidence, truncated: rows.length > RELATED_DETAIL_LIMIT };
 }
 
 export async function executeDnsDetailQuery(
@@ -658,12 +1007,7 @@ export async function executeDnsDetailQuery(
     accessToken,
     options,
   );
-  const mapped = mapRows(
-    payload,
-    request.selector.source,
-    options.queryId ?? crypto.randomUUID(),
-    DETAIL_LIMIT + 1,
-  );
+  const mapped = mapRows(payload, request.selector.source, DETAIL_LIMIT + 1);
   const observations = mapped.observations.filter((observation) =>
     matchesSelector(observation, request.selector),
   );
@@ -680,14 +1024,47 @@ export async function executeDnsDetailQuery(
     };
   }
   const detailTruncated = mapped.truncated;
+  const relatedQueries = buildDnsRelatedEvidenceQueries(observations[0]!);
+  const relatedResults = await Promise.allSettled(
+    relatedQueries.map(async ({ source, query, timespan, matchBasis }) => ({
+      source,
+      ...mapRelatedRows(
+        await executeLogAnalyticsRawQuery(target, query, timespan, accessToken, options),
+        source,
+        matchBasis,
+      ),
+    })),
+  );
+  const relatedEvidence: DnsRelatedEvidence[] = [];
+  const relatedSources: DnsRelatedSourceStatus[] = RELATED_SOURCE_KINDS.map((source) => ({
+    source,
+    availability: "not-applicable",
+    truncated: false,
+  }));
+  for (const [index, result] of relatedResults.entries()) {
+    const source = relatedQueries[index]!.source;
+    const status = relatedSources.find((item) => item.source === source)!;
+    if (result.status === "fulfilled") {
+      relatedEvidence.push(...result.value.evidence);
+      status.availability = "available";
+      status.truncated = result.value.truncated;
+      continue;
+    }
+    const forbidden =
+      result.reason instanceof LogAnalyticsQueryError && result.reason.kind === "authorization";
+    status.availability = forbidden ? "forbidden" : "failed";
+    status.warning = forbidden ? "Related source query forbidden" : "Related source query failed";
+  }
   return {
     observations,
+    relatedEvidence,
+    relatedSources,
     detailTruncated,
     completeness: detailTruncated
       ? "range-truncated"
       : observations[0]!.stage === "proxy-exchange"
         ? "complete"
         : "partial",
-    warnings: [],
+    warnings: observations[0]!.warnings,
   };
 }

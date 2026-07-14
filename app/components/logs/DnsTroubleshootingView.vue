@@ -50,8 +50,18 @@ const sortItems = [
   { label: "Oldest first", value: "timestamp-asc", key: "timestamp", direction: "asc" },
   { label: "Query name A–Z", value: "queryName-asc", key: "queryName", direction: "asc" },
   { label: "Query name Z–A", value: "queryName-desc", key: "queryName", direction: "desc" },
-  { label: "Shortest duration first", value: "duration-asc", key: "duration", direction: "asc" },
-  { label: "Longest duration first", value: "duration-desc", key: "duration", direction: "desc" },
+  {
+    label: "Shortest transaction first",
+    value: "duration-asc",
+    key: "duration",
+    direction: "asc",
+  },
+  {
+    label: "Longest transaction first",
+    value: "duration-desc",
+    key: "duration",
+    direction: "desc",
+  },
   {
     label: "Fewest observations first",
     value: "observations-asc",
@@ -130,6 +140,14 @@ const emptyEntryMessage = computed(() => {
   if (props.entriesTruncated) return "No entries retained within bounded DNS query results.";
   return "No matching DNS entries.";
 });
+const sourceWarnings = computed(() =>
+  props.sources
+    .filter((source) => source.availability !== "available")
+    .map((source) => ({
+      key: source.source,
+      text: source.warning ?? `${source.source} source unavailable`,
+    })),
+);
 
 function outcomeLabel(value: DnsEntry["outcome"]) {
   return DNS_OUTCOME_LABELS[value];
@@ -149,6 +167,7 @@ function endpoint(observation: DnsObservation, side: "client" | "server") {
 }
 
 function destination(entry: DnsEntry) {
+  if (entry.destination) return entry.destination;
   const observation = entry.observations.find(
     (item) => Boolean(item.serverIp) || Boolean(item.serverPort),
   );
@@ -168,7 +187,7 @@ function completeness(value: DnsEntry["completeness"]) {
     <LogsLogAnalysisToolbar>
       <template #filters>
         <div
-          class="grid min-w-0 flex-1 grid-cols-1 gap-2 md:grid-cols-3 xl:grid-cols-7"
+          class="grid min-w-0 flex-1 basis-full grid-cols-1 gap-2 md:grid-cols-3 xl:basis-0 xl:grid-cols-7"
           data-testid="dns-filter-grid"
         >
           <UInput
@@ -232,6 +251,16 @@ function completeness(value: DnsEntry["completeness"]) {
       >
         {{ error }}
       </p>
+      <div
+        v-if="sourceWarnings.length"
+        role="status"
+        class="shrink-0 rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+      >
+        <p class="font-medium">Some DNS sources could not be queried.</p>
+        <ul class="mt-1 list-disc pl-5">
+          <li v-for="warning in sourceWarnings" :key="warning.key">{{ warning.text }}</li>
+        </ul>
+      </div>
 
       <section
         class="flex min-h-52 flex-1 flex-col overflow-hidden rounded-md border border-brand-gray-200 dark:border-brand-gray-700"
@@ -258,14 +287,14 @@ function completeness(value: DnsEntry["completeness"]) {
             data-testid="dns-entry-header"
           >
             <span>Time</span>
-            <span>Query name</span>
+            <span>DNS name or message</span>
             <span>Type</span>
             <span>Protocol</span>
             <span>Client</span>
             <span>Destination</span>
             <span>Path</span>
             <span>Result</span>
-            <span>Duration</span>
+            <span>Transaction duration</span>
             <span>Evidence</span>
             <span>Observations</span>
           </div>
@@ -283,8 +312,8 @@ function completeness(value: DnsEntry["completeness"]) {
                   class="grid h-11 w-full items-center gap-2 border-b border-brand-gray-100 px-3 text-left text-xs hover:bg-brand-gray-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-800 dark:hover:bg-brand-gray-900"
                   :class="dnsEntryGridClass"
                   :aria-label="
-                    item.queryName
-                      ? `Open DNS details for ${item.queryName}`
+                    item.source !== 'network-rule'
+                      ? `Open DNS details for ${item.displayText || item.queryName || item.source}`
                       : `Open DNS transport details for ${item.client || 'unknown client'}`
                   "
                   :aria-pressed="selectedEntryId === item.id"
@@ -296,7 +325,9 @@ function completeness(value: DnsEntry["completeness"]) {
                     minute="2-digit"
                     second="2-digit"
                   />
-                  <span class="truncate font-mono">{{ item.queryName ?? "Not observed" }}</span>
+                  <span class="truncate font-mono">{{
+                    item.displayText ?? item.queryName ?? "Not observed"
+                  }}</span>
                   <span>{{ item.queryType ?? "-" }}</span>
                   <span>{{ item.protocol ?? "-" }}</span>
                   <span class="truncate font-mono" :title="item.client || '-'">
