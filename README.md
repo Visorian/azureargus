@@ -62,12 +62,13 @@ Managed deployments also require complete application-login configuration:
 For anonymous Log Analytics, create multitenant Microsoft Entra app registration, register SPA
 redirect URI at `https://YOUR_APP/log-analytics-redirect.html`, add delegated Log Analytics API
 `Data.Read` plus Azure Service Management `user_impersonation`, and set
-`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. Guided connection flow signs into an organization,
-lists available Azure directories and workspaces, and opens target-tenant admin consent and Azure
-portal workspace access. Query authorization is completed explicitly before Run, so Run never opens
-an interactive authentication window. Assign `Log Analytics Data Reader` at workspace scope to
-signed-in user or group. Access tokens and selected tenant/workspace IDs remain browser-memory-only
-and are cleared on disconnect/page exit.
+`NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`. Guided connection flow signs into an organization
+and lists available Azure directories. Target tenant consent must be granted before workspace
+selection is enabled. Azure Argus then discovers workspaces using a Resource Manager token issued
+for selected directory. Query authorization is completed before workspace selection, so Run never
+opens an interactive authentication window. Assign `Log Analytics Data Reader` at workspace scope
+to signed-in user or group. Access tokens and selected tenant/workspace IDs remain
+browser-memory-only and are cleared on disconnect/page exit.
 Do not add a `Cross-Origin-Opener-Policy` response header to the redirect bridge page; MSAL popup
 communication requires that page to remain in the opener's browsing context group.
 

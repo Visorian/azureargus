@@ -262,7 +262,7 @@ const readinessGroups = computed(() => [
             aria-hidden="true"
             class="grid size-6 place-items-center rounded-full text-xs font-semibold"
             :class="
-              tenantValid
+              temporaryLogAnalyticsAuthorized
                 ? 'bg-brand-blue-50 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300'
                 : 'bg-brand-gray-100 text-brand-gray-700 dark:bg-brand-gray-800 dark:text-brand-gray-200'
             "
@@ -271,9 +271,10 @@ const readinessGroups = computed(() => [
           </span>
           <div class="min-w-0 space-y-3">
             <div>
-              <p class="text-xs font-semibold">Choose Azure directory</p>
+              <p class="text-xs font-semibold">Choose Azure directory and grant consent</p>
               <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                Directory IDs come from Azure access. Target tenant admin approves application once.
+                Select target directory. Tenant admin must approve Log Analytics access before
+                workspace selection.
               </p>
             </div>
             <UFormField label="Directory" name="tenantId">
@@ -292,16 +293,34 @@ const readinessGroups = computed(() => [
             <p v-if="tenantValid" class="break-all font-mono text-[0.6875rem] text-brand-gray-500">
               {{ tenantId }}
             </p>
-            <UButton
-              :to="adminConsentUrl ?? undefined"
-              target="_blank"
-              rel="noopener noreferrer"
-              color="neutral"
-              variant="outline"
-              icon="i-lucide-shield-check"
-              label="Grant tenant consent"
-              :disabled="adminConsentUrl === null"
-            />
+            <div class="flex flex-wrap gap-2">
+              <UButton
+                :to="adminConsentUrl ?? undefined"
+                target="_blank"
+                rel="noopener noreferrer"
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-shield-check"
+                label="Grant tenant consent"
+                :disabled="adminConsentUrl === null"
+              />
+              <UButton
+                color="neutral"
+                variant="outline"
+                icon="i-lucide-refresh-cw"
+                label="Refresh consent"
+                :loading="temporaryLogAnalyticsAuthorizing"
+                :disabled="!tenantValid || temporaryLogAnalyticsAuthorizing"
+                @click="emit('authorizeLogAnalytics')"
+              />
+            </div>
+            <p
+              v-if="temporaryLogAnalyticsAuthorized"
+              role="status"
+              class="text-xs text-green-700 dark:text-green-300"
+            >
+              Log Analytics access available for selected directory.
+            </p>
           </div>
         </li>
         <li
@@ -335,11 +354,17 @@ const readinessGroups = computed(() => [
                 label-key="label"
                 class="w-full"
                 :loading="temporaryAccessStatus === 'loading'"
-                :disabled="temporaryAccessStatus === 'loading' || workspaceItems.length === 0"
+                :disabled="
+                  !temporaryLogAnalyticsAuthorized ||
+                  temporaryAccessStatus === 'loading' ||
+                  workspaceItems.length === 0
+                "
                 :placeholder="
-                  workspaceItems.length > 0
-                    ? 'Select a workspace'
-                    : 'No accessible workspace discovered'
+                  !temporaryLogAnalyticsAuthorized
+                    ? 'Grant tenant consent first'
+                    : workspaceItems.length > 0
+                      ? 'Select a workspace'
+                      : 'No accessible workspace discovered'
                 "
                 @update:model-value="changeWorkspace"
               />
@@ -357,7 +382,11 @@ const readinessGroups = computed(() => [
                 icon="i-lucide-refresh-cw"
                 label="Refresh"
                 :loading="temporaryAccessStatus === 'loading'"
-                :disabled="!tenantValid || temporaryAccessStatus === 'loading'"
+                :disabled="
+                  !tenantValid ||
+                  !temporaryLogAnalyticsAuthorized ||
+                  temporaryAccessStatus === 'loading'
+                "
                 @click="emit('refreshAzureAccess')"
               />
               <UButton
@@ -368,64 +397,26 @@ const readinessGroups = computed(() => [
                 variant="outline"
                 icon="i-lucide-external-link"
                 label="Permissions"
-                :disabled="!tenantValid"
+                :disabled="!tenantValid || !temporaryLogAnalyticsAuthorized"
               />
             </div>
             <p
-              v-if="temporaryAccessStatus === 'success' && workspaceItems.length === 0"
+              v-if="
+                temporaryLogAnalyticsAuthorized &&
+                temporaryAccessStatus === 'success' &&
+                workspaceItems.length === 0
+              "
               role="status"
               class="text-xs text-amber-700 dark:text-amber-300"
             >
               No accessible Log Analytics workspace found in selected directory.
             </p>
-          </div>
-        </li>
-        <li
-          v-if="temporaryAuthStatus === 'connected'"
-          class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2"
-        >
-          <span
-            aria-hidden="true"
-            class="grid size-6 place-items-center rounded-full text-xs font-semibold"
-            :class="
-              temporaryLogAnalyticsAuthorized
-                ? 'bg-brand-blue-50 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300'
-                : 'bg-brand-gray-100 text-brand-gray-700 dark:bg-brand-gray-800 dark:text-brand-gray-200'
-            "
-          >
-            4
-          </span>
-          <div class="min-w-0 space-y-2">
-            <div>
-              <p class="text-xs font-semibold">Log Analytics query permission</p>
-              <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                Cached permission is checked automatically after workspace selection. Grant
-                permission only when interaction is required.
-              </p>
-            </div>
-            <UButton
-              color="neutral"
-              variant="outline"
-              icon="i-lucide-shield-check"
-              :label="
-                temporaryLogAnalyticsAuthorized
-                  ? 'Log Analytics authorized'
-                  : 'Grant query permission'
-              "
-              :loading="temporaryLogAnalyticsAuthorizing"
-              :disabled="
-                !workspaceValid ||
-                temporaryLogAnalyticsAuthorizing ||
-                temporaryLogAnalyticsAuthorized
-              "
-              @click="emit('authorizeLogAnalytics')"
-            />
             <p
-              v-if="temporaryLogAnalyticsAuthorized"
+              v-else-if="!temporaryLogAnalyticsAuthorized"
               role="status"
-              class="text-xs text-green-700 dark:text-green-300"
+              class="text-xs text-amber-700 dark:text-amber-300"
             >
-              Log Analytics query permission available for selected directory.
+              Grant tenant consent before selecting a workspace.
             </p>
           </div>
         </li>

@@ -18,6 +18,17 @@ let operationGeneration = 0;
 let authorizationGeneration = 0;
 
 class StaleTemporaryAuthOperation extends Error {}
+class UnexpectedTemporaryAuthTenant extends Error {}
+
+function assertAuthenticationTenant(
+  result: { account?: AccountInfo | null; tenantId?: string },
+  tenantId: string,
+) {
+  const resultTenantId = result.tenantId || result.account?.tenantId;
+  if (resultTenantId !== tenantId) {
+    throw new UnexpectedTemporaryAuthTenant();
+  }
+}
 
 function hasPopupClosedState(value: unknown): value is { readonly closed: boolean } {
   return (
@@ -201,6 +212,7 @@ export function useTemporaryLogAnalyticsAuth() {
       if (generation !== operationGeneration || activeTenantId !== normalizedTenantId) {
         throw new StaleTemporaryAuthOperation();
       }
+      assertAuthenticationTenant(result, normalizedTenantId);
       activeAccount = result.account ?? activeAccount;
       return result.accessToken;
     } catch (error: unknown) {
@@ -212,7 +224,11 @@ export function useTemporaryLogAnalyticsAuth() {
         throw new StaleTemporaryAuthOperation();
       }
       const { InteractionRequiredAuthError } = await import("@azure/msal-browser");
-      if (!allowInteractive || !(error instanceof InteractionRequiredAuthError)) {
+      if (
+        !allowInteractive ||
+        (!(error instanceof InteractionRequiredAuthError) &&
+          !(error instanceof UnexpectedTemporaryAuthTenant))
+      ) {
         throw new Error("Azure directory authentication failed.");
       }
       const result = await client.acquireTokenPopup({
@@ -227,6 +243,7 @@ export function useTemporaryLogAnalyticsAuth() {
       if (!result.account) {
         throw new Error("Azure directory authentication failed.");
       }
+      assertAuthenticationTenant(result, normalizedTenantId);
       activeAccount = result.account;
       return result.accessToken;
     }

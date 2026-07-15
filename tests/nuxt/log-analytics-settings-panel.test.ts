@@ -142,6 +142,7 @@ describe("LogAnalyticsSettingsPanel", () => {
       temporaryAccessStatus: "success",
       temporaryAuthStatus: "connected",
       temporaryAzureUsername: "user@example.com",
+      temporaryLogAnalyticsAuthorized: true,
       tenantId: "22222222-2222-4222-8222-222222222222",
       tenantOptions: [
         {
@@ -176,7 +177,7 @@ describe("LogAnalyticsSettingsPanel", () => {
     expect(wrapper.get('a[href*="Microsoft.OperationalInsights%2Fworkspaces"]').text()).toContain(
       "Permissions",
     );
-    const refresh = wrapper.findAll("button").find((button) => button.text().includes("Refresh"));
+    const refresh = wrapper.findAll("button").find((button) => button.text() === "Refresh");
     selectors[0]?.vm.$emit("update:modelValue", "55555555-5555-4555-8555-555555555555");
     expect(wrapper.emitted("changeTenant")?.[0]).toEqual(["55555555-5555-4555-8555-555555555555"]);
     selectors[1]?.vm.$emit("update:modelValue", "66666666-6666-4666-8666-666666666666");
@@ -185,14 +186,59 @@ describe("LogAnalyticsSettingsPanel", () => {
     ]);
     await refresh!.trigger("click");
     expect(wrapper.emitted("refreshAzureAccess")).toHaveLength(1);
-    const authorize = wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("Grant query permission"));
-    expect(authorize?.attributes()).not.toHaveProperty("disabled");
-    await authorize!.trigger("click");
-    expect(wrapper.emitted("authorizeLogAnalytics")).toHaveLength(1);
     await disconnect!.trigger("click");
     expect(wrapper.emitted("disconnectAzure")).toHaveLength(1);
+  });
+
+  it("requires tenant consent before enabling workspace controls", async () => {
+    const wrapper = await mountSuspended(LogAnalyticsSettingsPanel, {
+      props: {
+        ...createProps(),
+        adminConsentUrl: "https://login.microsoftonline.com/consent",
+        temporary: true,
+        temporaryAccessStatus: "success",
+        temporaryAuthStatus: "connected",
+        tenantId: "22222222-2222-4222-8222-222222222222",
+        tenantOptions: [
+          {
+            defaultDomain: "target.example",
+            displayName: "Target tenant",
+            tenantId: "22222222-2222-4222-8222-222222222222",
+          },
+        ],
+        workspaceOptions: [
+          {
+            location: "westeurope",
+            name: "firewall-logs",
+            resourceGroup: "firewall",
+            subscriptionId: "44444444-4444-4444-8444-444444444444",
+            subscriptionName: "Production",
+            workspaceId: "33333333-3333-4333-8333-333333333333",
+          },
+        ],
+      },
+    });
+
+    const workspaceSelector = wrapper.findAllComponents({ name: "USelectMenu" })[1]!;
+    const buttons = wrapper.findAllComponents({ name: "UButton" });
+    const checkConsent = buttons.find((button) => button.props("label") === "Refresh consent")!;
+    const refresh = buttons.find((button) => button.props("label") === "Refresh")!;
+    const permissions = buttons.find((button) => button.props("label") === "Permissions")!;
+
+    expect(workspaceSelector.props("placeholder")).toBe("Grant tenant consent first");
+    expect(workspaceSelector.props("disabled")).toBe(true);
+    expect(refresh.props("disabled")).toBe(true);
+    expect(permissions.props("disabled")).toBe(true);
+    expect(wrapper.text()).toContain("Grant tenant consent before selecting a workspace.");
+    await checkConsent.trigger("click");
+    expect(wrapper.emitted("authorizeLogAnalytics")).toHaveLength(1);
+
+    await wrapper.setProps({ temporaryLogAnalyticsAuthorized: true });
+    expect(workspaceSelector.props("placeholder")).toBe("Select a workspace");
+    expect(workspaceSelector.props("disabled")).toBe(false);
+    expect(refresh.props("disabled")).toBe(false);
+    expect(permissions.props("disabled")).toBe(false);
+    expect(wrapper.text()).toContain("Log Analytics access available for selected directory.");
   });
 
   it("distinguishes discovered workspace selection and completed setup steps", async () => {
@@ -227,23 +273,21 @@ describe("LogAnalyticsSettingsPanel", () => {
     const indicators = wrapper.findAll(
       'ol[aria-label="Temporary Log Analytics setup"] > li > span',
     );
-    expect(selectors[1]?.props("placeholder")).toBe("Select a workspace");
-    expect(indicators[1]?.classes()).toContain("bg-brand-blue-50");
+    expect(selectors[1]?.props("placeholder")).toBe("Grant tenant consent first");
+    expect(indicators[1]?.classes()).toContain("bg-brand-gray-100");
     expect(indicators[2]?.classes()).toContain("bg-brand-gray-100");
 
     await wrapper.setProps({
       workspaceId: "33333333-3333-4333-8333-333333333333",
       temporaryLogAnalyticsAuthorized: true,
     });
+    expect(indicators[1]?.classes()).toContain("bg-brand-blue-50");
     expect(indicators[2]?.classes()).toContain("bg-brand-blue-50");
-    expect(indicators[3]?.classes()).toContain("bg-brand-blue-50");
-    expect(wrapper.text()).toContain(
-      "Log Analytics query permission available for selected directory.",
-    );
+    expect(wrapper.text()).toContain("Log Analytics access available for selected directory.");
     const authorize = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Log Analytics authorized"));
-    expect(authorize?.attributes()).toHaveProperty("disabled");
+      .find((button) => button.text().includes("Refresh consent"));
+    expect(authorize?.attributes()).not.toHaveProperty("disabled");
   });
 
   it("shows temporary connecting state without rendering controls in managed mode", async () => {

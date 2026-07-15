@@ -278,7 +278,12 @@ describe("temporary Log Analytics authentication", () => {
 
   it("acquires Azure Resource Manager token separately for selected directory", async () => {
     const selectedTenantId = "33333333-3333-4333-8333-333333333333";
-    msal.acquireTokenSilent.mockResolvedValue({ accessToken: "management-token", account });
+    const selectedTenantAccount = { ...account, tenantId: selectedTenantId };
+    msal.acquireTokenSilent.mockResolvedValue({
+      accessToken: "management-token",
+      account: selectedTenantAccount,
+      tenantId: selectedTenantId,
+    });
     const auth = await createAuth();
     await auth.connect();
 
@@ -292,6 +297,33 @@ describe("temporary Log Analytics authentication", () => {
     expect(msal.acquireTokenSilent).not.toHaveBeenCalledWith(
       expect.objectContaining({
         scopes: expect.arrayContaining(["https://api.loganalytics.io/Data.Read"]),
+      }),
+    );
+  });
+
+  it("does not use an Azure Resource Manager token issued for previous directory", async () => {
+    const selectedTenantId = "33333333-3333-4333-8333-333333333333";
+    const selectedTenantAccount = { ...account, tenantId: selectedTenantId };
+    msal.acquireTokenSilent.mockResolvedValue({
+      accessToken: "initial-tenant-token",
+      account,
+      tenantId,
+    });
+    msal.acquireTokenPopup.mockResolvedValue({
+      accessToken: "selected-tenant-token",
+      account: selectedTenantAccount,
+      tenantId: selectedTenantId,
+    });
+    const auth = await createAuth();
+    await auth.connect();
+
+    await expect(auth.getManagementAccessToken(selectedTenantId)).resolves.toBe(
+      "selected-tenant-token",
+    );
+    expect(msal.acquireTokenPopup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authority: `https://login.microsoftonline.com/${selectedTenantId}`,
+        scopes: ["https://management.azure.com/user_impersonation"],
       }),
     );
   });
@@ -340,7 +372,11 @@ describe("temporary Log Analytics authentication", () => {
 
   it("invalidates Log Analytics authorization when switching directory", async () => {
     const selectedTenantId = "33333333-3333-4333-8333-333333333333";
-    msal.acquireTokenSilent.mockResolvedValue({ accessToken: "token", account });
+    msal.acquireTokenSilent.mockResolvedValue({
+      accessToken: "token",
+      account: { ...account, tenantId: selectedTenantId },
+      tenantId: selectedTenantId,
+    });
     const auth = await createAuth();
     await auth.connect();
     await auth.getAccessToken(tenantId);

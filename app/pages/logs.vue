@@ -808,20 +808,18 @@ async function disconnectTemporaryLogAnalytics() {
 }
 
 async function authorizeTemporaryLogAnalytics() {
-  if (!temporaryWorkspaceValid.value || temporaryLogAnalyticsAuthorizing.value) {
+  if (!temporaryTenantValid.value || temporaryLogAnalyticsAuthorizing.value) {
     return;
   }
   const generation = temporaryAuthorizationGeneration;
   const tenantId = temporaryTenantId.value.trim();
-  const workspaceId = temporaryWorkspaceId.value.trim();
   temporaryLogAnalyticsAuthorizing.value = true;
   try {
     await temporaryLogAnalyticsAuth.getAccessToken(tenantId, true);
   } catch {
     if (
       generation !== temporaryAuthorizationGeneration ||
-      tenantId !== temporaryTenantId.value.trim() ||
-      workspaceId !== temporaryWorkspaceId.value.trim()
+      tenantId !== temporaryTenantId.value.trim()
     ) {
       return;
     }
@@ -830,31 +828,29 @@ async function authorizeTemporaryLogAnalytics() {
       color: "error",
       icon: "i-lucide-circle-alert",
     });
+    return;
   } finally {
     if (generation === temporaryAuthorizationGeneration) {
       temporaryLogAnalyticsAuthorizing.value = false;
     }
   }
+  refreshTemporaryAzureAccess();
 }
 
 async function checkTemporaryLogAnalyticsAuthorization() {
   const generation = ++temporaryAuthorizationGeneration;
   const tenantId = temporaryTenantId.value.trim();
-  const workspaceId = temporaryWorkspaceId.value.trim();
   temporaryLogAnalyticsAuth.invalidateAuthorization();
-  if (
-    !temporaryLogAnalyticsAuth.connected.value ||
-    !isEntraId(tenantId) ||
-    !isEntraId(workspaceId)
-  ) {
+  if (!temporaryLogAnalyticsAuth.connected.value || !isEntraId(tenantId)) {
     temporaryLogAnalyticsAuthorizing.value = false;
-    return;
+    return false;
   }
   temporaryLogAnalyticsAuthorizing.value = true;
-  await temporaryLogAnalyticsAuth.checkAuthorization(tenantId);
+  const authorized = await temporaryLogAnalyticsAuth.checkAuthorization(tenantId);
   if (generation === temporaryAuthorizationGeneration) {
     temporaryLogAnalyticsAuthorizing.value = false;
   }
+  return authorized;
 }
 
 function selectTemporaryWorkspace(workspaceId: string) {
@@ -864,7 +860,6 @@ function selectTemporaryWorkspace(workspaceId: string) {
   dns.abort();
   dns.clearActiveDataset();
   temporaryWorkspaceId.value = workspaceId;
-  void checkTemporaryLogAnalyticsAuthorization();
 }
 
 function mergeCurrentTenant(tenants: AzureAccessibleTenant[], tenantId: string) {
@@ -886,6 +881,7 @@ async function discoverTemporaryAzureAccess(
   temporaryAccessError.value = null;
   try {
     const accessToken = await getAccessToken();
+    const authorized = await checkTemporaryLogAnalyticsAuthorization();
     const access = await requestFetch<AzureLogAnalyticsAccess>(
       "/api/log-analytics/delegated-access",
       { headers: { authorization: `Bearer ${accessToken}` } },
@@ -894,8 +890,8 @@ async function discoverTemporaryAzureAccess(
       return;
     }
     temporaryTenants.value = mergeCurrentTenant(access.tenants, tenantId);
-    temporaryWorkspaces.value = access.workspaces;
-    if (access.workspaces.length === 1) {
+    temporaryWorkspaces.value = authorized ? access.workspaces : [];
+    if (authorized && access.workspaces.length === 1) {
       selectTemporaryWorkspace(access.workspaces[0]?.workspaceId ?? "");
     }
     temporaryAccessStatus.value = "success";
