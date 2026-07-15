@@ -439,7 +439,7 @@ const readinessGroups = computed(() => [
     </div>
 
     <section
-      v-if="lens === 'dns-troubleshooting'"
+      v-if="!temporary || workspaceValid"
       aria-labelledby="dns-readiness-heading"
       class="rounded-md border border-brand-blue-300 bg-brand-blue-50/60 p-3 dark:border-brand-blue-800 dark:bg-brand-blue-950/30"
     >
@@ -452,8 +452,7 @@ const readinessGroups = computed(() => [
           <div>
             <h3 id="dns-readiness-heading" class="text-xs font-semibold">DNS source readiness</h3>
             <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-              Workspace-wide sample, independent of selected query range and filters. Updated after
-              workspace selection changes.
+              Checks whether related tables have entries.
             </p>
             <p
               v-if="dnsReadinessStatus === 'loading'"

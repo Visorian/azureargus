@@ -258,21 +258,18 @@ describe("LogAnalyticsSettingsPanel", () => {
     expect(connect?.attributes()).toHaveProperty("disabled");
 
     await wrapper.setProps({ temporary: false, temporaryAuthStatus: "idle" });
-    expect(wrapper.text()).not.toContain("Workspace");
+    expect(wrapper.findAllComponents({ name: "USelectMenu" })).toHaveLength(0);
     expect(wrapper.text()).not.toContain("Directory");
     expect(wrapper.text()).not.toContain("Connect to Azure");
     expect(wrapper.text()).not.toContain("Disconnect");
   });
 
-  it("shows DNS readiness requirements only for DNS troubleshooting", async () => {
+  it("shows DNS readiness requirements in every Log Analytics view", async () => {
     const wrapper = await mountSuspended(LogAnalyticsSettingsPanel, {
-      props: {
-        ...createProps(),
-        lens: "dns-troubleshooting",
-      },
+      props: createProps(),
     });
 
-    expect(wrapper.text()).toContain("Query DNS diagnostics");
+    expect(wrapper.text()).toContain("Query configured Azure Firewall workspace");
     expect(wrapper.text()).toContain("DNS source readiness");
     expect(wrapper.text()).toContain("Structured DNS proxy logs");
     expect(wrapper.text()).toContain("DNS flow trace logs");
@@ -284,8 +281,7 @@ describe("LogAnalyticsSettingsPanel", () => {
     expect(wrapper.text()).toContain("NAT rule evidence");
     expect(wrapper.text()).not.toContain("Legacy DNS proxy logs");
     expect(wrapper.text()).toContain("Not checked");
-    expect(wrapper.text()).toContain("independent of selected query range and filters");
-    expect(wrapper.text()).toContain("Updated after workspace selection changes");
+    expect(wrapper.text()).toContain("Checks whether related tables have entries.");
     expect(wrapper.text()).not.toContain("AzureArgus checks table queryability only");
 
     await wrapper.setProps({ dnsReadinessStatus: "loading" });
@@ -320,8 +316,27 @@ describe("LogAnalyticsSettingsPanel", () => {
     expect(wrapper.text()).toContain("AZFWNatRule · original or translated port 53 record");
     expect(wrapper.text()).not.toContain("Partial");
 
-    await wrapper.setProps({ lens: "all-logs" });
+    await wrapper.setProps({ lens: "dns-troubleshooting" });
+    expect(wrapper.text()).toContain("Query DNS diagnostics");
+    expect(wrapper.text()).toContain("DNS source readiness");
+    expect(wrapper.text()).toContain("2+ records");
+  });
+
+  it("shows DNS readiness after a temporary workspace is selected", async () => {
+    const wrapper = await mountSuspended(LogAnalyticsSettingsPanel, {
+      props: {
+        ...createProps(),
+        temporary: true,
+      },
+    });
+
     expect(wrapper.text()).not.toContain("DNS source readiness");
+
+    await wrapper.setProps({
+      workspaceId: "33333333-3333-4333-8333-333333333333",
+    });
+    expect(wrapper.text()).toContain("DNS source readiness");
+    expect(wrapper.text()).toContain("Checks whether related tables have entries.");
   });
 
   it("exposes bounded query result limit in managed and temporary modes", async () => {

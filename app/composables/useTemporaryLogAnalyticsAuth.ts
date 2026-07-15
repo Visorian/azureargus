@@ -9,6 +9,7 @@ const LOG_ANALYTICS_SCOPES = ["https://api.loganalytics.io/Data.Read"];
 const AZURE_MANAGEMENT_SCOPES = ["https://management.azure.com/user_impersonation"];
 const ORGANIZATIONS_AUTHORITY = "https://login.microsoftonline.com/organizations";
 const REDIRECT_PATH = "/log-analytics-redirect.html";
+const POPUP_CLOSE_POLL_INTERVAL_MS = 500;
 
 let clientPromise: Promise<IPublicClientApplication> | null = null;
 let activeAccount: AccountInfo | null = null;
@@ -17,6 +18,23 @@ let operationGeneration = 0;
 let authorizationGeneration = 0;
 
 class StaleTemporaryAuthOperation extends Error {}
+
+function hasPopupClosedState(value: unknown): value is { readonly closed: boolean } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "closed" in value &&
+    typeof value.closed === "boolean"
+  );
+}
+
+function getPopupWindowState(payload: unknown): { readonly closed: boolean } | null {
+  if (typeof payload !== "object" || payload === null || !("popupWindow" in payload)) {
+    return null;
+  }
+  const popupWindow = payload.popupWindow;
+  return hasPopupClosedState(popupWindow) ? popupWindow : null;
+}
 
 export function useTemporaryLogAnalyticsAuth() {
   const runtimeConfig = useRuntimeConfig();
@@ -70,19 +88,55 @@ export function useTemporaryLogAnalyticsAuth() {
 
   async function connect() {
     const generation = ++operationGeneration;
+    let popupClosed = false;
     status.value = "connecting";
     authorized.value = false;
     lastError.value = null;
     try {
       const client = await getClient();
-      const result = await client.loginPopup({
-        authority: ORGANIZATIONS_AUTHORITY,
-        prompt: "select_account",
-        redirectUri: `${window.location.origin}${REDIRECT_PATH}`,
-        scopes: AZURE_MANAGEMENT_SCOPES,
-      });
+      const { EventType } = await import("@azure/msal-browser");
+      let closePoll: ReturnType<typeof setInterval> | null = null;
+      const eventCallbackId = client.addEventCallback(
+        (event) => {
+          const popupWindow = getPopupWindowState(event.payload);
+          if (!popupWindow) return;
+          closePoll = setInterval(() => {
+            if (!popupWindow.closed) return;
+            popupClosed = true;
+            if (closePoll !== null) {
+              clearInterval(closePoll);
+              closePoll = null;
+            }
+            if (generation === operationGeneration) {
+              activeAccount = null;
+              activeTenantId = null;
+              connected.value = false;
+              authorized.value = false;
+              status.value = "idle";
+            }
+          }, POPUP_CLOSE_POLL_INTERVAL_MS);
+        },
+        [EventType.POPUP_OPENED],
+      );
+      let result;
+      try {
+        result = await client.loginPopup({
+          authority: ORGANIZATIONS_AUTHORITY,
+          overrideInteractionInProgress: true,
+          prompt: "select_account",
+          redirectUri: `${window.location.origin}${REDIRECT_PATH}`,
+          scopes: AZURE_MANAGEMENT_SCOPES,
+        });
+      } finally {
+        if (closePoll !== null) clearInterval(closePoll);
+        if (eventCallbackId !== null) client.removeEventCallback(eventCallbackId);
+      }
       if (generation !== operationGeneration) {
-        await client.clearCache({ account: result.account });
+        const newerConnectionUsesSameAccount =
+          connected.value && activeAccount?.homeAccountId === result.account?.homeAccountId;
+        if (!newerConnectionUsesSameAccount) {
+          await client.clearCache({ account: result.account });
+        }
         return null;
       }
       const tenantId = result.tenantId || result.account?.tenantId;
@@ -101,6 +155,15 @@ export function useTemporaryLogAnalyticsAuth() {
       };
     } catch {
       if (generation !== operationGeneration) {
+        return null;
+      }
+      if (popupClosed) {
+        activeAccount = null;
+        activeTenantId = null;
+        connected.value = false;
+        authorized.value = false;
+        status.value = "idle";
+        lastError.value = null;
         return null;
       }
       activeAccount = null;

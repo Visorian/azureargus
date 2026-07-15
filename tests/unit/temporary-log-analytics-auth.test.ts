@@ -1,22 +1,51 @@
 import { ref, type Ref } from "vue";
 
 const msal = vi.hoisted(() => {
+  type AuthEvent = { eventType: string; payload: unknown };
+  const eventCallbacks = new Set<(event: AuthEvent) => void>();
+  const addEventCallback = vi.fn<(callback: (event: AuthEvent) => void) => string>((callback) => {
+    eventCallbacks.add(callback);
+    return "temporary-auth-event-callback";
+  });
   const clearCache = vi.fn();
   const initialize = vi.fn();
   const loginPopup = vi.fn();
   const acquireTokenPopup = vi.fn();
   const acquireTokenSilent = vi.fn();
+  const removeEventCallback = vi.fn<(callbackId: string) => void>(() => eventCallbacks.clear());
   const constructor = vi.fn(function () {
-    return { acquireTokenPopup, acquireTokenSilent, clearCache, initialize, loginPopup };
+    return {
+      acquireTokenPopup,
+      acquireTokenSilent,
+      addEventCallback,
+      clearCache,
+      initialize,
+      loginPopup,
+      removeEventCallback,
+    };
   });
 
-  return { acquireTokenPopup, acquireTokenSilent, clearCache, constructor, initialize, loginPopup };
+  return {
+    acquireTokenPopup,
+    acquireTokenSilent,
+    addEventCallback,
+    clearCache,
+    constructor,
+    emitEvent(event: AuthEvent) {
+      for (const callback of eventCallbacks) callback(event);
+    },
+    eventCallbacks,
+    initialize,
+    loginPopup,
+    removeEventCallback,
+  };
 });
 
 const MockInteractionRequiredAuthError = vi.hoisted(() => class extends Error {});
 
 vi.mock("@azure/msal-browser", () => ({
   BrowserCacheLocation: { MemoryStorage: "MemoryStorage" },
+  EventType: { POPUP_OPENED: "msal:popupOpened" },
   InteractionRequiredAuthError: MockInteractionRequiredAuthError,
   PublicClientApplication: msal.constructor,
 }));
@@ -48,6 +77,7 @@ function createDeferred<T>() {
 beforeEach(() => {
   state = new Map();
   dispose = undefined;
+  msal.addEventCallback.mockClear();
   msal.acquireTokenSilent.mockReset();
   msal.acquireTokenPopup.mockReset();
   msal.clearCache.mockReset().mockResolvedValue(undefined);
@@ -58,6 +88,8 @@ beforeEach(() => {
     account,
     tenantId,
   });
+  msal.eventCallbacks.clear();
+  msal.removeEventCallback.mockClear();
 
   vi.stubGlobal("window", { location: { origin: "https://argus.example.com" } });
   vi.stubGlobal("useRuntimeConfig", () => ({
@@ -79,6 +111,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -115,12 +148,84 @@ describe("temporary Log Analytics authentication", () => {
     );
     expect(msal.loginPopup).toHaveBeenCalledWith({
       authority: "https://login.microsoftonline.com/organizations",
+      overrideInteractionInProgress: true,
       prompt: "select_account",
       redirectUri: "https://argus.example.com/log-analytics-redirect.html",
       scopes: ["https://management.azure.com/user_impersonation"],
     });
     expect(auth.connected.value).toBe(true);
     expect(auth.status.value).toBe("connected");
+  });
+
+  it("accepts a sign-in result delivered after the popup closes", async () => {
+    vi.useFakeTimers();
+    const popup = createDeferred<{
+      account: typeof account;
+      accessToken: string;
+      tenantId: string;
+    }>();
+    msal.loginPopup.mockReturnValueOnce(popup.promise);
+    const auth = await createAuth();
+
+    const connection = auth.connect();
+    await vi.waitFor(() => expect(msal.loginPopup).toHaveBeenCalledOnce());
+    const popupWindow = { closed: false };
+    msal.emitEvent({ eventType: "msal:popupOpened", payload: { popupWindow } });
+    popupWindow.closed = true;
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(auth.status.value).toBe("idle");
+    expect(auth.lastError.value).toBeNull();
+    popup.resolve({ account, accessToken: "management-login-token", tenantId });
+    await expect(connection).resolves.toEqual({
+      accessToken: "management-login-token",
+      tenantId,
+      username: "user@example.com",
+    });
+    expect(auth.status.value).toBe("connected");
+    expect(msal.removeEventCallback).toHaveBeenCalledWith("temporary-auth-event-callback");
+    expect(msal.eventCallbacks.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("allows retry while a closed popup is still awaiting its bridge timeout", async () => {
+    vi.useFakeTimers();
+    const firstPopup = createDeferred<{
+      account: typeof account;
+      accessToken: string;
+      tenantId: string;
+    }>();
+    msal.loginPopup.mockReturnValueOnce(firstPopup.promise).mockResolvedValueOnce({
+      accessToken: "retried-management-token",
+      account,
+      tenantId,
+    });
+    const auth = await createAuth();
+
+    const firstConnection = auth.connect();
+    await vi.waitFor(() => expect(msal.loginPopup).toHaveBeenCalledOnce());
+    const popupWindow = { closed: false };
+    msal.emitEvent({ eventType: "msal:popupOpened", payload: { popupWindow } });
+    popupWindow.closed = true;
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(auth.status.value).toBe("idle");
+    const retriedConnection = auth.connect();
+    await expect(retriedConnection).resolves.toEqual({
+      accessToken: "retried-management-token",
+      tenantId,
+      username: "user@example.com",
+    });
+    expect(msal.loginPopup).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ overrideInteractionInProgress: true }),
+    );
+
+    firstPopup.resolve({ account, accessToken: "late-token", tenantId });
+    await expect(firstConnection).resolves.toBeNull();
+    expect(auth.status.value).toBe("connected");
+    expect(auth.connected.value).toBe(true);
+    expect(msal.clearCache).not.toHaveBeenCalled();
   });
 
   it("returns a silently renewed token without copying it into Nuxt state", async () => {
