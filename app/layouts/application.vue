@@ -62,6 +62,7 @@ async function leave() {
           <span class="hidden text-xs text-brand-gray-600 dark:text-brand-gray-300 sm:inline">
             {{ identityLabel }}
           </span>
+          <UColorModeButton />
           <UButton
             v-if="deployment.capabilities.value?.mode === 'managed'"
             variant="ghost"

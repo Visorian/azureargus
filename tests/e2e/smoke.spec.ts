@@ -229,9 +229,19 @@ test("anonymous deployment bypasses application login", async ({ page }) => {
 });
 
 test("anonymous deployment starts directly in logs", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/logs");
   await expect(page).toHaveURL(/\/logs/);
   await expect(page.getByText("Temporary session")).toBeVisible();
+
+  const darkModeToggle = page.getByRole("button", { name: "Switch to dark mode" });
+  await expect(darkModeToggle).toBeVisible();
+  await darkModeToggle.click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(page.getByRole("button", { name: "Switch to light mode" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
 });
 
 test("managed deployment requires application login", async ({ page }) => {
