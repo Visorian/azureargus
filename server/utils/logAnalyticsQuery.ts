@@ -5,8 +5,10 @@ import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
   LogAnalyticsSort,
+  LogAnalyticsStorageKind,
 } from "../../shared/types/logAnalytics";
 import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
+import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from "./azureDiagnosticsLogAnalytics";
 
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILTER_LENGTH = 256;
@@ -45,7 +47,7 @@ const REQUIRED_RESULT_COLUMNS = [
   "Message",
 ] as const;
 
-const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFWApplicationRule, AZFWNatRule
+const RESOURCE_SPECIFIC_BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFWApplicationRule, AZFWNatRule
 | project
     TimeGenerated,
     Category = tostring(Category),
@@ -60,8 +62,9 @@ const BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFW
     RuleCollectionGroup = tostring(column_ifexists("RuleCollectionGroup", "")),
     RuleCollection = tostring(column_ifexists("RuleCollection", "")),
     Rule = tostring(column_ifexists("Rule", "")),
-    ActionReason = tostring(column_ifexists("ActionReason", ""))
-| extend Rule = iff(
+    ActionReason = tostring(column_ifexists("ActionReason", ""))`;
+
+const CANONICAL_QUERY_SUFFIX = `| extend Rule = iff(
     Category == "AZFWNetworkRule" and isempty(Rule) and ActionReason =~ "Default Action",
     "Default",
     Rule
@@ -166,6 +169,10 @@ function isValidSortObject(value: unknown) {
     Object.hasOwn(SORT_COLUMNS, value.key) &&
     (value.direction === "asc" || value.direction === "desc")
   );
+}
+
+function isLogAnalyticsStorageKind(value: unknown): value is LogAnalyticsStorageKind {
+  return value === "resource-specific" || value === "azure-diagnostics";
 }
 
 function readRetryAfterSeconds(response: Response) {
@@ -340,11 +347,12 @@ export function validateLogAnalyticsQueryRequest(
 ): value is LogAnalyticsQueryRequest {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["from", "to", "filters", "limit", "sort"]) ||
+    !hasExactKeys(value, ["from", "to", "filters", "limit", "storage", "sort"]) ||
     !isIsoTimestamp(value.from) ||
     !isIsoTimestamp(value.to) ||
     !isValidFilterObject(value.filters) ||
     !isLogAnalyticsQueryLimit(value.limit) ||
+    !isLogAnalyticsStorageKind(value.storage) ||
     !isValidSortObject(value.sort)
   ) {
     return false;
@@ -360,7 +368,7 @@ export function validateDelegatedLogAnalyticsQueryRequest(
 ): value is DelegatedLogAnalyticsQueryRequest {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit", "sort"])
+    !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit", "storage", "sort"])
   ) {
     return false;
   }
@@ -381,8 +389,8 @@ export function getLogAnalyticsResultLimit(request: LogAnalyticsQueryRequest) {
   return request.limit;
 }
 
-export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
-  const clauses = [BASE_QUERY];
+function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, baseQuery: string) {
+  const clauses = [baseQuery, CANONICAL_QUERY_SUFFIX];
   const filters = {
     search: "SearchableText",
     category: "Category",
@@ -404,6 +412,14 @@ export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
   clauses.push(`| take ${limit + 1}`);
 
   return { query: clauses.join("\n"), limit };
+}
+
+export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
+  return buildLogAnalyticsQueryForSource(request, RESOURCE_SPECIFIC_BASE_QUERY);
+}
+
+export function buildAzureDiagnosticsLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
+  return buildLogAnalyticsQueryForSource(request, AZURE_DIAGNOSTICS_NETWORK_PROJECTION);
 }
 
 export function mapLogAnalyticsResponse(
@@ -505,18 +521,18 @@ export async function executeLogAnalyticsQuery(
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
 ) {
-  const { query, limit } = buildLogAnalyticsQuery(request);
-  const payload = await executeLogAnalyticsRawQuery(
-    target,
-    query,
-    `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`,
-    accessToken,
-    options,
-  );
+  const selectedQuery =
+    request.storage === "azure-diagnostics"
+      ? buildAzureDiagnosticsLogAnalyticsQuery(request)
+      : buildLogAnalyticsQuery(request);
+  const timespan = `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`;
+  const queryId = options.queryId ?? crypto.randomUUID();
+  const sourceQueryId =
+    request.storage === "azure-diagnostics" ? `${queryId}:azure-diagnostics` : queryId;
   return mapLogAnalyticsResponse(
-    payload,
+    await executeLogAnalyticsRawQuery(target, selectedQuery.query, timespan, accessToken, options),
     request.sort,
-    options.queryId ?? crypto.randomUUID(),
-    limit,
+    sourceQueryId,
+    selectedQuery.limit,
   );
 }

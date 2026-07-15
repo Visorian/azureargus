@@ -55,7 +55,7 @@ export function useDnsSourceReadiness(options: UseDnsSourceReadinessOptions) {
       return true;
     } catch (error: unknown) {
       if (currentGeneration !== generation || isAbortError(error)) return false;
-      lastError.value = "DNS source readiness check failed.";
+      lastError.value = "Source readiness check failed.";
       status.value = "error";
       return false;
     } finally {

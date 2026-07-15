@@ -55,6 +55,7 @@ function createRequest(): LogAnalyticsQueryRequest {
     },
     from: "2026-07-10T10:00:00.000Z",
     limit: 1_000,
+    storage: "resource-specific",
     sort: { direction: "desc", key: "timestamp" },
     to: "2026-07-10T10:15:00.000Z",
   };

@@ -1,4 +1,4 @@
-import { createDnsEntries, parseDnsObservation } from "#shared/utils/dns";
+import { createDnsDetailSelector, createDnsEntries, parseDnsObservation } from "#shared/utils/dns";
 
 const EVENT_HUB_DNS_REQUEST =
   "DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s";
@@ -301,6 +301,7 @@ describe("DNS parser", () => {
         networkDestinationPort: destinationPort,
         outcome,
       });
+      expect(createDnsDetailSelector(observation!)).not.toHaveProperty("logAnalyticsStorage");
     },
   );
 

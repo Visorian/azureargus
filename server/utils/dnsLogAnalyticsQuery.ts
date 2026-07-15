@@ -19,8 +19,11 @@ import type {
   DnsSourceReadiness,
   DnsSourceStatus,
 } from "../../shared/types/dns";
+import type { LogAnalyticsStorageKind } from "../../shared/types/logAnalytics";
 import { createHash } from "node:crypto";
 import { createDnsEntries, parseDnsObservation } from "../../shared/utils/dns";
+import { DNS_READINESS_SOURCE_DEFINITIONS } from "../../shared/utils/dnsReadiness";
+import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from "./azureDiagnosticsLogAnalytics";
 import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
 import {
   encodeKqlStringLiteral,
@@ -49,16 +52,34 @@ const SOURCE_KINDS = [
 ] as const;
 const RELATED_SOURCE_KINDS = ["application-rule", "flow-trace", "nat-rule"] as const;
 const FILTER_KEYS = ["search", "queryType", "client", "protocol", "outcome", "source"] as const;
-
+const LOG_ANALYTICS_STORAGE_KINDS = ["resource-specific", "azure-diagnostics"] as const;
 interface SourceQuery {
   source: DnsSourceKind;
+  storage: LogAnalyticsStorageKind;
   query: string;
 }
 
 interface ReadinessProbe {
   sources: readonly DnsReadinessSourceKind[];
+  storage: LogAnalyticsStorageKind;
   query: string;
 }
+
+type ReadinessAttempt =
+  | {
+      source: DnsReadinessSourceKind;
+      storage: LogAnalyticsStorageKind;
+      status: "success";
+      sampleCount: 0 | 1 | 2;
+    }
+  | {
+      source: DnsReadinessSourceKind;
+      storage: LogAnalyticsStorageKind;
+      status: "missing" | "forbidden" | "failed";
+      sampleCount: null;
+    };
+
+type LogAnalyticsIdentitySource = DnsReadinessSourceKind | "network-rule:azure-diagnostics";
 
 interface RelatedEvidenceQuery {
   source: DnsRelatedSourceKind;
@@ -106,19 +127,23 @@ function validRange(from: string, to: string) {
 export function validateDnsListQueryRequest(value: unknown): value is DnsListQueryRequest {
   return (
     isRecord(value) &&
-    hasExactKeys(value, ["from", "to", "filters", "limit"]) &&
+    hasExactKeys(value, ["from", "to", "filters", "limit", "storage"]) &&
     isIsoTimestamp(value.from) &&
     isIsoTimestamp(value.to) &&
     validRange(value.from, value.to) &&
     isFilters(value.filters) &&
-    isLogAnalyticsQueryLimit(value.limit)
+    isLogAnalyticsQueryLimit(value.limit) &&
+    LOG_ANALYTICS_STORAGE_KINDS.includes(value.storage as LogAnalyticsStorageKind)
   );
 }
 
 export function validateDelegatedDnsListQueryRequest(
   value: unknown,
 ): value is DelegatedDnsListQueryRequest {
-  if (!isRecord(value) || !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit"])) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit", "storage"])
+  ) {
     return false;
   }
   const { workspaceId, ...request } = value;
@@ -155,6 +180,7 @@ function isDetailSelector(value: unknown): value is DnsDetailSelector {
       "source",
       "resourceId",
       "timestamp",
+      "logAnalyticsStorage",
       "protocol",
       "networkSourceIp",
       "networkSourcePort",
@@ -163,7 +189,8 @@ function isDetailSelector(value: unknown): value is DnsDetailSelector {
     ] as const;
     return (
       hasExactKeys(value, keys) &&
-      keys.slice(3).every((key) => {
+      LOG_ANALYTICS_STORAGE_KINDS.includes(value.logAnalyticsStorage as LogAnalyticsStorageKind) &&
+      keys.slice(4).every((key) => {
         const field = value[key];
         return typeof field === "string" && field.length > 0 && field.length <= 256;
       })
@@ -360,6 +387,7 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
   const queries: SourceQuery[] = [
     {
       source: "proxy-structured",
+      storage: "resource-specific",
       query: [
         "AZFWDnsQuery",
         ...structuredFilters,
@@ -371,6 +399,7 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
     },
     {
       source: "dns-flow-trace",
+      storage: "resource-specific",
       query: [
         "AZFWDnsFlowTrace",
         ...flowFilters,
@@ -381,6 +410,7 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
     },
     {
       source: "internal-fqdn-failure",
+      storage: "resource-specific",
       query: [
         "AZFWInternalFqdnResolutionFailure",
         ...internalFilters,
@@ -391,6 +421,7 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
     },
     {
       source: "network-rule",
+      storage: "resource-specific",
       query: [
         "AZFWNetworkRule",
         "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
@@ -403,83 +434,59 @@ export function buildDnsListQueries(request: DnsListQueryRequest): SourceQuery[]
         `| take ${take}`,
       ].join("\n"),
     },
+    {
+      source: "network-rule",
+      storage: "azure-diagnostics",
+      query: [
+        AZURE_DIAGNOSTICS_NETWORK_PROJECTION,
+        "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
+        '| where Protocol =~ "TCP" or Protocol =~ "UDP"',
+        ...networkFilters,
+        ...outcomeClauses("network-rule", request.filters.outcome.trim()),
+        "| order by TimeGenerated desc",
+        `| take ${take}`,
+      ].join("\n"),
+    },
   ];
   const sourceFilter = request.filters.source.trim().toLowerCase();
-  return sourceFilter
-    ? queries.filter((query) => query.source.toLowerCase() === sourceFilter)
-    : queries;
+  return queries.filter(
+    (query) =>
+      query.storage === request.storage &&
+      (!sourceFilter || query.source.toLowerCase() === sourceFilter),
+  );
 }
 
 export function buildDnsReadinessProbes(): ReadinessProbe[] {
-  return [
-    {
-      sources: ["proxy-structured"],
-      query: ["AZFWDnsQuery", "| take 2", "| count", "| project SampleCount = toint(Count)"].join(
-        "\n",
-      ),
-    },
-    {
-      sources: ["dns-flow-trace"],
-      query: [
-        "AZFWDnsFlowTrace",
-        "| take 2",
-        "| count",
-        "| project SampleCount = toint(Count)",
-      ].join("\n"),
-    },
-    {
-      sources: ["internal-fqdn-failure"],
-      query: [
-        "AZFWInternalFqdnResolutionFailure",
-        "| take 2",
-        "| count",
-        "| project SampleCount = toint(Count)",
-      ].join("\n"),
-    },
-    {
-      sources: ["network-rule"],
-      query: [
-        "AZFWNetworkRule",
-        "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
-        '| where Protocol =~ "TCP" or Protocol =~ "UDP"',
-        "| take 2",
-        "| count",
-        "| project SampleCount = toint(Count)",
-      ].join("\n"),
-    },
-    {
-      sources: ["application-rule"],
-      query: [
-        "AZFWApplicationRule",
-        "| where isnotempty(Fqdn)",
-        "| take 2",
-        "| count",
-        "| project SampleCount = toint(Count)",
-      ].join("\n"),
-    },
-    {
-      sources: ["flow-trace"],
-      query: [
-        "AZFWFlowTrace",
-        '| where Protocol =~ "TCP"',
-        "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
-        "| take 2",
-        "| count",
-        "| project SampleCount = toint(Count)",
-      ].join("\n"),
-    },
-    {
-      sources: ["nat-rule"],
-      query: [
-        "AZFWNatRule",
-        '| where Protocol =~ "TCP" or Protocol =~ "UDP"',
-        "| where toint(DestinationPort) == 53 or toint(TranslatedPort) == 53",
-        "| take 2",
-        "| count",
-        "| project SampleCount = toint(Count)",
-      ].join("\n"),
-    },
-  ];
+  return DNS_READINESS_SOURCE_DEFINITIONS.flatMap<ReadinessProbe>(
+    ({ source, resourceSpecificTable, azureDiagnosticsCategory }) =>
+      LOG_ANALYTICS_STORAGE_KINDS.map((storage) => {
+        const sourceQuery =
+          storage === "resource-specific"
+            ? [resourceSpecificTable]
+            : [
+                "AzureDiagnostics",
+                '| where ResourceProvider =~ "MICROSOFT.NETWORK"',
+                '| where ResourceType =~ "AZUREFIREWALLS"',
+                `| where Category == ${encodeKqlStringLiteral(azureDiagnosticsCategory)}`,
+              ];
+        return {
+          sources: [source],
+          storage,
+          query: [
+            "let MissingTable = view () { print IsMissing = 1, SampleCount = toint(0) };",
+            "union isfuzzy=true MissingTable,",
+            "(",
+            ...sourceQuery,
+            "| take 2",
+            "| count",
+            "| project IsMissing = 0, SampleCount = toint(Count)",
+            ")",
+            "| top 1 by IsMissing asc",
+            "| project TableExists = IsMissing == 0, SampleCount",
+          ].join("\n"),
+        };
+      }),
+  );
 }
 
 function tableRows(payload: unknown, maxRows: number) {
@@ -504,14 +511,20 @@ function tableRows(payload: unknown, maxRows: number) {
   return rows;
 }
 
-function readinessSampleCount(payload: unknown): 0 | 1 | 2 {
+function isReadinessSampleCount(value: unknown): value is 0 | 1 | 2 {
+  return value === 0 || value === 1 || value === 2;
+}
+
+function readinessProbeResult(payload: unknown) {
   const rows = tableRows(payload, 1);
-  const value = rows[0]?.SampleCount;
-  if (rows.length !== 1 || typeof value !== "number" || !Number.isInteger(value)) {
+  const tableExists = rows[0]?.TableExists;
+  const sampleCount = rows[0]?.SampleCount;
+  if (rows.length !== 1 || typeof tableExists !== "boolean") {
     throw new LogAnalyticsQueryError("upstream");
   }
-  if (value === 0 || value === 1 || value === 2) return value;
-  throw new LogAnalyticsQueryError("upstream");
+  if (!isReadinessSampleCount(sampleCount)) throw new LogAnalyticsQueryError("upstream");
+  if (!tableExists && sampleCount !== 0) throw new LogAnalyticsQueryError("upstream");
+  return { tableExists, sampleCount };
 }
 
 export async function executeDnsReadinessQuery(
@@ -526,32 +539,53 @@ export async function executeDnsReadinessQuery(
     ),
   );
 
-  const readiness = results.flatMap((result, index) => {
-    const sources = probes[index]!.sources;
+  const attempts = results.flatMap<ReadinessAttempt>((result, index): ReadinessAttempt[] => {
+    const probe = probes[index]!;
     if (result.status === "fulfilled") {
       try {
-        const sampleCount = readinessSampleCount(result.value);
-        return sources.map<DnsSourceReadiness>((source) => ({
-          source,
-          status: "success",
-          sampleCount,
-        }));
+        const { tableExists, sampleCount } = readinessProbeResult(result.value);
+        return probe.sources.map((source) =>
+          tableExists
+            ? {
+                source,
+                storage: probe.storage,
+                status: "success" as const,
+                sampleCount,
+              }
+            : {
+                source,
+                storage: probe.storage,
+                status: "missing" as const,
+                sampleCount: null,
+              },
+        );
       } catch {
-        return sources.map<DnsSourceReadiness>((source) => ({
+        return probe.sources.map((source) => ({
           source,
-          status: "failed",
+          storage: probe.storage,
+          status: "failed" as const,
           sampleCount: null,
         }));
       }
     }
     const forbidden =
       result.reason instanceof LogAnalyticsQueryError && result.reason.kind === "authorization";
-    return sources.map<DnsSourceReadiness>((source) => ({
+    return probe.sources.map((source) => ({
       source,
-      status: forbidden ? "forbidden" : "failed",
+      storage: probe.storage,
+      status: forbidden ? ("forbidden" as const) : ("failed" as const),
       sampleCount: null,
     }));
   });
+  const readiness = DNS_READINESS_SOURCE_DEFINITIONS.flatMap<DnsSourceReadiness>(({ source }) =>
+    LOG_ANALYTICS_STORAGE_KINDS.map((storage) => {
+      const attempt = attempts.find(
+        (candidate) => candidate.source === source && candidate.storage === storage,
+      );
+      if (!attempt) throw new LogAnalyticsQueryError("upstream");
+      return attempt;
+    }),
+  );
   return { readiness };
 }
 
@@ -580,7 +614,7 @@ function defaultIdentityDigest(value: string) {
 }
 
 export function assignStableLogAnalyticsRowIds(
-  source: DnsReadinessSourceKind,
+  source: LogAnalyticsIdentitySource,
   rows: readonly Record<string, unknown>[],
   digest: (value: string) => string = defaultIdentityDigest,
 ) {
@@ -615,9 +649,23 @@ export function assignStableLogAnalyticsRowIds(
   return assigned;
 }
 
-function mapRows(payload: unknown, source: DnsSourceKind, maxRows: number) {
+function identitySource(
+  source: DnsSourceKind,
+  storage: LogAnalyticsStorageKind,
+): LogAnalyticsIdentitySource {
+  if (storage === "resource-specific") return source;
+  if (source === "network-rule") return "network-rule:azure-diagnostics";
+  throw new LogAnalyticsQueryError("upstream");
+}
+
+function mapRows(
+  payload: unknown,
+  source: DnsSourceKind,
+  maxRows: number,
+  storage: LogAnalyticsStorageKind = "resource-specific",
+) {
   const rows = tableRows(payload, maxRows);
-  const observations = assignStableLogAnalyticsRowIds(source, rows)
+  const observations = assignStableLogAnalyticsRowIds(identitySource(source, storage), rows)
     .map(({ collision, id, row }) => {
       const timestamp = text(row.TimeGenerated);
       if (!timestamp || !Number.isFinite(Date.parse(timestamp)))
@@ -628,6 +676,7 @@ function mapRows(payload: unknown, source: DnsSourceKind, maxRows: number) {
         id,
         timestamp: new Date(timestamp).toISOString(),
         category,
+        ...(source === "network-rule" ? { logAnalyticsStorage: storage } : {}),
         action: text(row.Action) ?? (source === "network-rule" ? "Unknown" : "DNS query"),
         protocol: text(row.Protocol) ?? "Unknown",
         sourceIp: text(row.SourceIp),
@@ -662,14 +711,16 @@ export async function executeDnsListQuery(
   const timespan = `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`;
   const queries = buildDnsListQueries(request);
   const results = await Promise.allSettled(
-    queries.map(async ({ query, source }) => {
+    queries.map(async ({ query, source, storage }) => {
       const mapped = mapRows(
         await executeLogAnalyticsRawQuery(target, query, timespan, accessToken, options),
         source,
         request.limit + 1,
+        storage,
       );
       return {
         source,
+        storage,
         observations: mapped.observations.filter((observation) =>
           matchesCanonicalFilters(observation, request.filters),
         ),
@@ -680,22 +731,37 @@ export async function executeDnsListQuery(
 
   const observations: DnsObservation[] = [];
   const sources: DnsSourceStatus[] = [];
-  for (const [index, result] of results.entries()) {
-    const source = queries[index]!.source;
-    if (result.status === "rejected") {
-      const forbidden =
-        result.reason instanceof LogAnalyticsQueryError && result.reason.kind === "authorization";
+  const sourceOrder = [...new Set(queries.map((query) => query.source))];
+  for (const source of sourceOrder) {
+    const sourceResults = results.filter((_, index) => queries[index]!.source === source);
+    const fulfilled = sourceResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    for (const result of fulfilled) {
+      observations.push(...result.observations.slice(0, request.limit));
+    }
+    const hasFailure = sourceResults.some((result) => result.status === "rejected");
+    const hasObservations = fulfilled.some((result) => result.observations.length > 0);
+    if (fulfilled.length > 0 && (!hasFailure || hasObservations)) {
       sources.push({
         source,
-        availability: forbidden ? "forbidden" : "failed",
-        truncated: false,
-        warning: forbidden ? "Source query forbidden" : "Source query failed",
+        availability: "available",
+        truncated: fulfilled.some((result) => result.truncated),
       });
       continue;
     }
-    const truncated = result.value.truncated;
-    observations.push(...result.value.observations.slice(0, request.limit));
-    sources.push({ source, availability: "available", truncated });
+    const forbidden = sourceResults.some(
+      (result) =>
+        result.status === "rejected" &&
+        result.reason instanceof LogAnalyticsQueryError &&
+        result.reason.kind === "authorization",
+    );
+    sources.push({
+      source,
+      availability: forbidden ? "forbidden" : "failed",
+      truncated: false,
+      warning: forbidden ? "Source query forbidden" : "Source query failed",
+    });
   }
   if (sources.every((source) => source.availability !== "available")) {
     return {
@@ -707,7 +773,12 @@ export async function executeDnsListQuery(
     };
   }
 
-  const transport = observations.filter((observation) => observation.source === "network-rule");
+  const transport = observations
+    .filter((observation) => observation.source === "network-rule")
+    .toSorted(
+      (left, right) =>
+        right.timestamp.localeCompare(left.timestamp) || right.id.localeCompare(left.id),
+    );
   const entries = createDnsEntries(observations);
   const namedSourceTruncated = sources.some(
     (source) => source.source !== "network-rule" && source.truncated,
@@ -728,12 +799,12 @@ export async function executeDnsListQuery(
   };
 }
 
-function selectorClauses(selector: DnsDetailSelector) {
+function selectorClauses(selector: DnsDetailSelector, resourceField = "_ResourceId") {
   const timestamp = new Date(selector.timestamp);
   const nextMillisecond = new Date(timestamp.getTime() + 1).toISOString();
   const clauses = [
     `| where TimeGenerated >= datetime(${timestamp.toISOString()}) and TimeGenerated < datetime(${nextMillisecond})`,
-    `| where _ResourceId =~ ${encodeKqlStringLiteral(selector.resourceId)}`,
+    `| where ${resourceField} =~ ${encodeKqlStringLiteral(selector.resourceId)}`,
   ];
   if (selector.source === "network-rule") {
     clauses.push(
@@ -798,6 +869,14 @@ export function buildDnsDetailQuery(selector: DnsDetailSelector) {
   if (selector.source === "dns-proxy") {
     throw new TypeError("Event Hub DNS proxy entries do not use Log Analytics detail queries");
   }
+  if (selector.source === "network-rule" && selector.logAnalyticsStorage === "azure-diagnostics") {
+    return [
+      AZURE_DIAGNOSTICS_NETWORK_PROJECTION,
+      ...selectorClauses(selector, "ResourceId"),
+      "| order by TimeGenerated asc",
+      `| take ${DETAIL_LIMIT + 1}`,
+    ].join("\n");
+  }
   const sourceShape = {
     "proxy-structured": {
       table: "AZFWDnsQuery",
@@ -835,6 +914,8 @@ export function buildDnsDetailQuery(selector: DnsDetailSelector) {
 function matchesSelector(observation: DnsObservation, selector: DnsDetailSelector) {
   return (
     observation.source === selector.source &&
+    (!selector.logAnalyticsStorage ||
+      observation.logAnalyticsStorage === selector.logAnalyticsStorage) &&
     observation.resourceId?.toLowerCase() === selector.resourceId.toLowerCase() &&
     observation.timestamp === new Date(selector.timestamp).toISOString() &&
     (!selector.queryId || observation.queryId === selector.queryId) &&
@@ -875,7 +956,7 @@ function relatedTimespan(timestamp: string, beforeMs: number, afterMs: number) {
 export function buildDnsRelatedEvidenceQueries(
   observation: DnsObservation,
 ): RelatedEvidenceQuery[] {
-  if (!observation.resourceId) return [];
+  if (!observation.resourceId || observation.logAnalyticsStorage === "azure-diagnostics") return [];
   const resourceClause = `| where _ResourceId =~ ${encodeKqlStringLiteral(observation.resourceId)}`;
   const queries: RelatedEvidenceQuery[] = [];
   const fqdn = observation.queryName?.replace(TRAILING_DOTS_PATTERN, "");
@@ -1007,7 +1088,12 @@ export async function executeDnsDetailQuery(
     accessToken,
     options,
   );
-  const mapped = mapRows(payload, request.selector.source, DETAIL_LIMIT + 1);
+  const mapped = mapRows(
+    payload,
+    request.selector.source,
+    DETAIL_LIMIT + 1,
+    request.selector.logAnalyticsStorage ?? "resource-specific",
+  );
   const observations = mapped.observations.filter((observation) =>
     matchesSelector(observation, request.selector),
   );

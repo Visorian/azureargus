@@ -79,6 +79,7 @@ function createListRequest(): DnsListQueryRequest {
       source: "",
     },
     limit: 1_000,
+    storage: "resource-specific",
   };
 }
 
@@ -241,6 +242,9 @@ describe("managed DNS list route", () => {
         createTestEvent({ ...createListRequest(), workspaceId: "caller-controlled" }),
       ),
     ).rejects.toMatchObject({ statusCode: 400 });
+    await expect(
+      managedListHandler(createTestEvent({ ...createListRequest(), storage: "both" })),
+    ).rejects.toMatchObject({ statusCode: 400 });
     expect(executeDnsListQuery).not.toHaveBeenCalled();
   });
 });
@@ -302,6 +306,11 @@ describe("delegated DNS list route", () => {
     await expect(
       delegatedListHandler(
         createTestEvent({ ...request, workspaceId: "not-a-workspace" }, "Bearer delegated-token"),
+      ),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    await expect(
+      delegatedListHandler(
+        createTestEvent({ ...request, storage: "both" }, "Bearer delegated-token"),
       ),
     ).rejects.toMatchObject({ statusCode: 400 });
     expect(executeDnsListQuery).not.toHaveBeenCalled();

@@ -18,7 +18,39 @@ function createDeferred<T>() {
 
 function response(sampleCount: 0 | 1 | 2): DnsReadinessResponse {
   return {
-    readiness: [{ source: "proxy-structured", status: "success", sampleCount }],
+    readiness: [
+      {
+        source: "proxy-structured",
+        storage: "resource-specific",
+        status: "success",
+        sampleCount,
+      },
+      {
+        source: "proxy-structured",
+        storage: "azure-diagnostics",
+        status: "success",
+        sampleCount,
+      },
+    ],
+  };
+}
+
+function storageResponse(): DnsReadinessResponse {
+  return {
+    readiness: [
+      {
+        source: "network-rule",
+        storage: "resource-specific",
+        status: "success",
+        sampleCount: 1,
+      },
+      {
+        source: "network-rule",
+        storage: "azure-diagnostics",
+        status: "success",
+        sampleCount: 2,
+      },
+    ],
   };
 }
 
@@ -105,6 +137,33 @@ describe("DNS source readiness client", () => {
     expect(signal?.aborted).toBe(true);
     expect(readiness.status.value).toBe("idle");
     expect(readiness.readiness.value).toEqual([]);
+    scope.stop();
+  });
+
+  it("clears storage-specific checks while a changed workspace target loads", async () => {
+    const next = createDeferred<DnsReadinessResponse>();
+    const target = ref<DnsReadinessTarget | null>({ mode: "managed" });
+    const request = vi
+      .fn<(target: DnsReadinessTarget) => Promise<DnsReadinessResponse>>()
+      .mockResolvedValueOnce(storageResponse())
+      .mockReturnValueOnce(next.promise);
+    const scope = effectScope();
+    const readiness = scope.run(() => useDnsSourceReadiness({ request, target }));
+    if (!readiness) throw new Error("Readiness composable was not created.");
+    await vi.waitFor(() => expect(readiness.status.value).toBe("success"));
+    expect(readiness.readiness.value).toEqual(storageResponse().readiness);
+
+    target.value = {
+      mode: "delegated",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      workspaceId: "22222222-2222-4222-8222-222222222222",
+    };
+    await nextTick();
+
+    expect(readiness.status.value).toBe("loading");
+    expect(readiness.readiness.value).toEqual([]);
+    next.resolve(response(0));
+    await vi.waitFor(() => expect(readiness.status.value).toBe("success"));
     scope.stop();
   });
 });

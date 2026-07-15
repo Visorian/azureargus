@@ -1,3 +1,5 @@
+import type { LogAnalyticsStorageKind } from "./logAnalytics";
+
 export type DnsSourceKind =
   | "dns-proxy"
   | "proxy-structured"
@@ -41,6 +43,7 @@ export interface DnsObservation {
   id: string;
   timestamp: string;
   enqueuedTimeUtc?: string;
+  logAnalyticsStorage?: LogAnalyticsStorageKind;
   source: DnsSourceKind;
   stage: DnsStage;
   path: DnsPathKind;
@@ -88,6 +91,7 @@ export interface DnsDetailSelector {
   source: DnsSourceKind;
   resourceId: string;
   timestamp: string;
+  logAnalyticsStorage?: LogAnalyticsStorageKind;
   queryId?: string;
   queryName?: string;
   clientIp?: string;
@@ -161,6 +165,7 @@ export interface DnsListQueryRequest {
   to: string;
   filters: DnsFilters;
   limit: number;
+  storage: LogAnalyticsStorageKind;
 }
 
 export interface DelegatedDnsListQueryRequest extends DnsListQueryRequest {
@@ -189,12 +194,14 @@ export interface DnsSourceStatus {
 export type DnsSourceReadiness =
   | {
       source: DnsReadinessSourceKind;
+      storage: LogAnalyticsStorageKind;
       status: "success";
       sampleCount: 0 | 1 | 2;
     }
   | {
       source: DnsReadinessSourceKind;
-      status: "forbidden" | "failed";
+      storage: LogAnalyticsStorageKind;
+      status: "missing" | "forbidden" | "failed";
       sampleCount: null;
     };
 

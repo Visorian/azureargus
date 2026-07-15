@@ -36,6 +36,7 @@ function createListRequest(): DnsListQueryRequest {
       source: "",
     },
     limit: 1_000,
+    storage: "resource-specific",
   };
 }
 
@@ -72,8 +73,8 @@ function response(payload: unknown) {
   });
 }
 
-function readinessResponse(sampleCount: 0 | 1 | 2 = 2) {
-  return response(azureResponse(["SampleCount"], [[sampleCount]]));
+function readinessResponse(sampleCount: 0 | 1 | 2 = 2, tableExists = true) {
+  return response(azureResponse(["TableExists", "SampleCount"], [[tableExists, sampleCount]]));
 }
 
 function relatedObservation(overrides: Partial<DnsObservation> = {}): DnsObservation {
@@ -104,6 +105,10 @@ describe("DNS Log Analytics request contracts", () => {
     const request = createListRequest();
 
     expect(validateDnsListQueryRequest(request)).toBe(true);
+    expect(validateDnsListQueryRequest({ ...request, storage: "azure-diagnostics" })).toBe(true);
+    expect(validateDnsListQueryRequest({ ...request, storage: "AzureDiagnostics" })).toBe(false);
+    const { storage: _storage, ...withoutStorage } = request;
+    expect(validateDnsListQueryRequest(withoutStorage)).toBe(false);
     expect(validateDnsListQueryRequest({ ...request, workspaceId })).toBe(false);
     expect(validateDnsListQueryRequest({ ...request, from: "2026-07-10" })).toBe(false);
     expect(
@@ -171,6 +176,7 @@ describe("DNS Log Analytics request contracts", () => {
           source: "network-rule",
           resourceId,
           timestamp: request.selector.timestamp,
+          logAnalyticsStorage: "resource-specific",
           protocol: "UDP",
           networkSourceIp: "10.0.0.4",
           networkSourcePort: "52338",
@@ -179,6 +185,21 @@ describe("DNS Log Analytics request contracts", () => {
         },
       }),
     ).toBe(true);
+    expect(
+      validateDnsDetailQueryRequest({
+        selector: {
+          source: "network-rule",
+          resourceId,
+          timestamp: request.selector.timestamp,
+          logAnalyticsStorage: "AzureDiagnostics",
+          protocol: "UDP",
+          networkSourceIp: "10.0.0.4",
+          networkSourcePort: "52338",
+          networkDestinationIp: "10.0.0.5",
+          networkDestinationPort: "53",
+        },
+      }),
+    ).toBe(false);
   });
 
   it("requires workspace only on delegated detail requests", () => {
@@ -199,7 +220,7 @@ describe("DNS Log Analytics request contracts", () => {
 });
 
 describe("DNS Log Analytics KQL", () => {
-  it("uses only allowlisted list sources, early projections, and independent probes", () => {
+  it("uses only resource-specific list sources when selected", () => {
     const request = createListRequest();
     request.filters.search = 'example.com" | take 9999';
     request.filters.protocol = "UDP";
@@ -218,12 +239,35 @@ describe("DNS Log Analytics KQL", () => {
       "AZFWInternalFqdnResolutionFailure",
       "AZFWNetworkRule",
     ]);
+    expect(queries.every(({ storage }) => storage === "resource-specific")).toBe(true);
+    expect(queries.every(({ query }) => !query.includes("AzureDiagnostics"))).toBe(true);
     expect(queries.every(({ query }) => query.includes("| take 1001"))).toBe(true);
-    expect(queries.every(({ query }) => query.includes("| project "))).toBe(true);
+    expect(
+      queries.every(({ query }) => query.includes("| project ") || query.includes("| project\n")),
+    ).toBe(true);
     expect(queries.every(({ query }) => !query.includes("\n| take 9999\n"))).toBe(true);
     expect(queries[3]?.query).toContain(
       "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
     );
+  });
+
+  it("uses only AzureDiagnostics list sources when selected", () => {
+    const request = createListRequest();
+    request.storage = "azure-diagnostics";
+
+    const queries = buildDnsListQueries(request);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatchObject({
+      source: "network-rule",
+      storage: "azure-diagnostics",
+    });
+    expect(queries[0]?.query.split("\n")[0]).toBe("AzureDiagnostics");
+    expect(queries[0]?.query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"');
+    expect(queries[0]?.query).toContain('| where ResourceType =~ "AZUREFIREWALLS"');
+    expect(queries[0]?.query).toContain('| where Category == "AZFWNetworkRule"');
+    expect(queries[0]?.query).toContain('column_ifexists("Protocol_s", "")');
+    expect(queries[0]?.query).not.toContain("\nAZFWNetworkRule\n");
   });
 
   it("uses requested list limit for every source query", () => {
@@ -235,32 +279,39 @@ describe("DNS Log Analytics KQL", () => {
     );
   });
 
-  it("uses unbounded source-specific readiness probes with capped record counts", () => {
+  it("checks every dedicated table and matching AzureDiagnostics category explicitly", () => {
     const probes = buildDnsReadinessProbes();
 
     expect(probes.map(({ sources }) => sources)).toEqual([
       ["proxy-structured"],
+      ["proxy-structured"],
+      ["dns-flow-trace"],
       ["dns-flow-trace"],
       ["internal-fqdn-failure"],
+      ["internal-fqdn-failure"],
+      ["network-rule"],
       ["network-rule"],
       ["application-rule"],
+      ["application-rule"],
+      ["flow-trace"],
       ["flow-trace"],
       ["nat-rule"],
+      ["nat-rule"],
     ]);
-    expect(probes.map(({ query }) => query.split("\n")[0])).toEqual([
-      "AZFWDnsQuery",
-      "AZFWDnsFlowTrace",
-      "AZFWInternalFqdnResolutionFailure",
-      "AZFWNetworkRule",
-      "AZFWApplicationRule",
-      "AZFWFlowTrace",
-      "AZFWNatRule",
-    ]);
-    expect(probes.every(({ query }) => query.includes("| take 2\n| count"))).toBe(true);
-    expect(probes.every(({ query }) => !query.includes("TimeGenerated"))).toBe(true);
-    expect(probes[3]?.query).toContain(
-      "| where toint(SourcePort) == 53 or toint(DestinationPort) == 53",
+    expect(probes.map(({ storage }) => storage)).toEqual(
+      Array.from({ length: 7 }, () => ["resource-specific", "azure-diagnostics"]).flat(),
     );
+    expect(probes).toHaveLength(14);
+    expect(probes.every(({ query }) => query.includes("union isfuzzy=true MissingTable"))).toBe(
+      true,
+    );
+    expect(probes.every(({ query }) => query.includes("| take 2\n| count"))).toBe(true);
+    expect(probes[0]?.query).toContain("\nAZFWDnsQuery\n");
+    expect(probes[1]?.query).toContain("\nAzureDiagnostics\n");
+    expect(probes[1]?.query).toContain('| where Category == "AZFWDnsQuery"');
+    expect(probes[3]?.query).toContain('| where Category == "AZFWDnsAdditional"');
+    expect(probes[5]?.query).toContain('| where Category == "AZFWFqdnResolveFailure"');
+    expect(probes[7]?.query).toContain('| where Category == "AZFWNetworkRule"');
   });
 
   it("uses documented DNS Flow Trace fields without inventing query or outcome semantics", () => {
@@ -363,6 +414,7 @@ describe("DNS Log Analytics KQL", () => {
       source: "network-rule",
       resourceId,
       timestamp: "2026-07-10T10:01:00.000Z",
+      logAnalyticsStorage: "resource-specific",
       protocol: "TCP",
       networkSourceIp: "10.0.0.53",
       networkSourcePort: "53",
@@ -377,6 +429,27 @@ describe("DNS Log Analytics KQL", () => {
     expect(query).toContain('| where DestinationIp == "10.0.0.4"');
     expect(query).toContain('| where tostring(DestinationPort) == "52338"');
     expect(query).toContain("Policy, RuleCollectionGroup, RuleCollection, Rule");
+  });
+
+  it("routes Azure Diagnostics network details through the fixed normalized projection", () => {
+    const query = buildDnsDetailQuery({
+      source: "network-rule",
+      resourceId,
+      timestamp: "2026-07-10T10:01:00.000Z",
+      logAnalyticsStorage: "azure-diagnostics",
+      protocol: "UDP",
+      networkSourceIp: "10.0.0.4",
+      networkSourcePort: "52338",
+      networkDestinationIp: "10.0.0.53",
+      networkDestinationPort: "53",
+    });
+
+    expect(query.split("\n")[0]).toBe("AzureDiagnostics");
+    expect(query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"');
+    expect(query).toContain('| where Category == "AZFWNetworkRule"');
+    expect(query).toContain('SourceIp = tostring(column_ifexists("SourceIP", ""))');
+    expect(query).toContain(`| where ResourceId =~ ${JSON.stringify(resourceId)}`);
+    expect(query).not.toContain("AzureFirewallNetworkRule");
   });
 
   it("uses exact escaped DNS Flow Trace detail anchors", () => {
@@ -478,6 +551,11 @@ describe("DNS Log Analytics KQL", () => {
     expect(buildDnsRelatedEvidenceQueries(relatedObservation({ resourceId: undefined }))).toEqual(
       [],
     );
+    expect(
+      buildDnsRelatedEvidenceQueries(
+        relatedObservation({ logAnalyticsStorage: "azure-diagnostics" }),
+      ),
+    ).toEqual([]);
     expect(
       buildDnsRelatedEvidenceQueries(
         relatedObservation({
@@ -639,36 +717,34 @@ describe("DNS Log Analytics source mapping", () => {
     expect(result.transportObservationsTruncated).toBe(true);
   });
 
-  it("keeps exact zero, one, and two-plus readiness evidence", async () => {
-    const sampleCounts = new Map<string, 0 | 1 | 2>([
-      ["AZFWDnsQuery", 0],
-      ["AZFWDnsFlowTrace", 1],
-      ["AZFWInternalFqdnResolutionFailure", 2],
-      ["AZFWNetworkRule", 2],
-      ["AZFWApplicationRule", 1],
-      ["AZFWFlowTrace", 0],
-      ["AZFWNatRule", 2],
-    ] as const);
-    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
-      const query = String(JSON.parse(init.body).query);
-      return readinessResponse(sampleCounts.get(query.split("\n")[0]!) ?? 2);
-    });
+  it("keeps exact zero, one, and two-plus readiness per source and storage", async () => {
+    const sampleCounts: Array<0 | 1 | 2> = [0, 1, 1, 2, 2, 0, 2, 1, 1, 0, 0, 2, 2, 1];
+    let requestIndex = 0;
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => readinessResponse(sampleCounts[requestIndex++]!));
 
     const result = await executeDnsReadinessQuery({ workspaceId }, "access-token", {
       fetchImplementation,
     });
 
-    expect(result.readiness).toEqual([
-      { source: "proxy-structured", status: "success", sampleCount: 0 },
-      { source: "dns-flow-trace", status: "success", sampleCount: 1 },
-      { source: "internal-fqdn-failure", status: "success", sampleCount: 2 },
-      { source: "network-rule", status: "success", sampleCount: 2 },
-      { source: "application-rule", status: "success", sampleCount: 1 },
-      { source: "flow-trace", status: "success", sampleCount: 0 },
-      { source: "nat-rule", status: "success", sampleCount: 2 },
-    ]);
-    expect(fetchImplementation).toHaveBeenCalledTimes(7);
+    expect(result.readiness.map(({ source, storage }) => [source, storage])).toEqual(
+      [
+        "proxy-structured",
+        "dns-flow-trace",
+        "internal-fqdn-failure",
+        "network-rule",
+        "application-rule",
+        "flow-trace",
+        "nat-rule",
+      ].flatMap((source) => [
+        [source, "resource-specific"],
+        [source, "azure-diagnostics"],
+      ]),
+    );
+    expect(result.readiness.every(({ status }) => status === "success")).toBe(true);
+    expect(result.readiness.map(({ sampleCount }) => sampleCount)).toEqual(sampleCounts);
+    expect(fetchImplementation).toHaveBeenCalledTimes(14);
     expect(
       fetchImplementation.mock.calls.every(([, init]) => {
         if (typeof init?.body !== "string") return false;
@@ -677,12 +753,41 @@ describe("DNS Log Analytics source mapping", () => {
     ).toBe(true);
   });
 
-  it("reports readiness authorization and query failures per source", async () => {
+  it("reports missing tables separately from empty AzureDiagnostics categories", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
       if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
       const query = String(JSON.parse(init.body).query);
-      if (query.startsWith("AZFWDnsQuery")) return new Response(null, { status: 403 });
-      if (query.startsWith("AZFWNetworkRule")) return new Response(null, { status: 500 });
+      return query.includes("\nAZFWDnsFlowTrace\n")
+        ? readinessResponse(0, false)
+        : readinessResponse(0);
+    });
+
+    const result = await executeDnsReadinessQuery({ workspaceId }, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.readiness.filter(({ source }) => source === "dns-flow-trace")).toEqual([
+      {
+        source: "dns-flow-trace",
+        storage: "resource-specific",
+        status: "missing",
+        sampleCount: null,
+      },
+      {
+        source: "dns-flow-trace",
+        storage: "azure-diagnostics",
+        status: "success",
+        sampleCount: 0,
+      },
+    ]);
+  });
+
+  it("reports authorization and query failures for each storage check", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      if (query.includes("\nAZFWDnsQuery\n")) return new Response(null, { status: 403 });
+      if (query.includes("\nAZFWNetworkRule\n")) return new Response(null, { status: 500 });
       return readinessResponse();
     });
 
@@ -692,17 +797,53 @@ describe("DNS Log Analytics source mapping", () => {
 
     expect(result.readiness).toContainEqual({
       source: "proxy-structured",
+      storage: "resource-specific",
       status: "forbidden",
       sampleCount: null,
     });
     expect(result.readiness).toContainEqual({
       source: "network-rule",
+      storage: "resource-specific",
       status: "failed",
       sampleCount: null,
     });
+    expect(result.readiness).toContainEqual({
+      source: "network-rule",
+      storage: "azure-diagnostics",
+      status: "success",
+      sampleCount: 2,
+    });
   });
 
-  it("keeps successful sources when another source is forbidden", async () => {
+  it("does not hide an AzureDiagnostics failure behind an empty dedicated table", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      if (query.includes("\nAzureDiagnostics\n")) return new Response(null, { status: 500 });
+      return readinessResponse(0);
+    });
+
+    const result = await executeDnsReadinessQuery({ workspaceId }, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.readiness.filter(({ source }) => source === "network-rule")).toEqual([
+      {
+        source: "network-rule",
+        storage: "resource-specific",
+        status: "success",
+        sampleCount: 0,
+      },
+      {
+        source: "network-rule",
+        storage: "azure-diagnostics",
+        status: "failed",
+        sampleCount: null,
+      },
+    ]);
+  });
+
+  it("keeps successful DNS entries when a network store is forbidden", async () => {
     const columns = [
       "TimeGenerated",
       "Category",
@@ -752,6 +893,201 @@ describe("DNS Log Analytics source mapping", () => {
       truncated: false,
       warning: "Source query forbidden",
     });
+  });
+
+  it.each([
+    ["malformed", () => response({ tables: [{}] }), "failed"],
+    ["forbidden", () => new Response(null, { status: 403 }), "forbidden"],
+    ["failed", () => new Response(null, { status: 500 }), "failed"],
+  ])("reports selected AzureDiagnostics source as %s", async (_name, azure, availability) => {
+    const request = createListRequest();
+    request.filters.source = "network-rule";
+    request.storage = "azure-diagnostics";
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      return query.startsWith("AzureDiagnostics")
+        ? azure()
+        : response(azureResponse(["TimeGenerated"], []));
+    });
+
+    const result = await executeDnsListQuery({ workspaceId }, request, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.sources).toEqual([
+      {
+        source: "network-rule",
+        availability,
+        truncated: false,
+        warning: availability === "forbidden" ? "Source query forbidden" : "Source query failed",
+      },
+    ]);
+  });
+
+  it("queries only the selected resource-specific network source", async () => {
+    const request = createListRequest();
+    request.filters.source = "network-rule";
+    const columns = [
+      "TimeGenerated",
+      "Category",
+      "ResourceId",
+      "Action",
+      "Protocol",
+      "SourceIp",
+      "SourcePort",
+      "DestinationIp",
+      "DestinationPort",
+    ];
+    const row = [
+      "2026-07-10T10:01:00.000Z",
+      "AZFWNetworkRule",
+      resourceId,
+      "Allow",
+      "UDP",
+      "10.0.0.4",
+      "52338",
+      "10.0.0.53",
+      "53",
+    ];
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      expect(query.startsWith("AZFWNetworkRule")).toBe(true);
+      expect(query).not.toContain("AzureDiagnostics");
+      return response(azureResponse(columns, [row]));
+    });
+
+    const result = await executeDnsListQuery({ workspaceId }, request, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.sources).toEqual([
+      { source: "network-rule", availability: "available", truncated: false },
+    ]);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    expect(result.transportObservations).toHaveLength(1);
+  });
+
+  it("reports authorization failure from the selected AzureDiagnostics source", async () => {
+    const request = createListRequest();
+    request.filters.source = "network-rule";
+    request.storage = "azure-diagnostics";
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      expect(query.startsWith("AzureDiagnostics")).toBe(true);
+      return new Response(null, { status: 403 });
+    });
+
+    const result = await executeDnsListQuery({ workspaceId }, request, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.sources).toEqual([
+      {
+        source: "network-rule",
+        availability: "forbidden",
+        truncated: false,
+        warning: "Source query forbidden",
+      },
+    ]);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it("keeps AzureDiagnostics network rows storage-aware", async () => {
+    const request = createListRequest();
+    request.filters.source = "network-rule";
+    request.storage = "azure-diagnostics";
+    const columns = [
+      "TimeGenerated",
+      "Category",
+      "ResourceId",
+      "Action",
+      "ActionReason",
+      "Protocol",
+      "SourceIp",
+      "SourcePort",
+      "DestinationIp",
+      "DestinationPort",
+      "Policy",
+      "RuleCollectionGroup",
+      "RuleCollection",
+      "Rule",
+    ];
+    const row = [
+      "2026-07-10T10:01:00.000Z",
+      "AZFWNetworkRule",
+      resourceId,
+      "Allow",
+      "",
+      "UDP",
+      "10.0.0.4",
+      "52338",
+      "10.0.0.53",
+      "53",
+      "policy",
+      "group",
+      "collection",
+      "rule",
+    ];
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => response(azureResponse(columns, [row])));
+
+    const result = await executeDnsListQuery({ workspaceId }, request, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(result.transportObservations).toHaveLength(1);
+    expect(result.transportObservations[0]).toMatchObject({
+      logAnalyticsStorage: "azure-diagnostics",
+    });
+    expect(result.transportObservations[0]?.id).toContain("network-rule:azure-diagnostics");
+  });
+
+  it("queries only the selected AzureDiagnostics network source", async () => {
+    const request = createListRequest();
+    request.filters.source = "network-rule";
+    request.storage = "azure-diagnostics";
+    const columns = [
+      "TimeGenerated",
+      "Category",
+      "ResourceId",
+      "Action",
+      "Protocol",
+      "SourceIp",
+      "SourcePort",
+      "DestinationIp",
+      "DestinationPort",
+    ];
+    const row = (timestamp: string) => [
+      timestamp,
+      "AZFWNetworkRule",
+      resourceId,
+      "Allow",
+      "UDP",
+      "10.0.0.4",
+      "52338",
+      "10.0.0.53",
+      "53",
+    ];
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
+      const query = String(JSON.parse(init.body).query);
+      expect(query.startsWith("AzureDiagnostics")).toBe(true);
+      const timestamp = "2026-07-10T10:02:00.000Z";
+      return response(azureResponse(columns, [row(timestamp)]));
+    });
+
+    const result = await executeDnsListQuery({ workspaceId }, request, "access-token", {
+      fetchImplementation,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    expect(
+      result.transportObservations.map(({ logAnalyticsStorage }) => logAnalyticsStorage),
+    ).toEqual(["azure-diagnostics"]);
   });
 
   it("retains successful zero-row sources across malformed failure envelopes", async () => {
@@ -995,6 +1331,7 @@ describe("DNS Log Analytics source mapping", () => {
       source: "network-rule" as const,
       resourceId,
       timestamp: "2026-07-10T10:01:00.000Z",
+      logAnalyticsStorage: "resource-specific" as const,
       protocol: "TCP",
       networkSourceIp: "10.0.0.4",
       networkSourcePort: "52338",

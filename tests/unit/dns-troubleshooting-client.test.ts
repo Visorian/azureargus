@@ -11,6 +11,7 @@ import type {
   DnsListQueryResponse,
   DnsObservation,
 } from "../../shared/types/dns";
+import type { LogAnalyticsStorageKind } from "../../shared/types/logAnalytics";
 
 function createEntry(id: string, queryName = `${id}.example.`): DnsEntry {
   return {
@@ -94,6 +95,7 @@ function createHarness(
   const mode = ref<"real-time-analysis" | "log-analysis">("log-analysis");
   const draftRange = reactive({ from: "2026-07-12T08:00", to: "2026-07-12T09:00" });
   const queryLimit = ref(1_000);
+  const storage = ref<LogAnalyticsStorageKind>("resource-specific");
   const removeSink = vi.fn<() => boolean>(() => true);
   const sinkHolder: { current?: NormalizedLogBatchSink } = {};
   const scope = effectScope();
@@ -111,6 +113,7 @@ function createHarness(
       },
       requestDetail,
       requestList,
+      storage,
     }),
   );
   if (!dns) throw new Error("DNS composable was not created.");
@@ -118,7 +121,7 @@ function createHarness(
     if (!sinkHolder.current) throw new Error("DNS sink was not registered.");
     return sinkHolder.current;
   }
-  return { active, dns, draftRange, mode, queryLimit, removeSink, scope, getSink };
+  return { active, dns, draftRange, mode, queryLimit, removeSink, scope, storage, getSink };
 }
 
 describe("DNS troubleshooting client", () => {
@@ -134,6 +137,7 @@ describe("DNS troubleshooting client", () => {
     await harness.dns.run();
     expect(requests).toHaveLength(1);
     expect(requests[0]?.limit).toBe(1_000);
+    expect(requests[0]?.storage).toBe("resource-specific");
     expect(harness.dns.canApplyFilters.value).toBe(true);
     expect(harness.dns.entries.value).toHaveLength(1);
 
@@ -215,6 +219,30 @@ describe("DNS troubleshooting client", () => {
     expect(signal?.aborted).toBe(true);
     expect(harness.dns.status.value).toBe("idle");
     expect(harness.dns.lastError.value).toBeNull();
+    harness.scope.stop();
+  });
+
+  it("clears Log Analytics results and uses only the selected storage", async () => {
+    const requests: DnsListQueryRequest[] = [];
+    const harness = createHarness(async (body) => {
+      requests.push(body);
+      return createResponse(createEntry(`entry-${requests.length}`));
+    });
+
+    await harness.dns.run();
+    expect(harness.dns.entries.value).toHaveLength(1);
+
+    harness.storage.value = "azure-diagnostics";
+    await nextTick();
+    expect(harness.dns.entries.value).toEqual([]);
+    expect(requests).toHaveLength(1);
+
+    await harness.dns.run();
+    expect(requests.map((request) => request.storage)).toEqual([
+      "resource-specific",
+      "azure-diagnostics",
+    ]);
+
     harness.scope.stop();
   });
 

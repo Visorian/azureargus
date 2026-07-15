@@ -20,6 +20,7 @@ function createRequest(): LogAnalyticsQueryRequest {
       destination: "",
     },
     limit: 1_000,
+    storage: "resource-specific",
     sort: { key: "timestamp", direction: "desc" },
   };
 }
@@ -44,6 +45,10 @@ describe("Log Analytics request contract", () => {
 
     const { sort: _sort, ...withoutSort } = request;
     expect(validateLogAnalyticsQueryRequest(withoutSort)).toBe(false);
+
+    const { storage: _storage, ...withoutStorage } = request;
+    expect(validateLogAnalyticsQueryRequest(withoutStorage)).toBe(false);
+    expect(validateLogAnalyticsQueryRequest({ ...request, storage: "all" })).toBe(false);
   });
 
   it("rejects invalid or oversized ranges", () => {

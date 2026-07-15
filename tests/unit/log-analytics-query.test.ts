@@ -1,6 +1,7 @@
 import type { LogAnalyticsQueryRequest } from "../../shared/types/logAnalytics";
 import type { LogAnalyticsRuntimeConfig } from "../../server/utils/logAnalyticsAuth";
 import {
+  buildAzureDiagnosticsLogAnalyticsQuery,
   buildLogAnalyticsQuery,
   encodeKqlStringLiteral,
   executeLogAnalyticsQuery,
@@ -45,6 +46,7 @@ function createRequest(): LogAnalyticsQueryRequest {
       destination: "",
     },
     limit: 1_000,
+    storage: "resource-specific",
     sort: { key: "timestamp", direction: "desc" },
   };
 }
@@ -53,6 +55,43 @@ function createAzureResponse(rows: unknown[][]) {
   return {
     tables: [{ name: "PrimaryResult", columns, rows }],
   };
+}
+
+function createNetworkRow(timestamp: string, message: string, protocol = "UDP"): unknown[] {
+  return [
+    timestamp,
+    "AZFWNetworkRule",
+    "Allow",
+    protocol,
+    "10.0.0.5",
+    "51001",
+    "10.0.0.53",
+    "",
+    "53",
+    "policy",
+    "group",
+    "collection",
+    "dns",
+    message,
+  ];
+}
+
+function response(rows: unknown[][], status = 200) {
+  return new Response(JSON.stringify(createAzureResponse(rows)), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function requestQuery(init?: RequestInit) {
+  if (typeof init?.body !== "string") throw new Error("Expected request body");
+  const body: unknown = JSON.parse(init.body);
+  if (typeof body !== "object" || body === null || !("query" in body)) {
+    throw new Error("Expected query body");
+  }
+  const query = body.query;
+  if (typeof query !== "string") throw new Error("Expected query string");
+  return query;
 }
 
 describe("Log Analytics KQL builder", () => {
@@ -109,6 +148,50 @@ describe("Log Analytics KQL builder", () => {
     const { query } = buildLogAnalyticsQuery(request);
     expect(query).toContain(JSON.stringify(hostileValue.toLowerCase()));
     expect(query).not.toContain("\n| take 9999\n");
+  });
+
+  it("normalizes only captured AzureDiagnostics network-rule fields", () => {
+    const request = createRequest();
+    request.filters.search = "dns-rule";
+    request.filters.category = "AZFWNetworkRule";
+    request.filters.action = "Allow";
+    request.filters.protocol = "UDP";
+    request.filters.source = "10.0.0.5:51001";
+    request.filters.destination = "10.0.0.53:53";
+
+    const result = buildAzureDiagnosticsLogAnalyticsQuery(request);
+
+    expect(result.limit).toBe(1_000);
+    expect(result.query).toContain("AzureDiagnostics");
+    expect(result.query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"');
+    expect(result.query).toContain('| where ResourceType =~ "AZUREFIREWALLS"');
+    expect(result.query).toContain('| where Category == "AZFWNetworkRule"');
+    expect(result.query).toContain('SourceIp = tostring(column_ifexists("SourceIP", ""))');
+    expect(result.query).toContain(
+      'SourcePort = tostring(column_ifexists("SourcePort_d", real(null)))',
+    );
+    expect(result.query).toContain(
+      'DestinationIp = tostring(column_ifexists("DestinationIp_s", ""))',
+    );
+    expect(result.query).toContain(
+      'DestinationPort = tostring(column_ifexists("DestinationPort_d", real(null)))',
+    );
+    expect(result.query).toContain(
+      'RuleCollectionGroup = tostring(column_ifexists("RuleCollectionGroup_s", ""))',
+    );
+    expect(result.query).toContain('| where Protocol contains "udp"');
+    expect(result.query).toContain('| where SearchableText contains "dns-rule"');
+    expect(result.query).toContain('| where Category contains "azfwnetworkrule"');
+    expect(result.query).toContain('| where Action contains "allow"');
+    expect(result.query).toContain(
+      '| where strcat(SourceIp, ":", SourcePort) contains "10.0.0.5:51001"',
+    );
+    expect(result.query).toContain(
+      '| where strcat(DestinationIp, ":", DestinationPort) contains "10.0.0.53:53"',
+    );
+    expect(result.query).toContain("| take 1001");
+    expect(result.query).not.toContain("AzureFirewallNetworkRule");
+    expect(result.query).not.toContain("AZFWNetworkRuleAggregation");
   });
 });
 
@@ -228,30 +311,78 @@ describe("Log Analytics response mapping", () => {
 });
 
 describe("Log Analytics Azure request", () => {
-  it("uses the configured workspace endpoint and explicit timespan", async () => {
-    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify(createAzureResponse([])), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+  it("queries only the selected resource-specific store", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response([createNetworkRow("2026-07-10T10:00:00Z", "resource-specific")]));
 
-    await executeLogAnalyticsQuery(config, createRequest(), "access-token", {
+    const result = await executeLogAnalyticsQuery(config, createRequest(), "access-token", {
       fetchImplementation,
       queryId: "query-id",
     });
 
+    expect(fetchImplementation).toHaveBeenCalledOnce();
     const [url, init] = fetchImplementation.mock.calls[0] ?? [];
+    if (typeof init?.body !== "string") throw new Error("Expected request body");
     expect(url).toBe(
       `https://api.loganalytics.azure.com/v1/workspaces/${config.workspaceId}/query`,
     );
-    expect(init?.headers).toEqual({
+    expect(init.headers).toEqual({
       authorization: "Bearer access-token",
       "content-type": "application/json",
     });
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    expect(JSON.parse(init.body)).toMatchObject({
       timespan: "2026-07-10T10:00:00.000Z/2026-07-10T10:15:00.000Z",
     });
+    expect(requestQuery(init)).toContain("AZFWApplicationRule");
+    expect(requestQuery(init)).not.toContain("AzureDiagnostics");
+    expect(result.records).toEqual([
+      expect.objectContaining({ id: "query-id:0:0", message: "resource-specific" }),
+    ]);
+  });
+
+  it("queries only AzureDiagnostics and preserves its record ID namespace", async () => {
+    const request = createRequest();
+    request.storage = "azure-diagnostics";
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        response([
+          createNetworkRow("2026-07-10T10:01:00Z", "Allow UDP from 10.0.0.5:51001 to 10.0.0.53:53"),
+        ]),
+      );
+
+    const result = await executeLogAnalyticsQuery(config, request, "access-token", {
+      fetchImplementation,
+      queryId: "query-id",
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    const [, init] = fetchImplementation.mock.calls[0] ?? [];
+    expect(requestQuery(init)).toContain("AzureDiagnostics");
+    expect(requestQuery(init)).not.toContain("union isfuzzy=true withsource=Category");
+    expect(result).toMatchObject({ limit: 1_000, truncated: false });
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        category: "AZFWNetworkRule",
+        id: "query-id:azure-diagnostics:0:0",
+        protocol: "UDP",
+      }),
+    ]);
+  });
+
+  it("does not fall back when the selected store fails", async () => {
+    const request = createRequest();
+    request.storage = "azure-diagnostics";
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(response([], 500));
+
+    await expect(
+      executeLogAnalyticsQuery(config, request, "access-token", {
+        fetchImplementation,
+        queryId: "query-id",
+      }),
+    ).rejects.toMatchObject({ kind: "upstream" });
+    expect(fetchImplementation).toHaveBeenCalledOnce();
   });
 
   it("aborts timed-out upstream requests", async () => {

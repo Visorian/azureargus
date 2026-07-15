@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from "#shared/types/azureAccess";
 import type { DnsReadinessSourceKind, DnsSourceReadiness } from "#shared/types/dns";
+import type { LogAnalyticsStorageKind } from "#shared/types/logAnalytics";
+import {
+  DNS_READINESS_SOURCE_DEFINITIONS,
+  hasDnsReadinessData,
+  type DnsReadinessSourceGroup,
+} from "#shared/utils/dnsReadiness";
 import type { DnsReadinessStatus } from "~/composables/useDnsSourceReadiness";
 import {
   MAX_LOG_ANALYTICS_QUERY_LIMIT,
@@ -37,6 +43,7 @@ const emit = defineEmits<{
 const tenantId = defineModel<string>("tenantId", { required: true });
 const workspaceId = defineModel<string>("workspaceId", { required: true });
 const queryLimit = defineModel<number>("queryLimit", { required: true });
+const queryStorage = defineModel<LogAnalyticsStorageKind>("queryStorage", { required: true });
 const tenantValid = computed(() => isEntraId(tenantId.value));
 const workspaceValid = computed(() => isEntraId(workspaceId.value));
 const tenantItems = computed(() =>
@@ -65,115 +72,171 @@ function changeWorkspace(value: unknown) {
   }
 }
 
-type ReadinessState =
-  | "multiple-records"
-  | "one-record"
-  | "no-records"
+type ReadinessIndicatorState =
+  | "available"
+  | "empty"
+  | "missing"
   | "forbidden"
   | "failed"
+  | "checking"
   | "unchecked";
 
-interface ReadinessItem {
-  description: string;
+interface ReadinessIndicator {
   label: string;
-  state: ReadinessState;
+  state: ReadinessIndicatorState;
+  statusLabel: string;
 }
 
-const readinessStyle: Record<ReadinessState, { icon: string; label: string; text: string }> = {
-  "multiple-records": {
+interface ReadinessItem {
+  indicators: ReadinessIndicator[];
+  label: string;
+  mapping: string;
+}
+
+const readinessIndicatorStyle: Record<
+  ReadinessIndicatorState,
+  { icon: string; iconClass?: string; text: string }
+> = {
+  available: {
     icon: "i-lucide-circle-check",
-    label: "2+ records",
     text: "text-green-700 dark:text-green-300",
   },
-  "one-record": {
-    icon: "i-lucide-circle-alert",
-    label: "1 record",
-    text: "text-amber-700 dark:text-amber-300",
+  empty: {
+    icon: "i-lucide-circle-minus",
+    text: "text-brand-gray-500 dark:text-brand-gray-400",
   },
-  "no-records": {
-    icon: "i-lucide-circle-alert",
-    label: "0 records",
-    text: "text-amber-700 dark:text-amber-300",
+  missing: {
+    icon: "i-lucide-circle-minus",
+    text: "text-brand-gray-500 dark:text-brand-gray-400",
   },
   forbidden: {
-    icon: "i-lucide-circle-x",
-    label: "Access denied",
-    text: "text-red-700 dark:text-red-300",
+    icon: "i-lucide-lock-keyhole",
+    text: "text-amber-700 dark:text-amber-300",
   },
   failed: {
     icon: "i-lucide-circle-x",
-    label: "Check failed",
     text: "text-red-700 dark:text-red-300",
+  },
+  checking: {
+    icon: "i-lucide-loader-circle",
+    iconClass: "animate-spin",
+    text: "text-brand-blue-600 dark:text-brand-blue-300",
   },
   unchecked: {
     icon: "i-lucide-circle-dashed",
-    label: "Not checked",
-    text: "text-brand-gray-500 dark:text-brand-gray-400",
+    text: "text-brand-gray-400 dark:text-brand-gray-500",
   },
 };
 
-function sourceState(source: DnsReadinessSourceKind): ReadinessState {
-  const readiness = props.dnsReadiness.find((item) => item.source === source);
-  if (
-    props.dnsReadinessStatus === "idle" ||
-    props.dnsReadinessStatus === "loading" ||
-    readiness === undefined
-  ) {
-    return "unchecked";
+const readinessColumns = [
+  { label: "Dedicated table", storage: "resource-specific" },
+  { label: "AzureDiagnostics", storage: "azure-diagnostics" },
+] as const satisfies readonly { label: string; storage: LogAnalyticsStorageKind }[];
+
+function sourceIndicator(
+  source: DnsReadinessSourceKind,
+  storage: LogAnalyticsStorageKind,
+  label: string,
+): ReadinessIndicator {
+  const readiness = props.dnsReadiness.find(
+    (item) => item.source === source && item.storage === storage,
+  );
+  if (!readiness) {
+    return props.dnsReadinessStatus === "loading"
+      ? { label, state: "checking", statusLabel: "checking" }
+      : { label, state: "unchecked", statusLabel: "not checked" };
   }
-  if (readiness.status !== "success") return readiness.status;
-  if (readiness.sampleCount === 0) return "no-records";
-  if (readiness.sampleCount === 1) return "one-record";
-  return "multiple-records";
+  if (readiness.status === "success") {
+    if (storage === "azure-diagnostics" && readiness.sampleCount === 0) {
+      return { label, state: "empty", statusLabel: "no matching records" };
+    }
+    return { label, state: "available", statusLabel: "available" };
+  }
+  if (readiness.status === "missing") {
+    return { label, state: "missing", statusLabel: "not found" };
+  }
+  if (readiness.status === "forbidden") {
+    return { label, state: "forbidden", statusLabel: "access denied" };
+  }
+  return { label, state: "failed", statusLabel: "check failed" };
 }
 
-const readinessGroups = computed(() => [
-  {
-    label: "DNS sources",
-    items: [
-      {
-        label: "Structured DNS proxy logs",
-        description: "AZFWDnsQuery · any record in selected workspace",
-        state: sourceState("proxy-structured"),
-      },
-      {
-        label: "DNS flow trace logs",
-        description: "AZFWDnsFlowTrace · any record in selected workspace",
-        state: sourceState("dns-flow-trace"),
-      },
-      {
-        label: "Internal FQDN resolution failures",
-        description: "AZFWInternalFqdnResolutionFailure · any record in selected workspace",
-        state: sourceState("internal-fqdn-failure"),
-      },
-      {
-        label: "DNS transport logs",
-        description: "AZFWNetworkRule · TCP or UDP port 53 record",
-        state: sourceState("network-rule"),
-      },
-    ] satisfies ReadinessItem[],
-  },
-  {
-    label: "Related firewall evidence",
-    items: [
-      {
-        label: "Application rule evidence",
-        description: "AZFWApplicationRule · FQDN-bearing record",
-        state: sourceState("application-rule"),
-      },
-      {
-        label: "TCP flow trace evidence",
-        description: "AZFWFlowTrace · TCP port 53 record",
-        state: sourceState("flow-trace"),
-      },
-      {
-        label: "NAT rule evidence",
-        description: "AZFWNatRule · original or translated port 53 record",
-        state: sourceState("nat-rule"),
-      },
-    ] satisfies ReadinessItem[],
-  },
-]);
+function sourceIndicators(source: DnsReadinessSourceKind): ReadinessIndicator[] {
+  return readinessColumns.map(({ label, storage }) => sourceIndicator(source, storage, label));
+}
+
+function readinessMapping(
+  resourceSpecificTable: string,
+  azureDiagnosticsCategory: string,
+  queryScope?: string,
+): string {
+  const storageMapping =
+    resourceSpecificTable === azureDiagnosticsCategory
+      ? resourceSpecificTable
+      : `${resourceSpecificTable} / ${azureDiagnosticsCategory}`;
+  return queryScope ? `${storageMapping} · ${queryScope}` : storageMapping;
+}
+
+function readinessItem(
+  friendlyLabel: string,
+  source: DnsReadinessSourceKind,
+  resourceSpecificTable: string,
+  azureDiagnosticsCategory: string,
+  queryScope?: string,
+): ReadinessItem {
+  return {
+    label: friendlyLabel,
+    mapping: readinessMapping(resourceSpecificTable, azureDiagnosticsCategory, queryScope),
+    indicators: sourceIndicators(source),
+  };
+}
+
+const readinessGroupLabels: Record<DnsReadinessSourceGroup, string> = {
+  dns: "DNS sources",
+  general: "General firewall logs",
+};
+const readinessGroups = computed(() =>
+  (["dns", "general"] as const).map((group) => ({
+    label: readinessGroupLabels[group],
+    items: DNS_READINESS_SOURCE_DEFINITIONS.filter((definition) => definition.group === group).map(
+      (definition) =>
+        readinessItem(
+          definition.friendlyLabel,
+          definition.source,
+          definition.resourceSpecificTable,
+          definition.azureDiagnosticsCategory,
+          "queryScope" in definition ? definition.queryScope : undefined,
+        ),
+    ),
+  })),
+);
+const resourceSpecificAvailable = computed(() =>
+  hasDnsReadinessData(props.dnsReadiness, "resource-specific"),
+);
+const azureDiagnosticsAvailable = computed(() =>
+  hasDnsReadinessData(props.dnsReadiness, "azure-diagnostics"),
+);
+const queryStorageSelectionEnabled = computed(
+  () => resourceSpecificAvailable.value && azureDiagnosticsAvailable.value,
+);
+const queryStorageItems: Array<{ label: string; value: LogAnalyticsStorageKind }> = [
+  { label: "Dedicated tables", value: "resource-specific" },
+  { label: "AzureDiagnostics", value: "azure-diagnostics" },
+];
+const readinessSourceCount = DNS_READINESS_SOURCE_DEFINITIONS.length;
+const resourceSpecificReadyCount = computed(
+  () =>
+    props.dnsReadiness.filter(
+      (item) => item.storage === "resource-specific" && item.status === "success",
+    ).length,
+);
+const azureDiagnosticsReadyCount = computed(
+  () =>
+    props.dnsReadiness.filter(
+      (item) =>
+        item.storage === "azure-diagnostics" && item.status === "success" && item.sampleCount > 0,
+    ).length,
+);
 </script>
 
 <template>
@@ -432,60 +495,118 @@ const readinessGroups = computed(() => [
     <section
       v-if="!temporary || workspaceValid"
       aria-labelledby="dns-readiness-heading"
-      class="rounded-md border border-brand-blue-300 bg-brand-blue-50/60 p-3 dark:border-brand-blue-800 dark:bg-brand-blue-950/30"
+      class="space-y-3 border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800"
     >
-      <div class="flex items-start gap-2">
-        <UIcon
-          name="i-lucide-info"
-          class="mt-0.5 size-4 shrink-0 text-brand-blue-600 dark:text-brand-blue-300"
-        />
-        <div class="min-w-0 flex-1 space-y-3">
-          <div>
-            <h3 id="dns-readiness-heading" class="text-xs font-semibold">DNS source readiness</h3>
-            <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-              Checks whether related tables have entries.
-            </p>
-            <p
-              v-if="dnsReadinessStatus === 'loading'"
-              role="status"
-              class="text-xs text-brand-blue-700 dark:text-brand-blue-300"
-            >
-              Checking selected workspace…
-            </p>
-            <p
-              v-else-if="dnsReadinessStatus === 'error'"
-              role="alert"
-              class="text-xs text-red-700 dark:text-red-300"
-            >
-              DNS source readiness check failed.
-            </p>
-          </div>
-          <div v-for="group in readinessGroups" :key="group.label" class="space-y-2">
-            <h4 class="text-xs font-semibold text-brand-gray-700 dark:text-brand-gray-200">
-              {{ group.label }}
-            </h4>
-            <ul class="space-y-2">
-              <li v-for="item in group.items" :key="item.label" class="flex items-start gap-2">
-                <UIcon
-                  :name="readinessStyle[item.state].icon"
-                  :class="['mt-0.5 size-4 shrink-0', readinessStyle[item.state].text]"
-                />
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-baseline justify-between gap-x-2">
-                    <span class="text-xs font-medium">{{ item.label }}</span>
-                    <span :class="['text-xs', readinessStyle[item.state].text]">
-                      {{ readinessStyle[item.state].label }}
-                    </span>
-                  </div>
-                  <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                    {{ item.description }}
-                  </p>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </div>
+      <div>
+        <h3 id="dns-readiness-heading" class="text-xs font-semibold">Source readiness</h3>
+        <p
+          v-if="dnsReadinessStatus === 'success'"
+          class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
+        >
+          Dedicated tables {{ resourceSpecificReadyCount }}/{{ readinessSourceCount }} available ·
+          AzureDiagnostics {{ azureDiagnosticsReadyCount }}/{{ readinessSourceCount }} with data.
+        </p>
+        <p
+          v-else-if="dnsReadinessStatus === 'loading'"
+          role="status"
+          class="text-xs text-brand-blue-700 dark:text-brand-blue-300"
+        >
+          Checking selected workspace…
+        </p>
+        <p
+          v-else-if="dnsReadinessStatus === 'error'"
+          role="alert"
+          class="text-xs text-red-700 dark:text-red-300"
+        >
+          Source readiness check failed.
+        </p>
+        <p v-else class="text-xs text-brand-gray-500 dark:text-brand-gray-400">
+          Waiting for workspace check.
+        </p>
       </div>
+
+      <div class="flex items-center gap-3">
+        <label for="query-storage" class="shrink-0 text-xs font-semibold">Query source</label>
+        <USelect
+          id="query-storage"
+          v-model="queryStorage"
+          :items="queryStorageItems"
+          :disabled="!queryStorageSelectionEnabled"
+          aria-label="Query source"
+          size="sm"
+          class="min-w-0 flex-1"
+        />
+      </div>
+
+      <table class="w-full table-fixed text-xs">
+        <caption class="sr-only">
+          Source availability in dedicated tables and AzureDiagnostics
+        </caption>
+        <colgroup>
+          <col />
+          <col class="w-14" />
+          <col class="w-26" />
+        </colgroup>
+        <thead>
+          <tr class="text-brand-gray-500 dark:text-brand-gray-400">
+            <th scope="col" class="pb-1 text-left text-xs font-medium">Source</th>
+            <th scope="col" class="pb-1 text-center text-xs font-medium">Table</th>
+            <th scope="col" class="pb-1 text-center text-xs font-medium">AzureDiagnostics</th>
+          </tr>
+        </thead>
+        <tbody v-for="group in readinessGroups" :key="group.label">
+          <tr>
+            <th
+              scope="rowgroup"
+              colspan="3"
+              class="pb-1 pt-2 text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
+            >
+              <span class="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  class="h-px flex-1 bg-brand-gray-200 dark:bg-brand-gray-800"
+                />
+                <span>{{ group.label }}</span>
+                <span
+                  aria-hidden="true"
+                  class="h-px flex-1 bg-brand-gray-200 dark:bg-brand-gray-800"
+                />
+              </span>
+            </th>
+          </tr>
+          <tr v-for="item in group.items" :key="item.label">
+            <th scope="row" class="py-1.5 pr-2 text-left align-top font-medium">
+              <span class="block leading-4">{{ item.label }}</span>
+              <span
+                class="block break-words font-mono text-[0.6875rem] leading-4 font-normal text-brand-gray-500 dark:text-brand-gray-400"
+              >
+                {{ item.mapping }}
+              </span>
+            </th>
+            <td
+              v-for="indicator in item.indicators"
+              :key="indicator.label"
+              class="py-1.5 text-center align-top"
+            >
+              <span
+                role="img"
+                :aria-label="`${indicator.label}: ${indicator.statusLabel}`"
+                :title="`${indicator.label}: ${indicator.statusLabel}`"
+                :class="[
+                  'inline-flex size-5 items-center justify-center',
+                  readinessIndicatorStyle[indicator.state].text,
+                ]"
+              >
+                <UIcon
+                  :name="readinessIndicatorStyle[indicator.state].icon"
+                  aria-hidden="true"
+                  :class="['size-3.5', readinessIndicatorStyle[indicator.state].iconClass]"
+                />
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </section>
   </div>
 </template>

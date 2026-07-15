@@ -11,6 +11,7 @@ import type { FirewallLogRecord } from "../../app/types/firewall";
 import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
+  LogAnalyticsStorageKind,
 } from "../../shared/types/logAnalytics";
 
 function createRecord(id: string): FirewallLogRecord {
@@ -44,6 +45,10 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
+function createStorage(value: LogAnalyticsStorageKind = "resource-specific") {
+  return ref<LogAnalyticsStorageKind>(value);
+}
+
 describe("Log analysis client", () => {
   it("creates and validates local date ranges", () => {
     const range = createDefaultLogAnalysisDateRange(new Date("2026-07-10T12:00:00.000Z"));
@@ -66,6 +71,7 @@ describe("Log analysis client", () => {
     const filters = reactive(createDefaultLogFilters());
     const queryLimit = ref(1_000);
     const sort = reactive(createDefaultLogSort());
+    const storage = createStorage();
     const onBeforeReplace = vi.fn();
     const scope = effectScope();
     const query = scope.run(() =>
@@ -79,6 +85,7 @@ describe("Log analysis client", () => {
           return response(`query-${requests.length}`);
         },
         sort,
+        storage,
       }),
     );
 
@@ -91,6 +98,7 @@ describe("Log analysis client", () => {
     await query.run();
     expect(requests).toHaveLength(1);
     expect(requests[0]?.limit).toBe(1_000);
+    expect(requests[0]?.storage).toBe("resource-specific");
     expect(query.hasRun.value).toBe(true);
     expect(query.records.value.map((record) => record.id)).toEqual(["query-1"]);
 
@@ -145,6 +153,45 @@ describe("Log analysis client", () => {
     vi.useRealTimers();
   });
 
+  it("clears results and sends the newly selected storage", async () => {
+    const requests: LogAnalyticsQueryRequest[] = [];
+    const storage = createStorage();
+    const scope = effectScope();
+    const query = scope.run(() =>
+      useLogAnalyticsQuery({
+        active: ref(true),
+        filters: reactive(createDefaultLogFilters()),
+        queryLimit: ref(1_000),
+        request: async (body) => {
+          requests.push(body);
+          return response(`query-${requests.length}`);
+        },
+        sort: reactive(createDefaultLogSort()),
+        storage,
+      }),
+    );
+
+    expect(query).toBeDefined();
+    if (!query) {
+      return;
+    }
+
+    await query.run();
+    expect(query.records.value).toHaveLength(1);
+    storage.value = "azure-diagnostics";
+    await nextTick();
+
+    expect(query.records.value).toEqual([]);
+    expect(query.hasRun.value).toBe(false);
+
+    await query.run();
+    expect(requests.map((request) => request.storage)).toEqual([
+      "resource-specific",
+      "azure-diagnostics",
+    ]);
+    scope.stop();
+  });
+
   it("initializes range when Log Analysis first becomes active", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 10, 10, 0));
@@ -157,6 +204,7 @@ describe("Log analysis client", () => {
         queryLimit: ref(1_000),
         request: async () => response("unused"),
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 
@@ -198,6 +246,7 @@ describe("Log analysis client", () => {
         queryLimit: ref(1_000),
         request: () => requests[requestIndex++]!.promise,
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 
@@ -233,6 +282,7 @@ describe("Log analysis client", () => {
           return requests.length === 1 ? initial.promise : response("refined");
         },
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 
@@ -275,6 +325,7 @@ describe("Log analysis client", () => {
           });
         },
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 
@@ -306,6 +357,7 @@ describe("Log analysis client", () => {
         queryLimit: ref(1_000),
         request,
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 
@@ -336,7 +388,14 @@ describe("Log analysis client", () => {
     const request = vi.fn(async () => response("unused"));
     const sort = reactive(createDefaultLogSort());
     const scope = effectScope();
-    useLogAnalyticsQuery({ active, filters, queryLimit: ref(1_000), request, sort });
+    useLogAnalyticsQuery({
+      active,
+      filters,
+      queryLimit: ref(1_000),
+      request,
+      sort,
+      storage: createStorage(),
+    });
 
     filters.action = "Deny";
     sort.key = "action";
@@ -368,6 +427,7 @@ describe("Log analysis client", () => {
           return response(requestCount === 1 ? "initial" : "retried");
         },
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 
@@ -417,6 +477,7 @@ describe("Log analysis client", () => {
           return secondRequest.promise;
         },
         sort: reactive(createDefaultLogSort()),
+        storage: createStorage(),
       }),
     );
 

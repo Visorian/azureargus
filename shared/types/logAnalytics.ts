@@ -18,11 +18,14 @@ export interface LogAnalyticsSort {
   direction: FirewallLogSortDirection;
 }
 
+export type LogAnalyticsStorageKind = "resource-specific" | "azure-diagnostics";
+
 export interface LogAnalyticsQueryRequest {
   from: string;
   to: string;
   filters: LogAnalyticsFilters;
   limit: number;
+  storage: LogAnalyticsStorageKind;
   sort: LogAnalyticsSort;
 }
 

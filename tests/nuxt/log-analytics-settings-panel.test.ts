@@ -33,6 +33,7 @@ function createProps() {
     dnsReadinessStatus: "idle" as const,
     lens: "all-logs" as const,
     queryLimit: 1_000,
+    queryStorage: "resource-specific" as const,
     temporary: false,
     temporaryAccessError: null,
     temporaryAccessStatus: "idle" as const,
@@ -47,6 +48,7 @@ function createProps() {
     workspaceOptions: [],
     "onUpdate:tenantId": () => undefined,
     "onUpdate:queryLimit": () => undefined,
+    "onUpdate:queryStorage": () => undefined,
     "onUpdate:workspaceId": () => undefined,
   };
 }
@@ -314,56 +316,248 @@ describe("LogAnalyticsSettingsPanel", () => {
     });
 
     expect(wrapper.text()).toContain("Query configured Azure Firewall workspace");
-    expect(wrapper.text()).toContain("DNS source readiness");
-    expect(wrapper.text()).toContain("Structured DNS proxy logs");
-    expect(wrapper.text()).toContain("DNS flow trace logs");
-    expect(wrapper.text()).toContain("Internal FQDN resolution failures");
-    expect(wrapper.text()).toContain("DNS transport logs");
-    expect(wrapper.text()).toContain("Related firewall evidence");
-    expect(wrapper.text()).toContain("Application rule evidence");
-    expect(wrapper.text()).toContain("TCP flow trace evidence");
-    expect(wrapper.text()).toContain("NAT rule evidence");
+    expect(wrapper.text()).toContain("Source readiness");
+    const readinessRows: Array<[string, string]> = [
+      ["Structured DNS proxy logs", "AZFWDnsQuery"],
+      ["DNS flow trace logs", "AZFWDnsFlowTrace / AZFWDnsAdditional"],
+      [
+        "Internal FQDN resolution failures",
+        "AZFWInternalFqdnResolutionFailure / AZFWFqdnResolveFailure",
+      ],
+      ["Network rule logs", "AZFWNetworkRule · TCP/UDP port 53"],
+      ["Application rule logs", "AZFWApplicationRule · FQDN-bearing records"],
+      ["TCP flow trace logs", "AZFWFlowTrace · TCP port 53"],
+      ["NAT rule logs", "AZFWNatRule · port 53"],
+    ];
+    for (const [label, mapping] of readinessRows) {
+      const row = wrapper.findAll("tr").find((candidate) => candidate.text().includes(label));
+      expect(row?.text()).toContain(mapping);
+    }
+    const readinessGroups = wrapper.findAll("tbody");
+    expect(readinessGroups[0]?.text()).toContain("DNS sources");
+    expect(readinessGroups[0]?.text()).not.toContain("Network rule logs");
+    expect(readinessGroups[1]?.text()).toContain("General firewall logs");
+    expect(readinessGroups[1]?.text()).toContain("Network rule logs");
+    expect(wrapper.text()).toContain("General firewall logs");
     expect(wrapper.text()).not.toContain("Legacy DNS proxy logs");
-    expect(wrapper.text()).toContain("Not checked");
-    expect(wrapper.text()).toContain("Checks whether related tables have entries.");
-    expect(wrapper.text()).not.toContain("AzureArgus checks table queryability only");
+    expect(wrapper.findAll('th[scope="col"]').map((header) => header.text())).toEqual([
+      "Source",
+      "Table",
+      "AzureDiagnostics",
+    ]);
+    const initialIndicators = wrapper.findAll("td [aria-label]");
+    expect(initialIndicators).toHaveLength(14);
+    expect(initialIndicators.every((indicator) => indicator.attributes("role") === "img")).toBe(
+      true,
+    );
+    expect(
+      initialIndicators.every((indicator) =>
+        indicator.attributes("aria-label")?.endsWith(": not checked"),
+      ),
+    ).toBe(true);
+    expect(wrapper.text()).toContain("Waiting for workspace check.");
+    const queryStorageSelect = wrapper.getComponent({ name: "USelect" });
+    expect(queryStorageSelect.props("modelValue")).toBe("resource-specific");
+    expect(queryStorageSelect.props("disabled")).toBe(true);
 
     await wrapper.setProps({ dnsReadinessStatus: "loading" });
     expect(wrapper.get('[role="status"]').text()).toContain("Checking selected workspace");
+    expect(
+      wrapper
+        .findAll("td [aria-label]")
+        .every((indicator) => indicator.attributes("aria-label")?.endsWith(": checking")),
+    ).toBe(true);
 
     await wrapper.setProps({ dnsReadinessStatus: "error" });
-    expect(wrapper.get('[role="alert"]').text()).toContain("DNS source readiness check failed");
+    expect(wrapper.get('[role="alert"]').text()).toContain("Source readiness check failed");
 
     await wrapper.setProps({
       dnsReadinessStatus: "success",
       dnsReadiness: [
-        { source: "proxy-structured", status: "success", sampleCount: 2 },
-        { source: "dns-flow-trace", status: "success", sampleCount: 1 },
-        { source: "internal-fqdn-failure", status: "success", sampleCount: 0 },
-        { source: "network-rule", status: "forbidden", sampleCount: null },
-        { source: "application-rule", status: "success", sampleCount: 2 },
-        { source: "flow-trace", status: "failed", sampleCount: null },
-        { source: "nat-rule", status: "success", sampleCount: 0 },
+        {
+          source: "proxy-structured",
+          storage: "resource-specific",
+          status: "success",
+          sampleCount: 2,
+        },
+        {
+          source: "proxy-structured",
+          storage: "azure-diagnostics",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "dns-flow-trace",
+          storage: "resource-specific",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "dns-flow-trace",
+          storage: "azure-diagnostics",
+          status: "success",
+          sampleCount: 2,
+        },
+        {
+          source: "internal-fqdn-failure",
+          storage: "resource-specific",
+          status: "success",
+          sampleCount: 2,
+        },
+        {
+          source: "internal-fqdn-failure",
+          storage: "azure-diagnostics",
+          status: "success",
+          sampleCount: 2,
+        },
+        {
+          source: "network-rule",
+          storage: "resource-specific",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "network-rule",
+          storage: "azure-diagnostics",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "application-rule",
+          storage: "resource-specific",
+          status: "forbidden",
+          sampleCount: null,
+        },
+        {
+          source: "application-rule",
+          storage: "azure-diagnostics",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "flow-trace",
+          storage: "resource-specific",
+          status: "failed",
+          sampleCount: null,
+        },
+        {
+          source: "flow-trace",
+          storage: "azure-diagnostics",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "nat-rule",
+          storage: "resource-specific",
+          status: "missing",
+          sampleCount: null,
+        },
+        {
+          source: "nat-rule",
+          storage: "azure-diagnostics",
+          status: "missing",
+          sampleCount: null,
+        },
       ],
     });
-    expect(wrapper.text()).toContain("2+ records");
-    expect(wrapper.text()).toContain("1 record");
-    expect(wrapper.text()).toContain("0 records");
-    expect(wrapper.text()).toContain("Access denied");
-    expect(wrapper.text()).toContain("Check failed");
-    expect(wrapper.text()).toContain("AZFWDnsQuery");
-    expect(wrapper.text()).toContain("AZFWDnsFlowTrace");
-    expect(wrapper.text()).toContain("AZFWInternalFqdnResolutionFailure");
-    expect(wrapper.text()).toContain("AZFWNetworkRule · TCP or UDP port 53 record");
-    expect(wrapper.text()).toContain("AZFWApplicationRule · FQDN-bearing record");
-    expect(wrapper.text()).toContain("AZFWFlowTrace · TCP port 53 record");
-    expect(wrapper.text()).toContain("AZFWNatRule · original or translated port 53 record");
-    expect(wrapper.text()).not.toContain("Partial");
+    function readinessIndicators(label: string) {
+      const row = wrapper.findAll("tr").find((item) => item.text().includes(label));
+      if (!row) throw new Error(`Readiness row not found: ${label}`);
+      return row.findAll("[aria-label]").map((indicator) => indicator.attributes("aria-label"));
+    }
+
+    expect(wrapper.text()).toContain("Dedicated tables 2/7 available");
+    expect(wrapper.text()).toContain("AzureDiagnostics 2/7 with data");
+    expect(readinessIndicators("Structured DNS proxy logs")).toEqual([
+      "Dedicated table: available",
+      "AzureDiagnostics: not found",
+    ]);
+    expect(readinessIndicators("DNS flow trace logs")).toEqual([
+      "Dedicated table: not found",
+      "AzureDiagnostics: available",
+    ]);
+    expect(readinessIndicators("Internal FQDN resolution failures")).toEqual([
+      "Dedicated table: available",
+      "AzureDiagnostics: available",
+    ]);
+    expect(readinessIndicators("Network rule logs")).toEqual([
+      "Dedicated table: not found",
+      "AzureDiagnostics: not found",
+    ]);
+    expect(readinessIndicators("Application rule logs")).toEqual([
+      "Dedicated table: access denied",
+      "AzureDiagnostics: not found",
+    ]);
+    expect(readinessIndicators("TCP flow trace logs")).toEqual([
+      "Dedicated table: check failed",
+      "AzureDiagnostics: not found",
+    ]);
+    expect(readinessIndicators("NAT rule logs")).toEqual([
+      "Dedicated table: not found",
+      "AzureDiagnostics: not found",
+    ]);
+    expect(queryStorageSelect.props("disabled")).toBe(true);
 
     await wrapper.setProps({ lens: "dns-troubleshooting" });
     expect(wrapper.text()).toContain("Query DNS diagnostics");
-    expect(wrapper.text()).toContain("DNS source readiness");
-    expect(wrapper.text()).toContain("2+ records");
+    expect(wrapper.text()).toContain("Source readiness");
+    expect(wrapper.text()).toContain("Table");
+  });
+
+  it("enables query storage selection only when both stores contain records", async () => {
+    const wrapper = await mountSuspended(LogAnalyticsSettingsPanel, {
+      props: {
+        ...createProps(),
+        dnsReadinessStatus: "success",
+        dnsReadiness: [
+          {
+            source: "network-rule",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "network-rule",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 0,
+          },
+        ],
+      },
+    });
+    const queryStorageSelect = wrapper.getComponent({ name: "USelect" });
+
+    expect(queryStorageSelect.props("disabled")).toBe(true);
+    const networkRuleRow = wrapper
+      .findAll("tr")
+      .find((item) => item.text().includes("Network rule logs"));
+    expect(
+      networkRuleRow
+        ?.findAll("[aria-label]")
+        .map((indicator) => indicator.attributes("aria-label")),
+    ).toEqual(["Dedicated table: available", "AzureDiagnostics: no matching records"]);
+    await wrapper.setProps({
+      dnsReadiness: [
+        {
+          source: "network-rule",
+          storage: "resource-specific",
+          status: "success",
+          sampleCount: 2,
+        },
+        {
+          source: "network-rule",
+          storage: "azure-diagnostics",
+          status: "success",
+          sampleCount: 1,
+        },
+      ],
+    });
+    expect(queryStorageSelect.props("disabled")).toBe(false);
+
+    queryStorageSelect.vm.$emit("update:modelValue", "azure-diagnostics");
+    expect(wrapper.emitted("update:queryStorage")?.[0]).toEqual(["azure-diagnostics"]);
+    await wrapper.setProps({ queryStorage: "azure-diagnostics" });
+    expect(queryStorageSelect.props("modelValue")).toBe("azure-diagnostics");
   });
 
   it("shows DNS readiness after a temporary workspace is selected", async () => {
@@ -374,13 +568,13 @@ describe("LogAnalyticsSettingsPanel", () => {
       },
     });
 
-    expect(wrapper.text()).not.toContain("DNS source readiness");
+    expect(wrapper.text()).not.toContain("Source readiness");
 
     await wrapper.setProps({
       workspaceId: "33333333-3333-4333-8333-333333333333",
     });
-    expect(wrapper.text()).toContain("DNS source readiness");
-    expect(wrapper.text()).toContain("Checks whether related tables have entries.");
+    expect(wrapper.text()).toContain("Source readiness");
+    expect(wrapper.text()).toContain("Waiting for workspace check.");
   });
 
   it("exposes bounded query result limit in managed and temporary modes", async () => {

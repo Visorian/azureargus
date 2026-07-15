@@ -325,12 +325,36 @@ test("managed Event Hub uses configured server stream without exposing credentia
   ).toBeVisible();
 });
 
-test("managed Log Analytics-only deployment starts in configured query mode", async ({ page }) => {
+test("managed Log Analytics-only deployment shows normalized AzureDiagnostics rows", async ({
+  page,
+}) => {
   await mockManagedDeployment(page, { eventHub: false, logAnalytics: true });
+  await page.route("**/api/log-analytics/dns/readiness", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        readiness: [
+          {
+            source: "network-rule",
+            storage: "resource-specific",
+            status: "missing",
+            sampleCount: null,
+          },
+          {
+            source: "network-rule",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+        ],
+      },
+    });
+  });
   await page.route("**/api/log-analytics/query", async (route) => {
     const requestBody = route.request().postDataJSON();
     expect(requestBody).not.toHaveProperty("workspaceId");
     expect(requestBody.limit).toBe(2_000);
+    expect(requestBody.storage).toBe("azure-diagnostics");
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -339,11 +363,20 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
           {
             action: "Allow",
             category: "AZFWNetworkRule",
-            id: "managed-query-record",
-            message: "managed-query-record",
-            protocol: "TCP",
-            raw: {},
-            searchableText: "managed-query-record",
+            destinationIp: "192.0.2.53",
+            destinationPort: "53",
+            id: "managed-azure-diagnostics-query-record",
+            message: "Allow UDP from 192.0.2.10:53607 to 192.0.2.53:53",
+            policy: "policy-1",
+            protocol: "UDP",
+            raw: { Category: "AZFWNetworkRule" },
+            rule: "rule-1",
+            ruleCollection: "collection-1",
+            ruleCollectionGroup: "group-1",
+            searchableText:
+              "azfwnetworkrule allow udp 192.0.2.10 53607 192.0.2.53 53 policy-1 group-1 collection-1 rule-1",
+            sourceIp: "192.0.2.10",
+            sourcePort: "53607",
             timestamp: "2026-07-12T14:30:00.000Z",
           },
         ],
@@ -361,6 +394,9 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
   );
   await expect(page.getByRole("textbox", { name: "Workspace ID*" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Connect to Azure" })).toHaveCount(0);
+  const sourceSelect = page.getByRole("combobox", { name: "Query source" });
+  await expect(sourceSelect).toContainText("AzureDiagnostics");
+  await expect(sourceSelect).toBeDisabled();
   const runQuery = page.getByRole("button", { name: "Run query" });
   await expect(
     page.getByRole("complementary").getByRole("button", { name: "Run query" }),
@@ -369,9 +405,18 @@ test("managed Log Analytics-only deployment starts in configured query mode", as
   await page.getByRole("spinbutton", { name: "Query result limit" }).fill("2000");
   await runQuery.click();
   await expect(page.getByText("1 visible", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
-  ).toBeVisible();
+  const normalizedRow = page
+    .getByRole("table", { name: "Firewall logs" })
+    .getByRole("row")
+    .filter({ hasText: "192.0.2.10" });
+  await expect(normalizedRow).toBeVisible();
+  await expect(normalizedRow).toContainText("AZFWNetworkRule");
+  await expect(normalizedRow).toContainText("Allow");
+  await expect(normalizedRow).toContainText("UDP");
+  await expect(normalizedRow).toContainText("53607");
+  await expect(normalizedRow).toContainText("192.0.2.53");
+  await expect(normalizedRow).toContainText("53");
+  await expect(normalizedRow).toContainText("rule-1");
 });
 
 test("managed DNS lens queries explicitly and shows decoded response size", async ({ page }) => {
@@ -420,6 +465,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   const transportObservation = {
     id: "dns-transport:network-rule:0",
     timestamp: "2026-07-12T14:29:00.000Z",
+    logAnalyticsStorage: "azure-diagnostics",
     source: "network-rule",
     stage: "transport",
     path: "direct",
@@ -440,13 +486,90 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
       contentType: "application/json",
       json: {
         readiness: [
-          { source: "proxy-structured", status: "success", sampleCount: 2 },
-          { source: "dns-flow-trace", status: "success", sampleCount: 2 },
-          { source: "internal-fqdn-failure", status: "success", sampleCount: 2 },
-          { source: "network-rule", status: "success", sampleCount: 2 },
-          { source: "application-rule", status: "success", sampleCount: 2 },
-          { source: "flow-trace", status: "success", sampleCount: 2 },
-          { source: "nat-rule", status: "success", sampleCount: 2 },
+          {
+            source: "proxy-structured",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "proxy-structured",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "dns-flow-trace",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "dns-flow-trace",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "internal-fqdn-failure",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "internal-fqdn-failure",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "network-rule",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "network-rule",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "application-rule",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "application-rule",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "flow-trace",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "flow-trace",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "nat-rule",
+            storage: "resource-specific",
+            status: "success",
+            sampleCount: 2,
+          },
+          {
+            source: "nat-rule",
+            storage: "azure-diagnostics",
+            status: "success",
+            sampleCount: 2,
+          },
         ],
       },
     });
@@ -467,6 +590,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
         source: "",
       },
       limit: 1_000,
+      storage: "resource-specific",
     });
     await route.fulfill({
       contentType: "application/json",
@@ -562,11 +686,29 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await expect(
     page.getByTestId("log-query-row").getByRole("button", { name: "Run query" }),
   ).toBeVisible();
-  await expect(page.getByText("2+ records", { exact: true })).toHaveCount(7);
+  await expect(page.getByRole("heading", { name: "Source readiness" })).toBeVisible();
   await expect(page.getByText("Legacy DNS proxy logs", { exact: true })).toHaveCount(0);
   await expect(page.getByText("DNS flow trace logs", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("AZFWDnsFlowTrace / AZFWDnsAdditional", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Internal FQDN resolution failures", { exact: true })).toBeVisible();
-  await expect(page.getByText("Related firewall evidence", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("AZFWInternalFqdnResolutionFailure / AZFWFqdnResolveFailure", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Network rule logs", { exact: true })).toBeVisible();
+  await expect(page.getByText("AZFWNetworkRule · TCP/UDP port 53", { exact: true })).toBeVisible();
+  await expect(page.getByText("General firewall logs", { exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Dedicated table: available" }).first()).toBeVisible();
+  const readinessTable = page.getByRole("table", {
+    name: "Source availability in dedicated tables and AzureDiagnostics",
+  });
+  expect(
+    await readinessTable.evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
+  const sourceSelect = page.getByRole("combobox", { name: "Query source" });
+  await expect(sourceSelect).toBeEnabled();
+  await expect(sourceSelect).toContainText("Dedicated tables");
   expect(readinessRequests).toBe(1);
   expect(listRequests).toBe(0);
   expect(detailRequests).toBe(0);
@@ -586,6 +728,15 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
     page.getByText("Some DNS sources could not be queried.", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("DNS transport query failed", { exact: true })).toBeVisible();
+
+  await sourceSelect.click();
+  await page.getByRole("option", { name: "AzureDiagnostics" }).click();
+  await expect(sourceSelect).toContainText("AzureDiagnostics");
+  await expect(page.getByText("Run DNS query to load entries.")).toBeVisible();
+  expect(listRequests).toBe(1);
+  await sourceSelect.click();
+  await page.getByRole("option", { name: "Dedicated tables" }).click();
+  await expect(sourceSelect).toContainText("Dedicated tables");
 
   await page.getByRole("button", { name: "Run query" }).click();
   expect(readinessRequests).toBe(1);

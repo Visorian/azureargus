@@ -3,6 +3,7 @@ import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } 
 import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
+  LogAnalyticsStorageKind,
 } from "#shared/types/logAnalytics";
 import {
   createDefaultLogAnalysisDateRange,
@@ -27,6 +28,7 @@ interface UseLogAnalyticsQueryOptions {
   onError?: (message: string) => void;
   request?: QueryRequest;
   sort: FirewallLogSortState;
+  storage: Readonly<Ref<LogAnalyticsStorageKind>>;
   draftRange?: LogAnalysisDateRange;
 }
 
@@ -149,6 +151,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
       },
       from: range.from,
       limit: options.queryLimit.value,
+      storage: options.storage.value,
       sort: {
         direction: options.sort.direction,
         key: options.sort.key,
@@ -311,6 +314,8 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
       abort();
     }
   });
+
+  watch(options.storage, clear);
 
   onScopeDispose(abort);
 

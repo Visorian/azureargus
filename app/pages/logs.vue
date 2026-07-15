@@ -13,6 +13,7 @@ import {
 import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
+  LogAnalyticsStorageKind,
 } from "#shared/types/logAnalytics";
 import type {
   AzureAccessibleTenant,
@@ -39,6 +40,7 @@ import {
 } from "~/utils/logAnalysis";
 import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
 import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from "#shared/utils/logAnalytics";
+import { hasDnsReadinessData } from "#shared/utils/dnsReadiness";
 
 definePageMeta({
   layout: "application",
@@ -246,6 +248,24 @@ const logFilters = reactive(createDefaultLogFilters());
 const logSort = reactive(createDefaultLogSort());
 const logDraftRange = reactive(createDefaultLogAnalysisDateRange());
 const logAnalyticsQueryLimit = ref(DEFAULT_LOG_ANALYTICS_QUERY_LIMIT);
+const logAnalyticsStorage = ref<LogAnalyticsStorageKind>("resource-specific");
+watch(
+  dnsReadinessTarget,
+  () => {
+    logAnalyticsStorage.value = "resource-specific";
+  },
+  { flush: "sync" },
+);
+watch([dnsSourceReadiness.readiness, dnsSourceReadiness.status], ([readiness, status]) => {
+  if (status !== "success") return;
+  const resourceSpecificHasData = hasDnsReadinessData(readiness, "resource-specific");
+  const azureDiagnosticsHasData = hasDnsReadinessData(readiness, "azure-diagnostics");
+  if (azureDiagnosticsHasData && !resourceSpecificHasData) {
+    logAnalyticsStorage.value = "azure-diagnostics";
+  } else if (!azureDiagnosticsHasData) {
+    logAnalyticsStorage.value = "resource-specific";
+  }
+});
 const logQuery = useLogAnalyticsQuery({
   active: allLogsLogAnalysisActive,
   draftRange: logDraftRange,
@@ -274,6 +294,7 @@ const logQuery = useLogAnalyticsQuery({
     return requestTemporaryLogAnalytics(body, signal, accessToken, workspaceId);
   },
   sort: logSort,
+  storage: logAnalyticsStorage,
 });
 const {
   canApplyFilters: logCanApplyFilters,
@@ -338,6 +359,7 @@ const dns = useDnsTroubleshooting({
   receiver,
   requestDetail: requestDnsDetail,
   requestList: requestDnsList,
+  storage: logAnalyticsStorage,
 });
 const dnsDetailOpen = computed({
   get: () => dns.selectedEntry.value !== null,
@@ -1183,6 +1205,7 @@ function statusColor(status: string) {
             @change.capture="commitLogAnalysisInteraction"
           >
             <LogsLogAnalyticsSettingsPanel
+              v-model:query-storage="logAnalyticsStorage"
               v-model:tenant-id="temporaryTenantId"
               v-model:workspace-id="temporaryWorkspaceId"
               v-model:query-limit="logAnalyticsQueryLimit"

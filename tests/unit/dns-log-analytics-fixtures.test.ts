@@ -3,12 +3,58 @@ import {
   executeDnsDetailQuery,
   executeDnsListQuery,
 } from "../../server/utils/dnsLogAnalyticsQuery";
+import { createDnsDetailSelector } from "../../shared/utils/dns";
 import structuredFixture from "../fixtures/dns/log-analytics-azfwdnsquery.sanitized.json";
+import azureDiagnosticsNetworkFixture from "../fixtures/dns/log-analytics-azurediagnostics-azfwnetworkrule.sanitized.json";
 import networkFixture from "../fixtures/dns/log-analytics-azfwnetworkrule.sanitized.json";
 
 const workspaceId = "33333333-3333-4333-8333-333333333333";
 const STRUCTURED_QUERY_PATTERN = /^AZFWDnsQuery\n/;
 const NETWORK_QUERY_PATTERN = /^AZFWNetworkRule\n/;
+const AZURE_DIAGNOSTICS_QUERY_PATTERN = /^AzureDiagnostics\n/;
+
+function normalizedAzureDiagnosticsNetworkFixture() {
+  const table = azureDiagnosticsNetworkFixture.tables[0]!;
+  return {
+    tables: [
+      {
+        name: table.name,
+        columns: [
+          { name: "TimeGenerated", type: "datetime" },
+          { name: "Category", type: "string" },
+          { name: "ResourceId", type: "string" },
+          { name: "Action", type: "string" },
+          { name: "ActionReason", type: "string" },
+          { name: "Protocol", type: "string" },
+          { name: "SourceIp", type: "string" },
+          { name: "SourcePort", type: "string" },
+          { name: "DestinationIp", type: "string" },
+          { name: "DestinationPort", type: "string" },
+          { name: "Policy", type: "string" },
+          { name: "RuleCollectionGroup", type: "string" },
+          { name: "RuleCollection", type: "string" },
+          { name: "Rule", type: "string" },
+        ],
+        rows: table.rows.map((row) => [
+          row[0],
+          "AZFWNetworkRule",
+          row[1],
+          row[2],
+          row[3] ?? "",
+          row[4],
+          row[5],
+          String(row[6]),
+          row[7],
+          String(row[8]),
+          row[9],
+          row[10],
+          row[11],
+          row[12],
+        ]),
+      },
+    ],
+  };
+}
 
 function readQuery(init?: RequestInit) {
   if (typeof init?.body !== "string") throw new Error("Expected JSON request body");
@@ -20,7 +66,10 @@ function readQuery(init?: RequestInit) {
   return value.query;
 }
 
-function requestFor(source: "proxy-structured" | "network-rule"): DnsListQueryRequest {
+function requestFor(
+  source: "proxy-structured" | "network-rule",
+  storage: DnsListQueryRequest["storage"] = "resource-specific",
+): DnsListQueryRequest {
   return {
     from: "2026-01-15T09:59:00.000Z",
     to: "2026-01-15T10:01:00.000Z",
@@ -33,6 +82,7 @@ function requestFor(source: "proxy-structured" | "network-rule"): DnsListQueryRe
       source,
     },
     limit: 100,
+    storage,
   };
 }
 
@@ -136,11 +186,13 @@ describe("sanitized DNS Log Analytics fixtures", () => {
         },
       ],
     });
+    expect(detail.observations[0]).not.toHaveProperty("logAnalyticsStorage");
   });
 
   it("keeps captured AZFWNetworkRule rows as unidentified transport evidence", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      expect(readQuery(init)).toMatch(NETWORK_QUERY_PATTERN);
+      const query = readQuery(init);
+      expect(query).toMatch(NETWORK_QUERY_PATTERN);
       return response(networkFixture);
     });
 
@@ -178,6 +230,92 @@ describe("sanitized DNS Log Analytics fixtures", () => {
     expect(
       result.transportObservations.filter(({ outcome }) => outcome === "transport-observed"),
     ).toHaveLength(6);
+  });
+
+  it("maps captured AzureDiagnostics network rows as storage-aware DNS transport", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const query = readQuery(init);
+      if (AZURE_DIAGNOSTICS_QUERY_PATTERN.test(query)) {
+        return response(normalizedAzureDiagnosticsNetworkFixture());
+      }
+      return response({
+        tables: [{ name: "PrimaryResult", columns: [], rows: [] }],
+      });
+    });
+
+    const result = await executeDnsListQuery(
+      { workspaceId },
+      requestFor("network-rule", "azure-diagnostics"),
+      "access-token",
+      { fetchImplementation, queryId: "fixture-azure-diagnostics-network" },
+    );
+
+    expect(result.queriedEntries).toEqual([]);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    expect(
+      fetchImplementation.mock.calls
+        .map(([, init]) => readQuery(init))
+        .some((query) => query.includes('column_ifexists("DestinationPort_d", real(null))')),
+    ).toBe(true);
+    expect(result.transportObservations).toHaveLength(4);
+    expect(result.transportObservations.every((row) => row.serverPort === "53")).toBe(true);
+    expect(result.transportObservations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          logAnalyticsStorage: "azure-diagnostics",
+          protocol: "TCP",
+          source: "network-rule",
+        }),
+      ]),
+    );
+    expect(new Set(result.transportObservations.map((row) => row.id)).size).toBe(4);
+    expect(
+      result.transportObservations.every((row) =>
+        row.id.startsWith("la:network-rule:azure-diagnostics:"),
+      ),
+    ).toBe(true);
+
+    const tcp = result.transportObservations.find((row) => row.protocol === "TCP");
+    const selector = tcp && createDnsDetailSelector(tcp);
+    expect(selector).toMatchObject({
+      source: "network-rule",
+      logAnalyticsStorage: "azure-diagnostics",
+    });
+    if (!selector) throw new Error("Expected Azure Diagnostics detail selector");
+
+    const detail = await executeDnsDetailQuery({ workspaceId }, { selector }, "access-token", {
+      fetchImplementation,
+      queryId: "fixture-azure-diagnostics-detail",
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(detail.observations).toEqual([
+      expect.objectContaining({
+        logAnalyticsStorage: "azure-diagnostics",
+        protocol: "TCP",
+        source: "network-rule",
+      }),
+    ]);
+
+    const duplicate = result.transportObservations.find(
+      (row) => row.networkSourceIp === "192.0.2.12",
+    );
+    const duplicateSelector = duplicate && createDnsDetailSelector(duplicate);
+    if (!duplicateSelector) throw new Error("Expected duplicate Azure Diagnostics selector");
+
+    const ambiguous = await executeDnsDetailQuery(
+      { workspaceId },
+      { selector: duplicateSelector },
+      "access-token",
+      { fetchImplementation, queryId: "fixture-azure-diagnostics-duplicate-detail" },
+    );
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+    expect(ambiguous).toMatchObject({
+      observations: [],
+      completeness: "partial",
+      warnings: ["Selected DNS entry is ambiguous"],
+    });
   });
 
   it("keeps deterministic fixture identities when Log Analytics reorders rows", async () => {

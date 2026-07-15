@@ -9,6 +9,7 @@ import type {
   DnsObservation,
   DnsSort,
 } from "#shared/types/dns";
+import type { LogAnalyticsStorageKind } from "#shared/types/logAnalytics";
 import { createDnsDetailSelector, DNS_QUERY_TYPE_LABELS } from "#shared/utils/dns";
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from "vue";
 import { createDnsObservationStore } from "~/utils/dnsObservationStore";
@@ -39,6 +40,7 @@ interface UseDnsTroubleshootingOptions {
   receiver: DnsReceiverSource;
   requestDetail: DetailRequest;
   requestList: ListRequest;
+  storage: Readonly<Ref<LogAnalyticsStorageKind>>;
 }
 
 function defaultFilters(): DnsFilters {
@@ -373,6 +375,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
           to: range.to,
           filters: { ...filters.value },
           limit: options.queryLimit.value,
+          storage: options.storage.value,
         },
         controller.signal,
       );
@@ -494,6 +497,9 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
   watch(options.mode, () => {
     closeDetail();
     scheduleRealtimePublish();
+  });
+  watch(options.storage, () => {
+    if (options.mode.value === "log-analysis") clearActiveDataset();
   });
   watch(
     () => [options.draftRange.from, options.draftRange.to],

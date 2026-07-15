@@ -7,6 +7,7 @@ import type {
   DnsSourceKind,
   DnsStage,
 } from "../types/dns";
+import type { LogAnalyticsStorageKind } from "../types/logAnalytics";
 
 export const DNS_OUTCOME_LABELS: Readonly<Record<DnsOutcome, string>> = {
   "answer-observed": "Answer observed",
@@ -36,6 +37,7 @@ export interface DnsRecordInput {
   id: string;
   timestamp: string;
   enqueuedTimeUtc?: string;
+  logAnalyticsStorage?: LogAnalyticsStorageKind;
   category: string;
   action: string;
   protocol: string;
@@ -248,6 +250,7 @@ function baseObservation(
     id: input.id,
     timestamp: input.timestamp,
     enqueuedTimeUtc: input.enqueuedTimeUtc,
+    ...(input.logAnalyticsStorage ? { logAnalyticsStorage: input.logAnalyticsStorage } : {}),
     source,
     stage,
     path:
@@ -637,6 +640,9 @@ export function createDnsDetailSelector(
       source: observation.source,
       resourceId: observation.resourceId,
       timestamp: observation.timestamp,
+      ...(observation.logAnalyticsStorage
+        ? { logAnalyticsStorage: observation.logAnalyticsStorage }
+        : {}),
       protocol: observation.protocol,
       networkSourceIp: observation.networkSourceIp,
       networkSourcePort: observation.networkSourcePort,

@@ -1,0 +1,84 @@
+{
+  "tables": [
+    {
+      "name": "PrimaryResult",
+      "columns": [
+        { "name": "TimeGenerated", "type": "datetime" },
+        { "name": "_ResourceId", "type": "string" },
+        { "name": "Action_s", "type": "string" },
+        { "name": "ActionReason_s", "type": "string" },
+        { "name": "Protocol_s", "type": "string" },
+        { "name": "SourceIP", "type": "string" },
+        { "name": "SourcePort_d", "type": "real" },
+        { "name": "DestinationIp_s", "type": "string" },
+        { "name": "DestinationPort_d", "type": "real" },
+        { "name": "Policy_s", "type": "string" },
+        { "name": "RuleCollectionGroup_s", "type": "string" },
+        { "name": "RuleCollection_s", "type": "string" },
+        { "name": "Rule_s", "type": "string" }
+      ],
+      "rows": [
+        [
+          "2026-01-15T10:00:00.009Z",
+          "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-dns-fixture/providers/Microsoft.Network/azureFirewalls/fw-dns-fixture",
+          "Allow",
+          null,
+          "UDP",
+          "192.0.2.10",
+          53607,
+          "192.0.2.53",
+          53,
+          "policy-1",
+          "group-1",
+          "collection-1",
+          "rule-1"
+        ],
+        [
+          "2026-01-15T10:00:00.620Z",
+          "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-dns-fixture/providers/Microsoft.Network/azureFirewalls/fw-dns-fixture",
+          "Allow",
+          null,
+          "TCP",
+          "192.0.2.11",
+          40706,
+          "192.0.2.53",
+          53,
+          "policy-2",
+          "group-2",
+          "collection-2",
+          "rule-2"
+        ],
+        [
+          "2026-01-15T10:00:01.633Z",
+          "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-dns-fixture/providers/Microsoft.Network/azureFirewalls/fw-dns-fixture",
+          "Allow",
+          null,
+          "UDP",
+          "192.0.2.12",
+          57950,
+          "192.0.2.53",
+          53,
+          "policy-1",
+          "group-1",
+          "collection-1",
+          "rule-1"
+        ],
+        [
+          "2026-01-15T10:00:01.633Z",
+          "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-dns-fixture/providers/Microsoft.Network/azureFirewalls/fw-dns-fixture",
+          "Allow",
+          null,
+          "UDP",
+          "192.0.2.12",
+          57950,
+          "192.0.2.53",
+          53,
+          "policy-1",
+          "group-1",
+          "collection-1",
+          "rule-1"
+        ]
+      ]
+    }
+  ]
+}
