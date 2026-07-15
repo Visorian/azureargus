@@ -64,6 +64,12 @@ interface DetailSection {
   title?: string;
 }
 
+interface LogsEmptyState {
+  description: string;
+  settingsActionLabel?: string;
+  title: string;
+}
+
 type QuickFilterKey = "category" | "action" | "protocol" | "source" | "destination";
 type LogsLens = "all-logs" | "dns-troubleshooting";
 
@@ -108,7 +114,7 @@ const { enabled: rememberConnectionString, lastError: connectionStringPersistenc
     active: computed(() => capabilities.value?.mode === "anonymous"),
   });
 const connecting = ref(false);
-const sidebarCollapsed = ref(false);
+const settingsOpen = ref(false);
 const detailOpen = ref(false);
 const selectedLog = ref<FirewallLogRecord | null>(null);
 const toast = useToast();
@@ -144,6 +150,9 @@ const allLogsLogAnalysisActive = computed(
 );
 const dnsLensActive = computed(() => activeLens.value === "dns-troubleshooting");
 const canUseLogAnalysis = logAnalyticsSourceAvailable;
+const settingsDrawerLabel = computed(() =>
+  logAnalysisActive.value ? "Log Analytics settings" : "Live Event Hub settings",
+);
 const logAnalyticsRequirement = computed(() => {
   if (logAnalyticsSourceAvailable.value) {
     return null;
@@ -536,7 +545,7 @@ const rawLogJson = computed(() => {
   return JSON.stringify(selectedLog.value.raw, null, 2);
 });
 const rawLogRows = computed(() => Math.min(Math.max(rawLogJson.value.split("\n").length, 6), 24));
-const emptyState = computed(() => {
+const emptyState = computed<LogsEmptyState>(() => {
   if (!logAnalysisActive.value) {
     return receiver.logs.value.length > 0
       ? {
@@ -548,6 +557,10 @@ const emptyState = computed(() => {
           description: managedMode.value
             ? "Connect to configured Event Hub."
             : "Connect to an Event Hub with a Listen-only SAS connection string.",
+          settingsActionLabel:
+            receiver.status.value === "idle" || receiver.status.value === "error"
+              ? "Open Event Hub settings"
+              : undefined,
         };
   }
 
@@ -555,6 +568,7 @@ const emptyState = computed(() => {
     return {
       title: "No query run",
       description: "Choose an absolute time range and run Log Analytics query.",
+      settingsActionLabel: "Open Log Analytics settings",
     };
   }
   if (logQuery.status.value === "refreshing" || logQuery.refinementPending.value) {
@@ -1001,12 +1015,30 @@ function clearClosedDetail() {
   }
 }
 
-function collapseSidebar() {
-  sidebarCollapsed.value = true;
+async function openSettings() {
+  settingsOpen.value = true;
+  await nextTick();
+  document.getElementById("logs-settings-close")?.focus({ preventScroll: true });
 }
 
-function expandSidebar() {
-  sidebarCollapsed.value = false;
+async function closeSettings() {
+  settingsOpen.value = false;
+  await nextTick();
+  document.getElementById("logs-settings-toggle")?.focus({ preventScroll: true });
+}
+
+function toggleSettings() {
+  if (settingsOpen.value) {
+    void closeSettings();
+    return;
+  }
+
+  void openSettings();
+}
+
+function closeSettingsFromEscape(event: KeyboardEvent) {
+  if (!settingsOpen.value || event.defaultPrevented) return;
+  void closeSettings();
 }
 
 function formatTime(timestamp: string) {
@@ -1053,6 +1085,7 @@ function statusColor(status: string) {
 <template>
   <div
     class="flex h-full min-h-0 flex-col overflow-hidden bg-white text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50"
+    @keydown.esc="closeSettingsFromEscape"
   >
     <section
       class="shrink-0 border-b border-brand-gray-300 bg-brand-gray-50 px-4 py-3 dark:border-brand-gray-700 dark:bg-brand-gray-900"
@@ -1115,7 +1148,7 @@ function statusColor(status: string) {
             {{ logAnalyticsRequirement }}
           </p>
         </div>
-        <div class="ml-auto flex shrink-0 items-center gap-3">
+        <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">
           <span
             id="logs-lens-label"
             class="text-xs font-semibold tracking-wide text-brand-gray-600 uppercase dark:text-brand-gray-300"
@@ -1142,136 +1175,145 @@ function statusColor(status: string) {
               </UButton>
             </UFieldGroup>
           </div>
+          <UButton
+            id="logs-settings-toggle"
+            icon="i-lucide-settings"
+            label="Settings"
+            aria-controls="logs-settings-drawer"
+            :aria-expanded="settingsOpen"
+            :color="settingsOpen ? 'primary' : 'neutral'"
+            :variant="settingsOpen ? 'solid' : 'outline'"
+            size="sm"
+            class="shrink-0"
+            @click="toggleSettings"
+          />
         </div>
       </div>
     </section>
 
-    <div
-      :class="[
-        'relative grid min-h-0 flex-1 overflow-hidden',
-        sidebarCollapsed
-          ? 'grid-cols-1 grid-rows-1'
-          : 'grid-cols-1 grid-rows-[auto_1fr] lg:grid-cols-[1fr_23rem] lg:grid-rows-1',
-      ]"
-    >
-      <UButton
-        v-if="sidebarCollapsed"
-        icon="i-lucide-settings"
-        aria-label="Expand sidebar"
-        color="neutral"
-        variant="outline"
-        square
-        size="md"
-        class="absolute top-1/2 right-2 z-20 -translate-y-1/2 rounded-full bg-white dark:bg-brand-gray-950"
-        @click="expandSidebar"
-      />
-
-      <aside
-        v-show="!sidebarCollapsed"
-        class="relative flex max-h-80 min-h-0 flex-col border-b border-brand-gray-300 bg-white dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:order-2 lg:max-h-none lg:border-b-0 lg:border-l"
+    <div class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden">
+      <Transition
+        enter-active-class="transition-transform duration-200 ease-out motion-reduce:transition-none"
+        enter-from-class="translate-x-full"
+        enter-to-class="translate-x-0"
+        leave-active-class="transition-transform duration-150 ease-in motion-reduce:transition-none"
+        leave-from-class="translate-x-0"
+        leave-to-class="translate-x-full"
       >
-        <UButton
-          icon="i-lucide-settings"
-          aria-label="Collapse sidebar"
-          color="neutral"
-          variant="outline"
-          square
-          size="md"
-          class="absolute top-3 right-3 z-20 rounded-full bg-white dark:bg-brand-gray-950 lg:top-1/2 lg:right-auto lg:left-0 lg:-translate-x-1/2 lg:-translate-y-1/2"
-          @click="collapseSidebar"
-        />
-
-        <section class="min-h-0 flex-1 overflow-y-auto p-4">
-          <LogsEventHubSettingsPanel
-            v-if="!logAnalysisActive"
-            v-model:remember-connection-string="rememberConnectionString"
-            :connection-form="connectionForm"
-            :clearing-log-history="clearingLogHistory"
-            :connecting="connecting"
-            :connection-string-persistence-error="connectionStringPersistenceError"
-            :log-history-enabled="logHistoryEnabled"
-            :log-history-error="logHistoryError"
-            :managed="managedMode"
-            :mode-transitioning="modeTransitioning"
-            @update:connection-form="updateConnectionForm"
-            @connect="connect"
-            @disconnect="receiver.disconnect"
-            @update-log-retention="updateLogRetention"
-          />
-          <div
-            v-else
-            @click.capture="commitLogAnalysisInteraction"
-            @input.capture="commitLogAnalysisInteraction"
-            @change.capture="commitLogAnalysisInteraction"
-          >
-            <LogsLogAnalyticsSettingsPanel
-              v-model:query-storage="logAnalyticsStorage"
-              v-model:tenant-id="temporaryTenantId"
-              v-model:workspace-id="temporaryWorkspaceId"
-              v-model:query-limit="logAnalyticsQueryLimit"
-              :admin-consent-url="temporaryAdminConsentUrl"
-              :dns-readiness="dnsSourceReadiness.readiness.value"
-              :dns-readiness-status="dnsSourceReadiness.status.value"
-              :lens="activeLens"
-              :temporary="temporaryLogAnalyticsMode"
-              :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
-              :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
-              :temporary-access-error="temporaryAccessError"
-              :temporary-access-status="temporaryAccessStatus"
-              :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
-              :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
-              :temporary-azure-username="temporaryAzureUsername"
-              :tenant-options="temporaryTenants"
-              :workspace-options="temporaryWorkspaces"
-              @change-tenant="changeTemporaryTenant"
-              @change-workspace="changeTemporaryWorkspace"
-              @connect-azure="connectTemporaryLogAnalytics"
-              @disconnect-azure="disconnectTemporaryLogAnalytics"
-              @authorize-log-analytics="authorizeTemporaryLogAnalytics"
-              @refresh-azure-access="refreshTemporaryAzureAccess"
-            />
-          </div>
-        </section>
-
-        <footer
-          class="space-y-1 border-t border-brand-gray-200 px-4 py-3 text-xs font-mono text-brand-gray-500 dark:border-brand-gray-800 dark:text-brand-gray-500"
+        <aside
+          id="logs-settings-drawer"
+          v-show="settingsOpen"
+          :aria-label="settingsDrawerLabel"
+          :aria-hidden="!settingsOpen"
+          :inert="!settingsOpen"
+          class="absolute inset-y-0 right-0 z-30 flex min-h-0 w-full flex-col border-l border-brand-gray-300 bg-white shadow-xl dark:border-brand-gray-700 dark:bg-brand-gray-950 lg:w-92"
         >
-          <span class="block select-none">
-            Version: {{ versionNumber }} by
-            <a
-              href="https://www.visorian.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1 underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
+          <UButton
+            id="logs-settings-close"
+            icon="i-lucide-x"
+            aria-label="Close settings"
+            color="neutral"
+            variant="ghost"
+            square
+            size="md"
+            class="absolute top-3 right-3 z-20 bg-white dark:bg-brand-gray-950"
+            @click="closeSettings"
+          />
+
+          <section class="min-h-0 flex-1 overflow-y-auto p-4">
+            <LogsEventHubSettingsPanel
+              v-if="!logAnalysisActive"
+              class="[&>div:first-child]:pr-12"
+              v-model:remember-connection-string="rememberConnectionString"
+              :connection-form="connectionForm"
+              :clearing-log-history="clearingLogHistory"
+              :connecting="connecting"
+              :connection-string-persistence-error="connectionStringPersistenceError"
+              :log-history-enabled="logHistoryEnabled"
+              :log-history-error="logHistoryError"
+              :managed="managedMode"
+              :mode-transitioning="modeTransitioning"
+              @update:connection-form="updateConnectionForm"
+              @connect="connect"
+              @disconnect="receiver.disconnect"
+              @update-log-retention="updateLogRetention"
+            />
+            <div
+              v-else
+              @click.capture="commitLogAnalysisInteraction"
+              @input.capture="commitLogAnalysisInteraction"
+              @change.capture="commitLogAnalysisInteraction"
             >
-              <img
-                :src="visorianPositive"
-                alt=""
-                aria-hidden="true"
-                class="h-3 w-auto dark:hidden"
+              <LogsLogAnalyticsSettingsPanel
+                class="[&>div:first-child]:pr-12"
+                v-model:query-storage="logAnalyticsStorage"
+                v-model:tenant-id="temporaryTenantId"
+                v-model:workspace-id="temporaryWorkspaceId"
+                v-model:query-limit="logAnalyticsQueryLimit"
+                :admin-consent-url="temporaryAdminConsentUrl"
+                :dns-readiness="dnsSourceReadiness.readiness.value"
+                :dns-readiness-status="dnsSourceReadiness.status.value"
+                :lens="activeLens"
+                :temporary="temporaryLogAnalyticsMode"
+                :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
+                :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
+                :temporary-access-error="temporaryAccessError"
+                :temporary-access-status="temporaryAccessStatus"
+                :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
+                :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
+                :temporary-azure-username="temporaryAzureUsername"
+                :tenant-options="temporaryTenants"
+                :workspace-options="temporaryWorkspaces"
+                @change-tenant="changeTemporaryTenant"
+                @change-workspace="changeTemporaryWorkspace"
+                @connect-azure="connectTemporaryLogAnalytics"
+                @disconnect-azure="disconnectTemporaryLogAnalytics"
+                @authorize-log-analytics="authorizeTemporaryLogAnalytics"
+                @refresh-azure-access="refreshTemporaryAzureAccess"
               />
-              <img
-                :src="visorianNegative"
-                alt=""
-                aria-hidden="true"
-                class="hidden h-3 w-auto dark:inline"
-              />
-              Visorian
-            </a>
-          </span>
-          <span class="block select-none">
-            IP geolocation by
-            <a
-              href="https://db-ip.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
-            >
-              DB-IP
-            </a>
-          </span>
-        </footer>
-      </aside>
+            </div>
+          </section>
+
+          <footer
+            class="space-y-1 border-t border-brand-gray-200 px-4 py-3 text-xs font-mono text-brand-gray-500 dark:border-brand-gray-800 dark:text-brand-gray-500"
+          >
+            <span class="block select-none">
+              Version: {{ versionNumber }} by
+              <a
+                href="https://www.visorian.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1 underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
+              >
+                <img
+                  :src="visorianPositive"
+                  alt=""
+                  aria-hidden="true"
+                  class="h-3 w-auto dark:hidden"
+                />
+                <img
+                  :src="visorianNegative"
+                  alt=""
+                  aria-hidden="true"
+                  class="hidden h-3 w-auto dark:inline"
+                />
+                Visorian
+              </a>
+            </span>
+            <span class="block select-none">
+              IP geolocation by
+              <a
+                href="https://db-ip.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
+              >
+                DB-IP
+              </a>
+            </span>
+          </footer>
+        </aside>
+      </Transition>
 
       <section
         v-if="activeLens === 'all-logs'"
@@ -1614,6 +1656,15 @@ function statusColor(status: string) {
                   <p class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
                     {{ emptyState.description }}
                   </p>
+                  <UButton
+                    v-if="emptyState.settingsActionLabel"
+                    icon="i-lucide-settings"
+                    :label="emptyState.settingsActionLabel"
+                    color="primary"
+                    variant="solid"
+                    class="mt-2"
+                    @click="openSettings"
+                  />
                 </div>
               </div>
             </ClientOnly>

@@ -52,6 +52,17 @@ async function enterAnonymousMode(page: Page) {
   await expect(page.getByRole("region", { name: "Data source" })).toBeVisible();
 }
 
+async function openSettings(page: Page) {
+  const settingsButton = page.getByRole("button", { name: "Settings", exact: true });
+  const settingsDrawer = page.locator("#logs-settings-drawer");
+  if ((await settingsButton.getAttribute("aria-expanded")) !== "true") {
+    await settingsButton.click();
+  }
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "true");
+  await expect(settingsDrawer).toBeVisible();
+  return settingsDrawer;
+}
+
 async function expectAlignedColumns(header: Locator, row: Locator) {
   await expect(async () => {
     const [headerCells, rowCells] = await Promise.all([
@@ -308,11 +319,14 @@ test("managed Event Hub uses configured server stream without exposing credentia
 
   await page.goto("/logs");
   await expect(page.getByText("Managed User")).toBeVisible();
+  const settingsDrawer = await openSettings(page);
   await expect(page.getByRole("textbox", { name: "Connection string" })).toBeDisabled();
   await expect(page.getByRole("textbox", { name: "Event Hub name" })).toBeDisabled();
   await expect(page.getByRole("checkbox", { name: "Remember connection string" })).toHaveCount(0);
   await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
   await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Event Hub settings" })).toHaveCount(0);
   await expect(
     page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
   ).toBeVisible();
@@ -396,6 +410,7 @@ test("managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
   });
 
   await page.goto("/logs");
+  const settingsDrawer = await openSettings(page);
   const dataSource = page.getByRole("group", { name: "Data source" });
   await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toBeDisabled();
   await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toHaveAttribute(
@@ -413,8 +428,10 @@ test("managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
   ).toHaveCount(0);
   await expect(runQuery).toBeVisible();
   await page.getByRole("spinbutton", { name: "Query result limit" }).fill("2000");
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
   await runQuery.click();
   await expect(page.getByText("1 visible", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Log Analytics settings" })).toHaveCount(0);
   const normalizedRow = page
     .getByRole("table", { name: "Firewall logs" })
     .getByRole("row")
@@ -686,6 +703,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   expect(listRequests).toBe(0);
   await expect(page.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
   await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+  let settingsDrawer = await openSettings(page);
   await expect(page.getByText("Run DNS query to load entries.")).toBeVisible();
   await expect(
     page.getByTestId("log-filter-row").getByRole("button", { name: "Apply filters" }),
@@ -723,6 +741,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   expect(listRequests).toBe(0);
   expect(detailRequests).toBe(0);
 
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
   await page.getByRole("button", { name: "Run query" }).click();
   expect(readinessRequests).toBe(1);
   const dnsStatusRail = page.getByRole("group", {
@@ -739,6 +758,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   ).toBeVisible();
   await expect(page.getByText("DNS transport query failed", { exact: true })).toBeVisible();
 
+  settingsDrawer = await openSettings(page);
   await sourceSelect.click();
   await page.getByRole("option", { name: "AzureDiagnostics" }).click();
   await expect(sourceSelect).toContainText("AzureDiagnostics");
@@ -748,6 +768,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await page.getByRole("option", { name: "Dedicated tables" }).click();
   await expect(sourceSelect).toContainText("Dedicated tables");
 
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
   await page.getByRole("button", { name: "Run query" }).click();
   expect(readinessRequests).toBe(1);
   await expect.poll(() => listRequests).toBe(2);
@@ -866,6 +887,14 @@ test("anonymous delegated Log Analytics exposes temporary authentication control
 
   await page.goto("/logs");
   await page.getByRole("button", { name: "Log Analytics" }).click();
+  const openLogAnalyticsSettings = page.getByRole("button", {
+    name: "Open Log Analytics settings",
+  });
+  await expect(openLogAnalyticsSettings).toBeVisible();
+  await openLogAnalyticsSettings.click();
+  const settingsDrawer = page.locator("#logs-settings-drawer");
+  await expect(settingsDrawer).toBeVisible();
+  await expect(settingsDrawer).toHaveAccessibleName("Log Analytics settings");
   await expect(page.getByText("Tenant ID", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Workspace ID", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Grant tenant consent" })).toHaveCount(0);
@@ -877,9 +906,26 @@ test("anonymous delegated Log Analytics exposes temporary authentication control
 });
 
 test("anonymous mode can reach logs page", async ({ page }) => {
+  await page.route("**/api/capabilities", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        mode: "anonymous",
+        eventHubAvailable: true,
+        predefinedLogAnalyticsAvailable: false,
+        temporaryLogAnalyticsAuthAvailable: false,
+        errors: [],
+      },
+    });
+  });
   await enterAnonymousMode(page);
 
-  await expect(page.getByText("Live Event Hub settings")).toBeVisible();
+  const settingsButton = page.getByRole("button", { name: "Settings", exact: true });
+  const settingsDrawer = page.locator("#logs-settings-drawer");
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "false");
+  await expect(settingsDrawer).toHaveAttribute("aria-hidden", "true");
+  await expect(settingsDrawer).toHaveJSProperty("inert", true);
+  await expect(settingsDrawer).toBeHidden();
   const dataSource = page.getByRole("group", { name: "Data source" });
   await expect(dataSource).toBeVisible();
   await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toHaveAttribute(
@@ -894,7 +940,13 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(dataSource.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
   await expect(page.getByText(/visible \/ .*received/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear", exact: true })).toBeVisible();
-  await expect(page.getByRole("table", { name: "Firewall logs" })).toBeVisible();
+  const firewallTable = page.getByRole("table", { name: "Firewall logs" });
+  const searchLogs = page.getByRole("textbox", { name: "Search logs" });
+  await expect(firewallTable).toBeVisible();
+  await searchLogs.fill("dns");
+  const tableWidth = await firewallTable.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
   await expect
     .poll(() =>
       page.evaluate(() => ({
@@ -912,19 +964,36 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await liveEventHubButton.press("Enter");
   await expect(liveEventHubButton).toBeFocused();
 
-  const collapseSidebar = page.getByRole("button", {
-    name: "Collapse sidebar",
+  const openEventHubSettings = page.getByRole("button", {
+    name: "Open Event Hub settings",
   });
-  await collapseSidebar.focus();
-  await expect(collapseSidebar).toBeFocused();
-  await collapseSidebar.press("Enter");
-  await expect(dataSource).toBeVisible();
-  const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
-  await expect(expandSidebar).toBeVisible();
-  await expandSidebar.focus();
-  await expect(expandSidebar).toBeFocused();
-  await expandSidebar.press("Enter");
-  await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+  await expect(openEventHubSettings).toBeVisible();
+  await openEventHubSettings.click();
+  const closeSettings = settingsDrawer.getByRole("button", { name: "Close settings" });
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "true");
+  await expect(settingsDrawer).toBeVisible();
+  expect(await settingsDrawer.locator("..").evaluate((element) => element.scrollLeft)).toBe(0);
+  await expect(settingsDrawer).toHaveAccessibleName("Live Event Hub settings");
+  await expect(
+    settingsDrawer.getByRole("heading", { name: "Live Event Hub settings" }),
+  ).toBeVisible();
+  await expect(closeSettings).toBeFocused();
+  expect(
+    await firewallTable.evaluate((element) => element.getBoundingClientRect().width),
+  ).toBeCloseTo(tableWidth, 1);
+  await expect(searchLogs).toHaveValue("dns");
+
+  await closeSettings.click();
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "false");
+  await expect(settingsDrawer).toHaveAttribute("aria-hidden", "true");
+  await expect(settingsDrawer).toHaveJSProperty("inert", true);
+  await expect(settingsButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(settingsDrawer.locator(":focus")).toHaveCount(0);
+  await expect(settingsDrawer).toBeHidden();
+
+  await settingsButton.click();
+  await expect(closeSettings).toBeFocused();
 
   const filterDropdowns = page.getByRole("button", { name: "Show popup" });
   await expect(filterDropdowns.filter({ hasText: "Category" })).toBeVisible();
@@ -941,6 +1010,20 @@ test("anonymous mode can reach logs page", async ({ page }) => {
     "Last 15 minutes",
   ]);
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("option")).toHaveCount(0);
+  await expect(settingsDrawer).toBeVisible();
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(settingsDrawer).toBeHidden();
+  await expect(settingsButton).toBeFocused();
+
+  await settingsButton.click();
+  await expect(settingsDrawer).toBeVisible();
+  await settingsButton.click();
+  await expect(settingsDrawer).toBeHidden();
+  await expect(settingsButton).toBeFocused();
+
+  await openSettings(page);
 
   const logRetentionSwitch = page.getByRole("switch", {
     name: "Local log retention",
@@ -1027,20 +1110,16 @@ test("pane action rails align with filters and separate them", async ({ page }) 
   );
 });
 
-test("data source rail keeps source left and view right", async ({ page }) => {
+test("data source rail keeps source left and controls right", async ({ page }) => {
   await enterAnonymousMode(page);
 
   const rail = page.getByRole("region", { name: "Data source" });
   const dataSourceControls = rail.getByRole("group", { name: "Data source" });
   const viewControls = rail.getByRole("group", { name: "View" });
-  const logAnalyticsRequirement = rail.getByText(
-    "Temporary Log Analytics app registration is not configured.",
-    { exact: true },
-  );
-
-  await expectLeftInSameRow(dataSourceControls, logAnalyticsRequirement);
-  await expectLeftInSameRow(logAnalyticsRequirement, viewControls);
-  await expectRightAligned(rail, viewControls);
+  const settingsButton = rail.getByRole("button", { name: "Settings", exact: true });
+  await expectLeftInSameRow(dataSourceControls, viewControls);
+  await expectLeftInSameRow(viewControls, settingsButton);
+  await expectRightAligned(rail, settingsButton);
   await expect(viewControls.getByRole("button", { name: "All logs" })).toBeVisible();
   await expect(viewControls.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
 });
@@ -1053,12 +1132,33 @@ test("data source rail remains bounded at narrow viewport", async ({ page }) => 
   await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toBeVisible();
   await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeVisible();
   const view = page.getByRole("group", { name: "View" });
+  const rail = page.getByRole("region", { name: "Data source" });
+  const settingsButton = rail.getByRole("button", { name: "Settings", exact: true });
   await expect(view.getByRole("button", { name: "All logs" })).toBeVisible();
   await expect(view.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
-  await expectRightAligned(page.getByRole("region", { name: "Data source" }), view);
-  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expectRightAligned(rail, settingsButton);
+  const settingsDrawer = await openSettings(page);
+  await expect(settingsDrawer.getByRole("button", { name: "Close settings" })).toBeVisible();
+  await expect(async () => {
+    const [drawerBox, workspaceBox] = await Promise.all([
+      settingsDrawer.boundingBox(),
+      settingsDrawer.locator("..").boundingBox(),
+    ]);
+    expect(drawerBox).not.toBeNull();
+    expect(workspaceBox).not.toBeNull();
+    expect(Math.abs(drawerBox!.x - workspaceBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(drawerBox!.width - workspaceBox!.width)).toBeLessThanOrEqual(1);
+  }).toPass();
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+      })),
+    )
+    .toEqual({ horizontal: true, vertical: true });
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
   await expect(dataSource).toBeVisible();
-  await expect(page.getByRole("button", { name: "Expand sidebar" })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() => ({
@@ -1162,6 +1262,7 @@ test("destination country flag follows a recycled visible row", async ({ page })
 
 test("local log retention is opt-in and clearing is persistent", async ({ page }) => {
   await enterAnonymousMode(page);
+  await openSettings(page);
 
   const logRetentionSwitch = page.getByRole("switch", {
     name: "Local log retention",
@@ -1180,6 +1281,7 @@ test("local log retention is opt-in and clearing is persistent", async ({ page }
   await expect.poll(() => queryLogHistoryIds(page)).toEqual(["second-seed"]);
   await page.reload();
   await expect(page).toHaveURL(/\/logs/);
+  await openSettings(page);
   await expect(logRetentionSwitch).not.toBeChecked();
   await expect.poll(() => queryLogHistoryIds(page)).toEqual([]);
   await expect(page.getByText("No logs received")).toBeVisible();
@@ -1237,6 +1339,7 @@ test("browser log history store queries, limits, deletes, and clears records", a
 
 test("invalid Event Hub settings stay idle and show validation errors", async ({ page }) => {
   await enterAnonymousMode(page);
+  await openSettings(page);
 
   await page
     .getByRole("textbox", { name: "Connection string*" })
@@ -1257,6 +1360,7 @@ test("connection string persistence is explicit and reversible", async ({ page }
     "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=fw-logs";
 
   await enterAnonymousMode(page);
+  await openSettings(page);
 
   const connectionStringInput = page.getByRole("textbox", {
     name: "Connection string*",
@@ -1272,12 +1376,14 @@ test("connection string persistence is explicit and reversible", async ({ page }
 
   await page.reload();
   await expect(page).toHaveURL(/\/logs/);
+  await openSettings(page);
   await expect(connectionStringInput).toHaveValue(connectionString);
   await expect(rememberConnectionString).toBeChecked();
 
   await rememberConnectionString.uncheck();
   await page.reload();
   await expect(page).toHaveURL(/\/logs/);
+  await openSettings(page);
   await expect(connectionStringInput).toHaveValue("");
   await expect(rememberConnectionString).not.toBeChecked();
 });
@@ -1287,6 +1393,7 @@ test("connection string remains opted in when browser storage removal fails", as
     "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=fw-logs";
 
   await enterAnonymousMode(page);
+  await openSettings(page);
 
   const connectionStringInput = page.getByRole("textbox", {
     name: "Connection string*",
@@ -1318,6 +1425,7 @@ test("connection string stays opted out when browser storage saving fails", asyn
   const connectionString =
     "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=fw-logs";
   await enterAnonymousMode(page);
+  await openSettings(page);
 
   const connectionStringInput = page.getByRole("textbox", {
     name: "Connection string*",
@@ -1344,6 +1452,7 @@ test("connection string stays opted out when browser storage saving fails", asyn
   ).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(/\/logs/);
+  await openSettings(page);
   await expect(connectionStringInput).toHaveValue("");
   await expect(rememberConnectionString).not.toBeChecked();
 });
