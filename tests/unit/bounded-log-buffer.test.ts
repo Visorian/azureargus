@@ -8,9 +8,16 @@ import {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.stubGlobal("useState", <T>(_key: string, initialize: () => T | Ref<T>) => {
+  const stateByKey = new Map<string, Ref<unknown>>();
+  vi.stubGlobal("useState", <T>(key: string, initialize: () => T | Ref<T>) => {
+    const existing = stateByKey.get(key);
+    if (existing) {
+      return existing as Ref<T>;
+    }
     const initial = initialize();
-    return isRef(initial) ? initial : ref(initial);
+    const state = isRef(initial) ? initial : ref(initial);
+    stateByKey.set(key, state as Ref<unknown>);
+    return state;
   });
 });
 
@@ -76,6 +83,21 @@ describe("bounded log buffer helpers", () => {
     vi.advanceTimersByTime(1);
     expect(buffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2]);
     expect(buffer.version.value).toBe(1);
+  });
+
+  it("retains raw rows when the buffer composable is recreated", () => {
+    const firstBuffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
+      publishedSize: ref(2),
+    });
+    firstBuffer.pushMany([{ id: 1 }, { id: 2 }, { id: 3 }]);
+    firstBuffer.flush();
+
+    const recreatedBuffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
+      publishedSize: ref(2),
+    });
+
+    expect(recreatedBuffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2]);
+    expect(recreatedBuffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1]);
   });
 
   it("flushes a pending publication immediately and cancels its timer", () => {

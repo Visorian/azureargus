@@ -66,8 +66,10 @@ export function useBoundedLogBuffer<T>(
   }: BoundedLogBufferOptions = {},
 ) {
   const items = useState<T[]>(key, () => shallowRef<T[]>([]));
-  const version = ref(0);
-  let rawItems = items.value.map((item) => toRaw(item));
+  const rawItems = useState<T[]>(`${key}-raw`, () =>
+    shallowRef(items.value.map((item) => toRaw(item))),
+  );
+  const version = useState(`${key}-version`, () => 0);
   let publishTimer: ReturnType<typeof setTimeout> | undefined;
   let publishPending = false;
 
@@ -87,7 +89,7 @@ export function useBoundedLogBuffer<T>(
     }
 
     publishPending = false;
-    items.value = trimToBufferSize(rawItems, publishedSize.value);
+    items.value = trimToBufferSize(rawItems.value, publishedSize.value);
     version.value += 1;
   }
 
@@ -108,7 +110,7 @@ export function useBoundedLogBuffer<T>(
       return;
     }
 
-    rawItems = prependToBoundedBuffer(rawItems, nextItems, maxSize.value);
+    rawItems.value = prependToBoundedBuffer(rawItems.value, nextItems, maxSize.value);
     publishPending = true;
     schedulePublish();
   }
@@ -127,7 +129,7 @@ export function useBoundedLogBuffer<T>(
 
   function clear() {
     cancelPublish();
-    rawItems = [];
+    rawItems.value = [];
     publishPending = false;
     items.value = [];
     version.value += 1;
@@ -140,7 +142,7 @@ export function useBoundedLogBuffer<T>(
   return {
     clear,
     flush: publish,
-    getRawItems: () => rawItems as readonly T[],
+    getRawItems: (): readonly T[] => rawItems.value,
     items,
     pushMany,
     version,
