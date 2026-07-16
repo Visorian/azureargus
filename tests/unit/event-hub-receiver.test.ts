@@ -32,7 +32,41 @@ function createValidForm(): EventHubConnectionForm {
   return form;
 }
 
-function installNuxtMocks(order: string[] = []) {
+const duplicateResourceId =
+  "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw";
+
+function createDuplicateNetworkRuleBodies() {
+  const time = "2026-07-16T13:24:59.993509+00:00";
+  return {
+    legacy: {
+      time,
+      resourceId: duplicateResourceId,
+      properties: {
+        msg: "UDP request from 10.176.207.6:59805 to 10.140.17.5:53. Action: Deny.. Policy: policy. Rule Collection Group: group. Rule Collection: collection. Rule: rule",
+      },
+      category: "AzureFirewallNetworkRule",
+    },
+    structured: {
+      time,
+      resourceId: duplicateResourceId,
+      properties: {
+        Protocol: "UDP",
+        SourceIp: "10.176.207.6",
+        SourcePort: 59_805,
+        DestinationIp: "10.140.17.5",
+        DestinationPort: 53,
+        Action: "Deny",
+        Policy: "policy",
+        RuleCollectionGroup: "group",
+        RuleCollection: "collection",
+        Rule: "rule",
+      },
+      category: "AZFWNetworkRule",
+    },
+  };
+}
+
+function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unknown>>) {
   const logs = shallowRef<FirewallLogRecord[]>([]);
   const snapshotVersion = shallowRef(0);
   const pushMany = vi.fn((records: readonly FirewallLogRecord[]) => {
@@ -44,10 +78,14 @@ function installNuxtMocks(order: string[] = []) {
   });
   const queueRecords = vi.fn();
 
-  vi.stubGlobal(
-    "useState",
-    <T>(_key: string, initializer: () => T): Ref<T> => shallowRef(initializer()),
-  );
+  vi.stubGlobal("useState", <T>(key: string, initializer: () => T): Ref<T> => {
+    const existing = stateCache?.get(key);
+    if (existing) return existing as Ref<T>;
+
+    const state = shallowRef(initializer());
+    stateCache?.set(key, state);
+    return state;
+  });
   vi.stubGlobal("computed", computed);
   vi.stubGlobal("useBoundedLogBuffer", () => ({
     items: logs,
@@ -211,6 +249,59 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
+  it("correlates managed duplicate network-rule schemas before fan-out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const mocks = installNuxtMocks();
+    const bodies = createDuplicateNetworkRuleBodies();
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `${JSON.stringify({
+              type: "events",
+              events: [
+                {
+                  body: bodies.legacy,
+                  enqueuedTimeUtc: "2026-07-16T13:25:00.000Z",
+                  partitionId: "0",
+                  sequenceNumber: 1,
+                },
+                {
+                  body: bodies.structured,
+                  enqueuedTimeUtc: "2026-07-16T13:25:00.000Z",
+                  partitionId: "0",
+                  sequenceNumber: 2,
+                },
+              ],
+            })}\n`,
+          ),
+        );
+      },
+    });
+    const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ managedFetch });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    receiver.addNormalizedBatchSink({ onRecords });
+
+    await receiver.connect(createInitialEventHubConnectionForm(), "managed");
+    await vi.waitFor(() => expect(receiver.status.value).toBe("connected"));
+    vi.advanceTimersByTime(100);
+
+    expect(onRecords).toHaveBeenCalledOnce();
+    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ category: "AZFWNetworkRule" }),
+    ]);
+    expect(mocks.logs.value).toHaveLength(1);
+    expect(mocks.queueRecords).toHaveBeenCalledOnce();
+    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.categoryOptions.value).toEqual(["AZFWNetworkRule"]);
+
+    await receiver.disconnect();
+  });
+
   it("allocates unique record indexes across expanded queued events", () => {
     const result = eventsToFirewallLogs(
       [
@@ -240,6 +331,27 @@ describe("Event Hub receiver helpers", () => {
       "0:10:0:2026-07-09T12:00:00.000Z:resource:unknown",
       "0:10:1:2026-07-09T12:00:01.000Z:resource:unknown",
       "0:11:0:2026-07-09T12:00:02.000Z:resource:unknown",
+    ]);
+  });
+
+  it("expands malformed binary Azure Monitor batches instead of publishing an Unknown row", () => {
+    const body = new TextEncoder().encode(
+      String.raw`{"records":[{"time":"2026-07-16T16:28:38.728265+00:00","properties": {\"msg\":\"DNS Request: 192.168.179.30:54245 - 49226 AAAA IN \\ 100.112.0.22. udp 42 false 1224 NXDOMAIN\"},"category":"AzureFirewallDnsProxy"}]}`,
+    );
+
+    const result = eventsToFirewallLogs(
+      [{ body, enqueuedTimeUtc: "2026-07-16T16:29:17.000Z", sequenceNumber: 42 }],
+      "0",
+      0,
+    );
+
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        timestamp: "2026-07-16T16:28:38.728Z",
+        category: "AzureFirewallDnsProxy",
+        action: "DNS query",
+        protocol: "UDP",
+      }),
     ]);
   });
 
@@ -295,6 +407,216 @@ describe("Event Hub receiver helpers", () => {
         serverIp: "168.63.129.16",
       },
     });
+  });
+
+  it("correlates manual duplicate schemas across receiver batches", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const mocks = installNuxtMocks();
+    const bodies = createDuplicateNetworkRuleBodies();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    receiver.addNormalizedBatchSink({ onRecords });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents([{ body: bodies.legacy, sequenceNumber: 1 }], {
+      partitionId: "0",
+    });
+    vi.advanceTimersByTime(100);
+    expect(onRecords).not.toHaveBeenCalled();
+    expect(receiver.receivedCount.value).toBe(0);
+
+    vi.advanceTimersByTime(50);
+    await requireHandlers(handlers).processEvents(
+      [{ body: bodies.structured, sequenceNumber: 2 }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(onRecords).toHaveBeenCalledOnce();
+    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ category: "AZFWNetworkRule" }),
+    ]);
+    expect(mocks.logs.value).toHaveLength(1);
+    expect(mocks.queueRecords).toHaveBeenCalledOnce();
+    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.categoryOptions.value).toEqual(["AZFWNetworkRule"]);
+
+    await receiver.disconnect();
+  });
+
+  it("allocates fallback indexes from physical records after correlation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    installNuxtMocks();
+    const bodies = createDuplicateNetworkRuleBodies();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    receiver.addNormalizedBatchSink({ onRecords });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents(
+      [{ body: bodies.legacy }, { body: bodies.structured }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+    await requireHandlers(handlers).processEvents(
+      [{ body: { time: "2026-07-16T13:25:01.000Z", msg: "third" } }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(onRecords).toHaveBeenCalledTimes(2);
+    expect(onRecords.mock.calls[1]?.[0]?.[0]?.id).toContain("0:index-2:0:");
+    expect(receiver.receivedCount.value).toBe(2);
+    await receiver.disconnect();
+  });
+
+  it("seeds fallback index from shared physical count after receiver recreation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const stateCache = new Map<string, Ref<unknown>>();
+    installNuxtMocks([], stateCache);
+    const bodies = createDuplicateNetworkRuleBodies();
+    let handlers: ReceiverHandlers | undefined;
+    const createClient: CreateEventHubReceiverClient = () => ({
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    });
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const firstReceiver = useEventHubReceiver({ loadClientFactory: async () => createClient });
+    await firstReceiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents(
+      [{ body: bodies.legacy }, { body: bodies.structured }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+    expect(firstReceiver.receivedCount.value).toBe(1);
+    await firstReceiver.disconnect();
+
+    installNuxtMocks([], stateCache);
+    const secondReceiver = useEventHubReceiver({ loadClientFactory: async () => createClient });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    secondReceiver.addNormalizedBatchSink({ onRecords });
+    await secondReceiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents(
+      [{ body: { time: "2026-07-16T13:25:01.000Z", msg: "third" } }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(onRecords.mock.calls[0]?.[0]?.[0]?.id).toContain("0:index-2:0:");
+    expect(secondReceiver.receivedCount.value).toBe(2);
+    await secondReceiver.disconnect();
+  });
+
+  it("publishes unmatched legacy network rule after window and discards it on clear", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const mocks = installNuxtMocks();
+    const bodies = createDuplicateNetworkRuleBodies();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    receiver.addNormalizedBatchSink({ onRecords });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents([{ body: bodies.legacy, sequenceNumber: 1 }], {
+      partitionId: "0",
+    });
+    vi.advanceTimersByTime(100 + 249);
+    expect(onRecords).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onRecords).toHaveBeenCalledOnce();
+    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({ category: "AzureFirewallNetworkRule" }),
+    ]);
+    expect(receiver.receivedCount.value).toBe(1);
+
+    receiver.clear();
+    onRecords.mockClear();
+    await requireHandlers(handlers).processEvents([{ body: bodies.legacy, sequenceNumber: 2 }], {
+      partitionId: "0",
+    });
+    vi.advanceTimersByTime(100);
+    receiver.clear();
+    vi.advanceTimersByTime(250);
+
+    expect(onRecords).not.toHaveBeenCalled();
+    expect(mocks.logs.value).toEqual([]);
+    expect(receiver.receivedCount.value).toBe(0);
+    await receiver.disconnect();
+  });
+
+  it("does not correlate records across reconnect boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    installNuxtMocks();
+    const bodies = createDuplicateNetworkRuleBodies();
+    let handlers: ReceiverHandlers | undefined;
+    const createClient: CreateEventHubReceiverClient = () => ({
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    });
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => createClient });
+    const onRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>();
+    receiver.addNormalizedBatchSink({ onRecords });
+
+    await receiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents(
+      [{ body: bodies.structured, sequenceNumber: 1 }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+    expect(onRecords).toHaveBeenCalledOnce();
+    await receiver.disconnect();
+
+    onRecords.mockClear();
+    await receiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents([{ body: bodies.legacy, sequenceNumber: 2 }], {
+      partitionId: "0",
+    });
+    vi.advanceTimersByTime(100 + 249);
+    expect(onRecords).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+
+    expect(onRecords).toHaveBeenCalledOnce();
+    expect(onRecords.mock.calls[0]?.[0]?.[0]?.category).toBe("AzureFirewallNetworkRule");
+    expect(receiver.receivedCount.value).toBe(2);
+    await receiver.disconnect();
   });
 
   it("does not create or subscribe a client after connect is invalidated", async () => {
@@ -643,6 +965,41 @@ describe("Event Hub receiver helpers", () => {
     expect(receiver.receivedCount.value).toBe(1);
     expect(receiver.errors.value).toEqual([]);
     expect(receiver.status.value).toBe("idle");
+  });
+
+  it("flushes unmatched legacy correlation candidate during disconnect", async () => {
+    const order: string[] = [];
+    const mocks = installNuxtMocks(order);
+    const bodies = createDuplicateNetworkRuleBodies();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => {
+        order.push("client-close");
+      }),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return {
+          close: vi.fn<() => Promise<void>>(async () => {
+            order.push("subscription-close");
+          }),
+        };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
+    await receiver.connect(createValidForm());
+    order.length = 0;
+
+    await requireHandlers(handlers).processEvents([{ body: bodies.legacy, sequenceNumber: 1 }], {
+      partitionId: "0",
+    });
+    await receiver.disconnect();
+
+    expect(order).toEqual(["subscription-close", "client-close", "batch-flush", "history-flush"]);
+    expect(mocks.logs.value).toHaveLength(1);
+    expect(mocks.logs.value[0]?.category).toBe("AzureFirewallNetworkRule");
+    expect(mocks.queueRecords).toHaveBeenCalledOnce();
+    expect(receiver.receivedCount.value).toBe(1);
   });
 
   it("resets paused receiver resources and buffered state", async () => {

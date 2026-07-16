@@ -48,6 +48,11 @@ interface ManagedEventHubStreamOptions {
 }
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function normalizeEventBodyForStream(body: unknown) {
+  return body instanceof Uint8Array ? textDecoder.decode(body) : body;
+}
 
 function containsControlCharacter(value: string) {
   for (let index = 0; index < value.length; index += 1) {
@@ -255,7 +260,7 @@ export function createManagedEventHubStream({
                 await write({
                   type: "events",
                   events: events.map((event) => ({
-                    body: event.body,
+                    body: normalizeEventBodyForStream(event.body),
                     enqueuedTimeUtc: event.enqueuedTimeUtc.toISOString(),
                     partitionId: context.partitionId,
                     sequenceNumber: event.sequenceNumber,

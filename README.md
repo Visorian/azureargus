@@ -5,6 +5,10 @@ Browser workspace for receiving, inspecting, and querying Azure Firewall logs.
 ## Features
 
 - Stream Azure Firewall logs directly from Event Hubs with pause/resume controls and wall-time lag.
+- When `AZFWNetworkRule` and `AzureFirewallNetworkRule` records exactly match within correlation
+  window, legacy `AzureFirewallNetworkRule` record is suppressed.
+- Live Event Hub view defaults to 5,000 visible entries; filters can access a 10x in-memory rolling
+  buffer capped at 50,000, where newest entries replace oldest entries after the cap is reached.
 - Query historical network, application, and NAT rule logs through Azure Log Analytics.
 - Search, filter, sort, and inspect raw records in a virtualized high-volume table.
 - Add or remove filters directly from filterable table values.

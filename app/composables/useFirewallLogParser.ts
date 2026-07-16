@@ -2,6 +2,9 @@ import type { FirewallLogRecord } from "~/types/firewall";
 import { parseDnsObservation } from "#shared/utils/dns";
 
 const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i;
+const ESCAPED_MESSAGE_PROPERTIES_PATTERN =
+  /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g;
+const utf8Decoder = new TextDecoder();
 
 export interface FirewallLogInput {
   raw: unknown;
@@ -128,16 +131,68 @@ function safeJson(value: unknown) {
   }
 }
 
+function repairEscapedMessageProperties(value: string) {
+  let changed = false;
+  const repaired = value.replace(
+    ESCAPED_MESSAGE_PROPERTIES_PATTERN,
+    (match, escapedMessage: string) => {
+      let message: unknown;
+      try {
+        message = JSON.parse(`"${escapedMessage}"`);
+      } catch {
+        return match;
+      }
+      if (typeof message !== "string") {
+        return match;
+      }
+
+      changed = true;
+      return `"properties":{"msg":${JSON.stringify(message)}}`;
+    },
+  );
+
+  return changed ? repaired : undefined;
+}
+
+function parseEventHubBody(body: unknown) {
+  const encoded =
+    typeof body === "string"
+      ? body
+      : body instanceof Uint8Array
+        ? utf8Decoder.decode(body)
+        : undefined;
+  if (encoded === undefined) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(encoded) as unknown;
+  } catch {
+    const repaired = repairEscapedMessageProperties(encoded);
+    if (repaired === undefined) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(repaired) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 export function expandAzureMonitorRecords(body: unknown): unknown[] {
-  if (Array.isArray(body)) {
-    return body;
+  const parsedBody = parseEventHubBody(body);
+  const expandedBody = parsedBody === undefined ? body : parsedBody;
+
+  if (Array.isArray(expandedBody)) {
+    return expandedBody;
   }
 
-  if (isRecord(body) && Array.isArray(body.records)) {
-    return body.records;
+  if (isRecord(expandedBody) && Array.isArray(expandedBody.records)) {
+    return expandedBody.records;
   }
 
-  return [body];
+  return [expandedBody];
 }
 
 export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLogRecord {

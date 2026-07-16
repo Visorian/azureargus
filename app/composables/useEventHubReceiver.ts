@@ -12,6 +12,7 @@ import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFire
 import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "~/types/firewall";
 import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
+import { createNetworkRuleCorrelator } from "~/utils/networkRuleCorrelation";
 import { computed, watch, type Ref } from "vue";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
@@ -158,6 +159,7 @@ export function useEventHubReceiver({
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
   const errors = useState<string[]>("event-hub-errors", () => []);
   const receivedCount = useState("event-hub-received-count", () => 0);
+  const sourceRecordCount = useState("event-hub-source-record-count", () => receivedCount.value);
   const latestSourceTimestamp = useState<string | null>(
     "event-hub-latest-source-timestamp",
     () => null,
@@ -179,7 +181,7 @@ export function useEventHubReceiver({
   const logHistoryPersistence = useLogHistoryPersistence();
   const paused = computed(() => status.value === "paused");
   const normalizedBatchSinks = new Set<NormalizedLogBatchSink>();
-  let nextRecordIndex = receivedCount.value;
+  let nextRecordIndex = sourceRecordCount.value;
 
   function updateUiFilterOptions(records: readonly FirewallLogRecord[], rebuild = false) {
     if (rebuild) {
@@ -216,45 +218,58 @@ export function useEventHubReceiver({
     { flush: "sync" },
   );
 
+  function observeReceivedRecords(records: readonly FirewallLogRecord[]) {
+    sourceRecordCount.value += records.length;
+    let nextLatestSourceTimestamp = latestSourceTimestamp.value;
+    let latestEnqueuedTimestamp: string | null = null;
+
+    for (const record of records) {
+      if (
+        (nextLatestSourceTimestamp === null || record.timestamp > nextLatestSourceTimestamp) &&
+        Date.parse(record.timestamp) > 0
+      ) {
+        nextLatestSourceTimestamp = record.timestamp;
+      }
+      if (
+        record.enqueuedTimeUtc &&
+        (latestEnqueuedTimestamp === null || record.enqueuedTimeUtc > latestEnqueuedTimestamp)
+      ) {
+        latestEnqueuedTimestamp = record.enqueuedTimeUtc;
+      }
+    }
+
+    latestSourceTimestamp.value = nextLatestSourceTimestamp;
+    if (
+      !caughtUp.value &&
+      latestEnqueuedTimestamp !== null &&
+      Date.now() - Date.parse(latestEnqueuedTimestamp) <= LIVE_TAIL_THRESHOLD_MS
+    ) {
+      caughtUp.value = true;
+    }
+  }
+
+  function publishAcceptedRecords(records: readonly FirewallLogRecord[]) {
+    for (const sink of normalizedBatchSinks) {
+      try {
+        sink.onRecords(records);
+      } catch (error: unknown) {
+        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+      }
+    }
+    buffer.pushMany(records);
+    if (uiActive.value) updateUiFilterOptions(records);
+    receivedCount.value += records.length;
+    logHistoryPersistence.queueRecords(records);
+  }
+
+  const networkRuleCorrelator = createNetworkRuleCorrelator({
+    maxCandidates: () => rawBufferSize.value,
+    onRecords: publishAcceptedRecords,
+  });
   const batcher = createLogBatcher<FirewallLogRecord>({
     onFlush: (records) => {
-      for (const sink of normalizedBatchSinks) {
-        try {
-          sink.onRecords(records);
-        } catch (error: unknown) {
-          errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-        }
-      }
-      buffer.pushMany(records);
-      if (uiActive.value) updateUiFilterOptions(records);
-      let nextLatestSourceTimestamp = latestSourceTimestamp.value;
-      let latestEnqueuedTimestamp: string | null = null;
-
-      for (const record of records) {
-        if (
-          (nextLatestSourceTimestamp === null || record.timestamp > nextLatestSourceTimestamp) &&
-          Date.parse(record.timestamp) > 0
-        ) {
-          nextLatestSourceTimestamp = record.timestamp;
-        }
-        if (
-          record.enqueuedTimeUtc &&
-          (latestEnqueuedTimestamp === null || record.enqueuedTimeUtc > latestEnqueuedTimestamp)
-        ) {
-          latestEnqueuedTimestamp = record.enqueuedTimeUtc;
-        }
-      }
-
-      latestSourceTimestamp.value = nextLatestSourceTimestamp;
-      if (
-        !caughtUp.value &&
-        latestEnqueuedTimestamp !== null &&
-        Date.now() - Date.parse(latestEnqueuedTimestamp) <= LIVE_TAIL_THRESHOLD_MS
-      ) {
-        caughtUp.value = true;
-      }
-      receivedCount.value += records.length;
-      logHistoryPersistence.queueRecords(records);
+      observeReceivedRecords(records);
+      networkRuleCorrelator.push(records);
     },
   });
 
@@ -306,6 +321,12 @@ export function useEventHubReceiver({
 
       try {
         batcher.flush();
+      } catch (error: unknown) {
+        failures.push(error);
+      }
+
+      try {
+        networkRuleCorrelator.flush();
       } catch (error: unknown) {
         failures.push(error);
       }
@@ -520,6 +541,7 @@ export function useEventHubReceiver({
 
   function clear() {
     batcher.clear();
+    networkRuleCorrelator.clear();
     logHistoryPersistence.clearQueueIfDisabled();
     buffer.clear();
     categoryOptions.value = [];
@@ -529,6 +551,7 @@ export function useEventHubReceiver({
     actionKeys.clear();
     protocolKeys.clear();
     receivedCount.value = 0;
+    sourceRecordCount.value = 0;
     nextRecordIndex = 0;
     latestSourceTimestamp.value = null;
     caughtUp.value = false;

@@ -138,6 +138,36 @@ describe("managed Event Hub stream", () => {
     expect(fixture.clientClose).toHaveBeenCalledOnce();
   });
 
+  it("transports binary event bodies as compact UTF-8 text", async () => {
+    const fixture = createClient();
+    const managed = createManagedEventHubStream({
+      client: fixture.client,
+      request: { consumerGroup: "$Default", lookbackMinutes: 3 },
+      sessionExpiresAt: 10,
+      revalidateSession: async () => true,
+      now: () => 0,
+    });
+    const body = '{"records":[{"category":"AzureFirewallDnsProxy"}]}';
+    const processing = fixture.getHandlers().processEvents(
+      [
+        {
+          body: new TextEncoder().encode(body),
+          enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
+          sequenceNumber: 42,
+        },
+      ],
+      { partitionId: "1" },
+    );
+    const reader = managed.stream.getReader();
+
+    await expect(readEnvelope(reader)).resolves.toMatchObject({
+      type: "events",
+      events: [{ body }],
+    });
+    await processing;
+    await reader.cancel();
+  });
+
   it("waits for Node response drain before reading another stream chunk", async () => {
     const request = new IncomingMessage(new Socket());
     const response = new ServerResponse(request);
