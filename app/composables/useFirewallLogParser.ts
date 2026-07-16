@@ -2,6 +2,8 @@ import type { FirewallLogRecord } from "~/types/firewall";
 import { parseDnsObservation } from "#shared/utils/dns";
 
 const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i;
+const LEGACY_RULE_COLLECTION_PATTERN = /\bRule Collection\s*:\s*(.*?)(?=\.\s*Rule\s*:|$)/i;
+const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/i;
 const ESCAPED_MESSAGE_PROPERTIES_PATTERN =
   /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g;
 const utf8Decoder = new TextDecoder();
@@ -106,6 +108,14 @@ function extractLegacyRuleCollectionGroup(message: string) {
   return message
     .match(/\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/i)?.[1]
     ?.trim();
+}
+
+function extractLegacyRuleCollection(message: string) {
+  return message.match(LEGACY_RULE_COLLECTION_PATTERN)?.[1]?.trim();
+}
+
+function extractLegacyRule(message: string) {
+  return message.match(LEGACY_RULE_PATTERN)?.[1]?.trim();
 }
 
 function extractIpPorts(message: string) {
@@ -255,10 +265,12 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     extractLegacyRuleCollectionGroup(message);
   const ruleCollection =
     readString(properties, ["ruleCollection", "RuleCollection", "ruleCollectionName"]) ||
-    readString(rawRecord, ["ruleCollection", "RuleCollection", "ruleCollectionName"]);
+    readString(rawRecord, ["ruleCollection", "RuleCollection", "ruleCollectionName"]) ||
+    extractLegacyRuleCollection(message);
   const explicitRule =
     readString(properties, ["rule", "Rule", "ruleName"]) ||
-    readString(rawRecord, ["rule", "Rule", "ruleName"]);
+    readString(rawRecord, ["rule", "Rule", "ruleName"]) ||
+    extractLegacyRule(message);
   const actionReason =
     readString(properties, ["actionReason", "ActionReason"]) ||
     readString(rawRecord, ["actionReason", "ActionReason"]);

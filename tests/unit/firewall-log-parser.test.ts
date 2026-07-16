@@ -80,6 +80,8 @@ describe("firewall log parser", () => {
     expect(log.destinationIp).toBe("10.1.0.8");
     expect(log.policy).toBe("legacy-policy");
     expect(log.ruleCollectionGroup).toBe("legacy-collection-group");
+    expect(log.ruleCollection).toBe("legacy-collection");
+    expect(log.rule).toBe("allow-web");
   });
 
   it("maps live Event Hub DNS proxy requests and preserves delivery metadata", () => {
