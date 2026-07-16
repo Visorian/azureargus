@@ -7,7 +7,9 @@ import type { EventHubConnectionForm } from "~/composables/useEventHubConnection
 import type { AnalysisMode } from "~/composables/useAnalysisMode";
 import {
   createDefaultLogFilters,
+  isLogCategoryFilterValueActive,
   isLogFilterValueActive,
+  toggleLogCategoryFilterValue,
   toggleLogFilterValue,
 } from "~/composables/useLogQuery";
 import type {
@@ -414,7 +416,7 @@ const realTimeProtocols = computed(() => {
 const activeFilters = computed(() =>
   logAnalysisActive.value ? logResultQuery.filters : realTimeQuery.filters,
 );
-function createClearableFilterModel(key: "category" | "action" | "protocol") {
+function createClearableFilterModel(key: "action" | "protocol") {
   return computed<string | null>({
     get: () => activeFilters.value[key] || null,
     set: (value) => {
@@ -422,7 +424,6 @@ function createClearableFilterModel(key: "category" | "action" | "protocol") {
     },
   });
 }
-const categoryFilter = createClearableFilterModel("category");
 const actionFilter = createClearableFilterModel("action");
 const protocolFilter = createClearableFilterModel("protocol");
 const sortedLogs = computed(() =>
@@ -742,10 +743,20 @@ function createProtocol(value: string) {
 }
 
 function isQuickFilterActive(key: QuickFilterKey, value: string | undefined) {
+  if (key === "category") {
+    return isLogCategoryFilterValueActive(activeFilters.value.category, value);
+  }
   return isLogFilterValueActive(activeFilters.value[key], value);
 }
 
 function toggleQuickFilter(key: QuickFilterKey, value: string | undefined) {
+  if (key === "category") {
+    activeFilters.value.category = toggleLogCategoryFilterValue(
+      activeFilters.value.category,
+      value,
+    );
+    return;
+  }
   activeFilters.value[key] = toggleLogFilterValue(activeFilters.value[key], value);
 }
 
@@ -1398,10 +1409,12 @@ function statusColor(status: string) {
                 @keydown.enter="logAnalysisActive && applyLogFilters()"
               />
               <USelectMenu
-                v-model="categoryFilter"
+                v-model="activeFilters.category"
                 :items="categories"
+                aria-label="Category filter"
                 clear
-                placeholder="Category"
+                multiple
+                placeholder="Categories"
                 class="w-38"
               />
               <USelectMenu

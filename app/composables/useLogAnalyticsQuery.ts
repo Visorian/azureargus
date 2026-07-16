@@ -143,7 +143,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     return {
       filters: {
         action: options.filters.action,
-        category: options.filters.category,
+        category: [...options.filters.category],
         destination: options.filters.destination,
         protocol: options.filters.protocol,
         search: options.filters.search,

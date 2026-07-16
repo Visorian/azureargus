@@ -12,11 +12,13 @@ import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from "./azureDiagnosticsLogAnaly
 
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILTER_LENGTH = 256;
+const MAX_CATEGORY_FILTERS = 32;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILTER_KEYS = ["search", "category", "action", "protocol", "source", "destination"] as const;
+const TEXT_FILTER_KEYS = ["search", "action", "protocol", "source", "destination"] as const;
 const SORT_COLUMNS: Record<LogAnalyticsSort["key"], string> = {
   timestamp: "TimeGenerated",
   category: "tolower(Category)",
@@ -155,10 +157,20 @@ function isValidFilterObject(value: unknown) {
     return false;
   }
 
-  return FILTER_KEYS.every((key) => {
-    const filterValue = value[key];
-    return typeof filterValue === "string" && filterValue.length <= MAX_FILTER_LENGTH;
-  });
+  return (
+    Array.isArray(value.category) &&
+    value.category.length <= MAX_CATEGORY_FILTERS &&
+    value.category.every(
+      (category) =>
+        typeof category === "string" &&
+        category.trim().length > 0 &&
+        category.length <= MAX_FILTER_LENGTH,
+    ) &&
+    TEXT_FILTER_KEYS.every((key) => {
+      const filterValue = value[key];
+      return typeof filterValue === "string" && filterValue.length <= MAX_FILTER_LENGTH;
+    })
+  );
 }
 
 function isValidSortObject(value: unknown) {
@@ -393,14 +405,24 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
   const clauses = [baseQuery, CANONICAL_QUERY_SUFFIX];
   const filters = {
     search: "SearchableText",
-    category: "Category",
     action: "Action",
     protocol: "Protocol",
     source: 'strcat(SourceIp, ":", SourcePort)',
     destination: 'strcat(DestinationIp, ":", DestinationPort)',
   } as const;
 
-  for (const key of FILTER_KEYS) {
+  const categories = [
+    ...new Set(
+      request.filters.category
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value.length > 0),
+    ),
+  ].toSorted();
+  if (categories.length > 0) {
+    clauses.push(`| where Category in~ (${categories.map(encodeKqlStringLiteral).join(", ")})`);
+  }
+
+  for (const key of TEXT_FILTER_KEYS) {
     const value = request.filters[key].trim().toLowerCase();
     if (value.length > 0) {
       clauses.push(`| where ${filters[key]} contains ${encodeKqlStringLiteral(value)}`);

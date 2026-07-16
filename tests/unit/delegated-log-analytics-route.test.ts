@@ -28,7 +28,7 @@ function createRequest(): DelegatedLogAnalyticsQueryRequest {
   return {
     filters: {
       action: "",
-      category: "",
+      category: [],
       destination: "",
       protocol: "",
       search: "",

@@ -49,7 +49,7 @@ export interface FirewallLogSortState {
 
 export interface FirewallLogFilters {
   search: string;
-  category: string;
+  category: string[];
   action: string;
   protocol: string;
   source: string;

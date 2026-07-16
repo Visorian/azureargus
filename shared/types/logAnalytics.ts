@@ -6,7 +6,7 @@ import type {
 
 export interface LogAnalyticsFilters {
   search: string;
-  category: string;
+  category: string[];
   action: string;
   protocol: string;
   source: string;

@@ -72,7 +72,11 @@ export function parseLogAnalysisDateRange(range: LogAnalysisDateRange): LogAnaly
 export function getLogAnalysisCriteriaKey(filters: FirewallLogFilters, sort: FirewallLogSortState) {
   return [
     filters.search,
-    filters.category,
+    filters.category
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+      .toSorted()
+      .join("\u001E"),
     filters.action,
     filters.protocol,
     filters.source,

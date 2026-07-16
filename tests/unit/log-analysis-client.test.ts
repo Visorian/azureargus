@@ -108,6 +108,7 @@ describe("Log analysis client", () => {
 
     queryLimit.value = 2_000;
     filters.action = "Deny";
+    filters.category = ["AZFWNetworkRule", "AZFWApplicationRule"];
     await nextTick();
     expect(query.refinementPending.value).toBe(true);
     vi.advanceTimersByTime(499);
@@ -119,6 +120,7 @@ describe("Log analysis client", () => {
     await Promise.resolve();
     expect(requests).toHaveLength(2);
     expect(requests[1]?.filters.action).toBe("Deny");
+    expect(requests[1]?.filters.category).toEqual(["AZFWNetworkRule", "AZFWApplicationRule"]);
     expect(requests[1]?.limit).toBe(2_000);
 
     filters.protocol = "UDP";

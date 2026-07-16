@@ -47,7 +47,7 @@ function createRequest(): LogAnalyticsQueryRequest {
   return {
     filters: {
       action: "",
-      category: "",
+      category: [],
       destination: "",
       protocol: "",
       search: "",

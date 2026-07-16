@@ -21,7 +21,7 @@ interface UseLogQueryOptions {
 export function createDefaultLogFilters(): FirewallLogFilters {
   return {
     search: "",
-    category: "",
+    category: [],
     action: "",
     protocol: "",
     source: "",
@@ -66,7 +66,9 @@ export function filterFirewallLogs(
   limit?: number,
 ) {
   const search = filters.search.trim().toLowerCase();
-  const category = filters.category.trim().toLowerCase();
+  const categories = new Set(
+    filters.category.map((value) => value.trim().toLowerCase()).filter(Boolean),
+  );
   const action = filters.action.trim().toLowerCase();
   const protocol = filters.protocol.trim().toLowerCase();
   const source = filters.source.trim().toLowerCase();
@@ -85,7 +87,7 @@ export function filterFirewallLogs(
   for (const log of logs) {
     if (
       (search.length === 0 || log.searchableText.includes(search)) &&
-      includes(log.category, category) &&
+      (categories.size === 0 || categories.has(log.category.trim().toLowerCase())) &&
       includes(log.action, action) &&
       includes(log.protocol, protocol) &&
       (source.length === 0 || includes(`${log.sourceIp ?? ""}:${log.sourcePort ?? ""}`, source)) &&
@@ -103,7 +105,36 @@ export function filterFirewallLogs(
 }
 
 export function hasActiveLogFilters(filters: FirewallLogFilters) {
-  return Object.values(filters).some((value) => value.trim().length > 0);
+  return Object.values(filters).some((value) =>
+    Array.isArray(value) ? value.some((item) => item.trim().length > 0) : value.trim().length > 0,
+  );
+}
+
+export function isLogCategoryFilterValueActive(
+  currentValues: readonly string[],
+  candidateValue: string | undefined,
+) {
+  const candidate = candidateValue?.trim().toLowerCase();
+  return Boolean(
+    candidate && currentValues.some((value) => value.trim().toLowerCase() === candidate),
+  );
+}
+
+export function toggleLogCategoryFilterValue(
+  currentValues: readonly string[],
+  candidateValue: string | undefined,
+) {
+  const nextValue = candidateValue?.trim();
+  if (!nextValue) {
+    return [...currentValues];
+  }
+
+  if (isLogCategoryFilterValueActive(currentValues, nextValue)) {
+    const normalizedValue = nextValue.toLowerCase();
+    return currentValues.filter((value) => value.trim().toLowerCase() !== normalizedValue);
+  }
+
+  return [...currentValues, nextValue];
 }
 
 export function isLogFilterValueActive(currentValue: string, candidateValue: string | undefined) {
@@ -124,7 +155,11 @@ export function toggleLogFilterValue(currentValue: string, candidateValue: strin
 export function getLogFiltersKey(filters: FirewallLogFilters) {
   return [
     filters.search,
-    filters.category,
+    filters.category
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+      .toSorted()
+      .join("\u001E"),
     filters.action,
     filters.protocol,
     filters.source,

@@ -13,7 +13,7 @@ function createRequest(): LogAnalyticsQueryRequest {
     to: "2026-07-10T10:15:00.000Z",
     filters: {
       search: "",
-      category: "",
+      category: [],
       action: "",
       protocol: "",
       source: "",
@@ -28,6 +28,15 @@ function createRequest(): LogAnalyticsQueryRequest {
 describe("Log Analytics request contract", () => {
   it("accepts the strict request shape", () => {
     expect(validateLogAnalyticsQueryRequest(createRequest())).toBe(true);
+    expect(
+      validateLogAnalyticsQueryRequest({
+        ...createRequest(),
+        filters: {
+          ...createRequest().filters,
+          category: ["AZFWNetworkRule", "AZFWApplicationRule"],
+        },
+      }),
+    ).toBe(true);
   });
 
   it("rejects unknown and missing fields", () => {
@@ -83,6 +92,36 @@ describe("Log Analytics request contract", () => {
       validateLogAnalyticsQueryRequest({
         ...request,
         filters: { ...request.filters, search: "x".repeat(257) },
+      }),
+    ).toBe(false);
+    expect(
+      validateLogAnalyticsQueryRequest({
+        ...request,
+        filters: { ...request.filters, category: Array.from({ length: 33 }).fill("category") },
+      }),
+    ).toBe(false);
+    expect(
+      validateLogAnalyticsQueryRequest({
+        ...request,
+        filters: { ...request.filters, category: ["x".repeat(257)] },
+      }),
+    ).toBe(false);
+    expect(
+      validateLogAnalyticsQueryRequest({
+        ...request,
+        filters: { ...request.filters, category: [" "] },
+      }),
+    ).toBe(false);
+    expect(
+      validateLogAnalyticsQueryRequest({
+        ...request,
+        filters: { ...request.filters, category: [42] },
+      }),
+    ).toBe(false);
+    expect(
+      validateLogAnalyticsQueryRequest({
+        ...request,
+        filters: { ...request.filters, category: "AZFWNetworkRule" },
       }),
     ).toBe(false);
     expect(

@@ -39,7 +39,7 @@ function createRequest(): LogAnalyticsQueryRequest {
     to: "2026-07-10T10:15:00.000Z",
     filters: {
       search: "",
-      category: "",
+      category: [],
       action: "",
       protocol: "",
       source: "",
@@ -114,7 +114,7 @@ describe("Log Analytics KQL builder", () => {
   it("matches trimmed case-insensitive browser filters and preserves requested cap", () => {
     const request = createRequest();
     request.filters.search = "  Firewall  ";
-    request.filters.category = "AZFWNetworkRule";
+    request.filters.category = ["AZFWNetworkRule", "AZFWApplicationRule"];
     request.filters.action = "  DeNy  ";
     request.filters.protocol = "Tcp";
     request.filters.source = "10.0.0.4:443";
@@ -126,7 +126,9 @@ describe("Log Analytics KQL builder", () => {
 
     expect(result.limit).toBe(5_000);
     expect(result.query).toContain('| where SearchableText contains "firewall"');
-    expect(result.query).toContain('| where Category contains "azfwnetworkrule"');
+    expect(result.query).toContain(
+      '| where Category in~ ("azfwapplicationrule", "azfwnetworkrule")',
+    );
     expect(result.query).toContain('| where Action contains "deny"');
     expect(result.query).toContain('| where Protocol contains "tcp"');
     expect(result.query).toContain(
@@ -153,7 +155,7 @@ describe("Log Analytics KQL builder", () => {
   it("normalizes only captured AzureDiagnostics network-rule fields", () => {
     const request = createRequest();
     request.filters.search = "dns-rule";
-    request.filters.category = "AZFWNetworkRule";
+    request.filters.category = ["AZFWNetworkRule"];
     request.filters.action = "Allow";
     request.filters.protocol = "UDP";
     request.filters.source = "10.0.0.5:51001";
@@ -181,7 +183,7 @@ describe("Log Analytics KQL builder", () => {
     );
     expect(result.query).toContain('| where Protocol contains "udp"');
     expect(result.query).toContain('| where SearchableText contains "dns-rule"');
-    expect(result.query).toContain('| where Category contains "azfwnetworkrule"');
+    expect(result.query).toContain('| where Category in~ ("azfwnetworkrule")');
     expect(result.query).toContain('| where Action contains "allow"');
     expect(result.query).toContain(
       '| where strcat(SourceIp, ":", SourcePort) contains "10.0.0.5:51001"',

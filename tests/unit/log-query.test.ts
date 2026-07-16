@@ -4,9 +4,11 @@ import {
   createCaseInsensitiveFilterOptions,
   createDefaultLogFilters,
   filterFirewallLogs,
+  isLogCategoryFilterValueActive,
   isLogFilterValueActive,
   mergeFilteredLogCache,
   queryFirewallLogs,
+  toggleLogCategoryFilterValue,
   toggleLogFilterValue,
   useLogQuery,
 } from "../../app/composables/useLogQuery";
@@ -43,6 +45,18 @@ describe("log query", () => {
     expect(isLogFilterValueActive("Allow", "Deny")).toBe(false);
   });
 
+  it("toggles multiple category quick-filter values case-insensitively", () => {
+    expect(toggleLogCategoryFilterValue([], " AZFWNetworkRule ")).toEqual(["AZFWNetworkRule"]);
+    expect(toggleLogCategoryFilterValue(["AZFWNetworkRule"], "AZFWApplicationRule")).toEqual([
+      "AZFWNetworkRule",
+      "AZFWApplicationRule",
+    ]);
+    expect(
+      toggleLogCategoryFilterValue(["AZFWNetworkRule", "AZFWApplicationRule"], "azfwnetworkrule"),
+    ).toEqual(["AZFWApplicationRule"]);
+    expect(isLogCategoryFilterValueActive([" AZFWNetworkRule "], "azfwnetworkrule")).toBe(true);
+  });
+
   it("filters by search text and fields", () => {
     const filters = createDefaultLogFilters();
     filters.search = "20.30";
@@ -74,6 +88,23 @@ describe("log query", () => {
     );
 
     expect(result.map((log) => log.id)).toEqual(["1"]);
+  });
+
+  it("matches any selected category exactly and case-insensitively", () => {
+    const filters = createDefaultLogFilters();
+    filters.category = ["azfwnetworkrule", "AZFWApplicationRule"];
+
+    const result = filterFirewallLogs(
+      [
+        createLog({ id: "network", category: "AZFWNetworkRule" }),
+        createLog({ id: "application", category: "AZFWApplicationRule" }),
+        createLog({ id: "nat", category: "AZFWNatRule" }),
+        createLog({ id: "partial", category: "AZFWNetworkRuleAggregation" }),
+      ],
+      filters,
+    );
+
+    expect(result.map((log) => log.id)).toEqual(["network", "application"]);
   });
 
   it("returns newest visible rows directly when no filters are active", () => {

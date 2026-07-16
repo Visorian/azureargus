@@ -330,6 +330,17 @@ test("managed Event Hub uses configured server stream without exposing credentia
   await expect(
     page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
   ).toBeVisible();
+  const categoryFilter = page.getByRole("button", { name: "Category filter" });
+  await categoryFilter.click();
+  const networkCategory = page.getByRole("option", { name: "AZFWNetworkRule", exact: true });
+  const dnsCategory = page.getByRole("option", { name: "AzureFirewallDnsProxy", exact: true });
+  await networkCategory.click();
+  await expect(page.getByText("1 visible / 2 received")).toBeVisible();
+  await dnsCategory.click();
+  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+  await networkCategory.click();
+  await expect(page.getByText("1 visible / 2 received")).toBeVisible();
+  await page.keyboard.press("Escape");
   const firewallTable = page.getByRole("table", { name: "Firewall logs" });
   const tableBox = await firewallTable.boundingBox();
   expect(tableBox?.x).toBeGreaterThanOrEqual(15);
@@ -379,6 +390,7 @@ test("managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
     expect(requestBody).not.toHaveProperty("workspaceId");
     expect(requestBody.limit).toBe(2_000);
     expect(requestBody.storage).toBe("azure-diagnostics");
+    expect(requestBody.filters.category).toEqual(["AZFWNetworkRule", "AZFWApplicationRule"]);
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -429,6 +441,10 @@ test("managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
   await expect(runQuery).toBeVisible();
   await page.getByRole("spinbutton", { name: "Query result limit" }).fill("2000");
   await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
+  await page.getByRole("button", { name: "Category filter" }).click();
+  await page.getByRole("option", { name: "AZFWNetworkRule", exact: true }).click();
+  await page.getByRole("option", { name: "AZFWApplicationRule", exact: true }).click();
+  await page.keyboard.press("Escape");
   await runQuery.click();
   await expect(page.getByText("1 visible", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open Log Analytics settings" })).toHaveCount(0);
@@ -996,7 +1012,7 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await expect(closeSettings).toBeFocused();
 
   const filterDropdowns = page.getByRole("button", { name: "Show popup" });
-  await expect(filterDropdowns.filter({ hasText: "Category" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Category filter" })).toBeVisible();
   await expect(filterDropdowns.filter({ hasText: "Action" })).toBeVisible();
   await expect(filterDropdowns.filter({ hasText: "Protocol" })).toBeVisible();
 
@@ -1462,7 +1478,7 @@ test("anonymous request cannot query Log Analytics", async ({ request }) => {
     data: {
       filters: {
         action: "",
-        category: "",
+        category: [],
         destination: "",
         protocol: "",
         search: "",
