@@ -4,8 +4,9 @@ import {
   type EventHubConnectionForm,
 } from "~/composables/useEventHubConnection";
 
-defineProps<{
+const props = defineProps<{
   clearingLogHistory: boolean;
+  connectionActive: boolean;
   connecting: boolean;
   connectionStringPersistenceError: string | null;
   logHistoryEnabled: boolean;
@@ -39,6 +40,7 @@ const consumerGroup = createConnectionFieldModel("consumerGroup");
 const eventHubName = createConnectionFieldModel("eventHubName");
 const lookbackMinutes = createConnectionFieldModel("lookbackMinutes");
 const bufferSize = createConnectionFieldModel("bufferSize");
+const connectionFieldsDisabled = computed(() => props.connecting || props.connectionActive);
 </script>
 
 <template>
@@ -60,7 +62,7 @@ const bufferSize = createConnectionFieldModel("bufferSize");
           v-model="connectionString"
           :rows="4"
           class="w-full"
-          :disabled="managed"
+          :disabled="managed || connectionFieldsDisabled"
           :placeholder="
             managed
               ? 'Configured by deployment'
@@ -82,21 +84,33 @@ const bufferSize = createConnectionFieldModel("bufferSize");
         {{ connectionStringPersistenceError }}
       </p>
       <UFormField label="Consumer group" name="consumerGroup" required>
-        <UInput v-model="consumerGroup" class="w-full" />
+        <UInput v-model="consumerGroup" class="w-full" :disabled="connectionFieldsDisabled" />
       </UFormField>
       <UFormField label="Event Hub name" name="eventHubName">
         <UInput
           v-model="eventHubName"
           class="w-full"
-          :disabled="managed"
+          :disabled="managed || connectionFieldsDisabled"
           :placeholder="managed ? 'Configured by deployment' : 'Only needed without EntityPath'"
         />
       </UFormField>
       <UFormField label="Lookback" name="lookbackMinutes">
-        <USelect v-model="lookbackMinutes" :items="EVENT_HUB_LOOKBACK_OPTIONS" class="w-full" />
+        <USelect
+          v-model="lookbackMinutes"
+          :items="EVENT_HUB_LOOKBACK_OPTIONS"
+          class="w-full"
+          :disabled="connectionFieldsDisabled"
+        />
       </UFormField>
       <UFormField label="Visible rows" name="bufferSize">
-        <UInput v-model.number="bufferSize" type="number" min="100" step="100" class="w-full" />
+        <UInput
+          v-model.number="bufferSize"
+          type="number"
+          min="100"
+          step="100"
+          class="w-full"
+          :disabled="connectionFieldsDisabled"
+        />
       </UFormField>
       <div class="flex gap-2">
         <UButton

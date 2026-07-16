@@ -18,6 +18,7 @@ function createProps(connectionForm = createConnectionForm()) {
     connectionForm,
     rememberConnectionString: false,
     clearingLogHistory: false,
+    connectionActive: false,
     connecting: false,
     connectionStringPersistenceError: null,
     logHistoryEnabled: true,
@@ -112,5 +113,18 @@ describe("EventHubSettingsPanel", () => {
     expect(wrapper.text()).not.toContain("Remember connection string");
     const eventHubName = wrapper.findAll("input")[1];
     expect(eventHubName?.attributes()).toHaveProperty("disabled");
+  });
+
+  it("disables connection fields while the connection is active", async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
+      ...mountOptions,
+      props: { ...createProps(), connectionActive: true },
+    });
+
+    expect(wrapper.get("textarea").attributes()).toHaveProperty("disabled");
+    expect(wrapper.findAll("input").every((input) => "disabled" in input.attributes())).toBe(true);
+    expect(wrapper.get('[role="combobox"]').attributes()).toHaveProperty("disabled");
+    expect(wrapper.get('[role="checkbox"]').attributes()).not.toHaveProperty("disabled");
+    expect(wrapper.get('[role="switch"]').attributes()).not.toHaveProperty("disabled");
   });
 });

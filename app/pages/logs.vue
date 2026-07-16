@@ -114,6 +114,9 @@ const { enabled: rememberConnectionString, lastError: connectionStringPersistenc
     active: computed(() => capabilities.value?.mode === "anonymous"),
   });
 const connecting = ref(false);
+const eventHubConnectionActive = computed(
+  () => receiver.status.value === "connected" || receiver.status.value === "paused",
+);
 const settingsOpen = ref(false);
 const detailOpen = ref(false);
 const selectedLog = ref<FirewallLogRecord | null>(null);
@@ -1227,6 +1230,7 @@ function statusColor(status: string) {
               v-model:remember-connection-string="rememberConnectionString"
               :connection-form="connectionForm"
               :clearing-log-history="clearingLogHistory"
+              :connection-active="eventHubConnectionActive"
               :connecting="connecting"
               :connection-string-persistence-error="connectionStringPersistenceError"
               :log-history-enabled="logHistoryEnabled"
