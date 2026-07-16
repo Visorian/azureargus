@@ -246,7 +246,7 @@ describe("firewall log parser", () => {
     expect(log.searchableText).toContain("dns query");
   });
 
-  it("labels the default network action as the rule when no rule matched", () => {
+  it("labels default actions as the rule when no rule matched", () => {
     const defaultAction = normalizeFirewallLogRecord({
       raw: {
         category: "AZFWNetworkRule",
@@ -265,8 +265,47 @@ describe("firewall log parser", () => {
         },
       },
     });
+    const applicationDefault = normalizeFirewallLogRecord({
+      raw: {
+        time: "2026-07-16T15:15:58.874439+00:00",
+        resourceId:
+          "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
+        properties: {
+          Protocol: "HTTPS",
+          SourceIp: "10.140.5.36",
+          SourcePort: 51298,
+          DestinationPort: 443,
+          Fqdn: "0f0287f2-8b3c-4676-a466-934cd6e80d09.ods.opinsights.azure.com",
+          TargetUrl: "",
+          Action: "Deny",
+          Policy: "",
+          RuleCollectionGroup: "",
+          RuleCollection: "",
+          Rule: "",
+          ActionReason: "No rule matched. Proceeding with default action",
+          IsTlsInspected: false,
+          WebCategory: "",
+          IsExplicitProxyRequest: false,
+        },
+        category: "AZFWApplicationRule",
+      },
+    });
+    const legacyApplicationDefault = normalizeFirewallLogRecord({
+      raw: {
+        time: "2026-07-16T15:18:15.518183+00:00",
+        resourceId:
+          "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
+        operationName: "AzureFirewallApplicationRuleLog",
+        properties: {
+          msg: "HTTPS request from 10.140.5.36:51384 to winatp-gw-neu3.microsoft.com:443. Action: Deny. No rule matched. Proceeding with default action",
+        },
+        category: "AzureFirewallApplicationRule",
+      },
+    });
 
     expect(defaultAction.rule).toBe("Default");
     expect(namedRule.rule).toBe("deny-web");
+    expect(applicationDefault.rule).toBe("Default");
+    expect(legacyApplicationDefault.rule).toBe("Default");
   });
 });

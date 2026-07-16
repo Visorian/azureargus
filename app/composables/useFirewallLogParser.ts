@@ -1,6 +1,8 @@
 import type { FirewallLogRecord } from "~/types/firewall";
 import { parseDnsObservation } from "#shared/utils/dns";
 
+const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i;
+
 export interface FirewallLogInput {
   raw: unknown;
   enqueuedTimeUtc?: Date | string;
@@ -205,9 +207,10 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
   const actionReason =
     readString(properties, ["actionReason", "ActionReason"]) ||
     readString(rawRecord, ["actionReason", "ActionReason"]);
-  const rule =
-    explicitRule ??
-    (category === "AZFWNetworkRule" && actionReason === "Default Action" ? "Default" : undefined);
+  const usesDefaultAction =
+    DEFAULT_ACTION_REASON_PATTERN.test(actionReason ?? "") ||
+    DEFAULT_ACTION_REASON_PATTERN.test(message);
+  const rule = explicitRule ?? (usesDefaultAction ? "Default" : undefined);
   const sequenceNumber =
     input.sequenceNumber === undefined ? undefined : String(input.sequenceNumber);
   const offset = input.offset === undefined ? undefined : String(input.offset);

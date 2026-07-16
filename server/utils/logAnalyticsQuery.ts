@@ -65,7 +65,7 @@ const RESOURCE_SPECIFIC_BASE_QUERY = `union isfuzzy=true withsource=Category AZF
     ActionReason = tostring(column_ifexists("ActionReason", ""))`;
 
 const CANONICAL_QUERY_SUFFIX = `| extend Rule = iff(
-    Category == "AZFWNetworkRule" and isempty(Rule) and ActionReason =~ "Default Action",
+    isempty(Rule) and ActionReason contains "default action",
     "Default",
     Rule
   )
