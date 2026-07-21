@@ -13,13 +13,18 @@ import {
   DNS_QUERY_TYPE_LABELS,
   DNS_RCODE_LABELS,
 } from "#shared/utils/dns";
+import type { LogHourCycle } from "~/composables/useLogTimeFormat";
 
-const props = defineProps<{
-  entry: DnsEntry | null;
-  detail: DnsDetailQueryResponse | null;
-  error: string | null;
-  loading: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    entry: DnsEntry | null;
+    detail: DnsDetailQueryResponse | null;
+    error: string | null;
+    loading: boolean;
+    hourCycle?: LogHourCycle;
+  }>(),
+  { hourCycle: "h23" },
+);
 const open = defineModel<boolean>("open", { required: true });
 const toast = useToast();
 const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? []);
@@ -195,6 +200,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                         :datetime="observation.timestamp"
                         date-style="medium"
                         time-style="medium"
+                        :hour-cycle="hourCycle"
                       />
                       <template v-if="observation.enqueuedTimeUtc">
                         <p class="mt-1 text-xs text-brand-gray-500">Event Hub enqueued</p>
@@ -202,6 +208,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                           :datetime="observation.enqueuedTimeUtc"
                           date-style="medium"
                           time-style="medium"
+                          :hour-cycle="hourCycle"
                         />
                       </template>
                       <p v-if="observation.serverIp" class="truncate font-mono text-xs">
@@ -413,6 +420,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                         :datetime="evidence.timestamp"
                         date-style="medium"
                         time-style="medium"
+                        :hour-cycle="hourCycle"
                       />
                     </dd>
                   </div>

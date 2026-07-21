@@ -86,8 +86,6 @@ const logTableColumns: LogTableColumn[] = [
   { key: "destinationPort", label: "Dst port" },
   { key: "rule", label: "Rule" },
 ];
-const logTableGridClass =
-  "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]";
 const quickFilterButtonClass =
   "inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100";
 
@@ -108,6 +106,16 @@ const versionNumber = appConfig.versionNumber as string;
 const activeLens = ref<LogsLens>("all-logs");
 const allLogsLensActive = computed(() => activeLens.value === "all-logs");
 const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive });
+const {
+  hourCycle: logHourCycle,
+  lastError: logTimeFormatError,
+  use12Hour: use12HourTime,
+} = useLogTimeFormat();
+const logTableGridClass = computed(() =>
+  use12HourTime.value
+    ? "grid-cols-[14rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]"
+    : "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]",
+);
 const connectionForm = reactive<EventHubConnectionForm>(
   createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
 );
@@ -1287,6 +1295,20 @@ function statusColor(status: string) {
                 @refresh-azure-access="refreshTemporaryAzureAccess"
               />
             </div>
+            <div class="mt-4 border-t border-brand-gray-200 pt-4 dark:border-brand-gray-800">
+              <h2 class="text-sm font-semibold">Display settings</h2>
+              <USwitch v-model="use12HourTime" label="12-hour time" class="mt-3" />
+              <p class="mt-1 text-xs text-brand-gray-600 dark:text-brand-gray-300">
+                Off uses 24-hour time. Preference is stored in this browser.
+              </p>
+              <p
+                v-if="logTimeFormatError"
+                role="alert"
+                class="mt-2 text-xs text-red-600 dark:text-red-400"
+              >
+                {{ logTimeFormatError }}
+              </p>
+            </div>
           </section>
 
           <footer
@@ -1530,10 +1552,14 @@ function statusColor(status: string) {
                   >
                     <NuxtTime
                       :datetime="item.timestamp"
-                      date-style="medium"
-                      time-style="medium"
+                      year="numeric"
+                      month="short"
+                      day="2-digit"
+                      hour="2-digit"
+                      minute="2-digit"
+                      second="2-digit"
                       time-zone="UTC"
-                      hour-cycle="h23"
+                      :hour-cycle="logHourCycle"
                     />
                   </span>
                   <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
@@ -1756,6 +1782,7 @@ function statusColor(status: string) {
           </div>
         </div>
         <LogsDnsTroubleshootingView
+          :hour-cycle="logHourCycle"
           :filters="dns.filters.value"
           :sort="dns.sort.value"
           :entries="dns.entries.value"
@@ -1881,6 +1908,7 @@ function statusColor(status: string) {
     </UModal>
     <LogsDnsDetailModal
       v-model:open="dnsDetailOpen"
+      :hour-cycle="logHourCycle"
       :entry="dns.selectedEntry.value"
       :detail="dns.detail.value"
       :error="dns.detailError.value"

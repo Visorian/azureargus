@@ -11,19 +11,24 @@ import type {
   DnsSourceStatus,
 } from "#shared/types/dns";
 import { DNS_OUTCOME_LABELS } from "#shared/utils/dns";
+import type { LogHourCycle } from "~/composables/useLogTimeFormat";
 
-const props = defineProps<{
-  entries: DnsEntry[];
-  sources: DnsSourceStatus[];
-  status: "idle" | "loading" | "success" | "error";
-  error: string | null;
-  entriesTruncated: boolean;
-  transportsTruncated: boolean;
-  logAnalysis: boolean;
-  canApplyFilters: boolean;
-  filterOptions: DnsFilterOptions;
-  selectedEntryId: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    hourCycle?: LogHourCycle;
+    entries: DnsEntry[];
+    sources: DnsSourceStatus[];
+    status: "idle" | "loading" | "success" | "error";
+    error: string | null;
+    entriesTruncated: boolean;
+    transportsTruncated: boolean;
+    logAnalysis: boolean;
+    canApplyFilters: boolean;
+    filterOptions: DnsFilterOptions;
+    selectedEntryId: string | null;
+  }>(),
+  { hourCycle: "h23" },
+);
 const emit = defineEmits<{
   apply: [];
   reset: [];
@@ -34,8 +39,11 @@ const sort = defineModel<DnsSort>("sort", { required: true });
 const showUnidentifiedTransports = defineModel<boolean>("showUnidentifiedTransports", {
   required: true,
 });
-const dnsEntryGridClass =
-  "min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]";
+const dnsEntryGridClass = computed(() =>
+  props.hourCycle === "h12"
+    ? "min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]"
+    : "min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]",
+);
 type SortSelection =
   | "timestamp-desc"
   | "timestamp-asc"
@@ -324,6 +332,7 @@ function completeness(value: DnsEntry["completeness"]) {
                     hour="2-digit"
                     minute="2-digit"
                     second="2-digit"
+                    :hour-cycle="hourCycle"
                   />
                   <span class="truncate font-mono">{{
                     item.displayText ?? item.queryName ?? "Not observed"

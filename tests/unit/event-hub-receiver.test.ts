@@ -699,6 +699,46 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
+  it("marks a quiet temporary receiver caught up after reaching the partition head", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:10:00.000Z"));
+    installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({
+      loadClientFactory: async () => () => client,
+    });
+    await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents(
+      [
+        {
+          enqueuedTimeUtc: new Date("2026-07-10T12:05:00.000Z"),
+          body: {
+            time: "2026-07-10T12:05:00.000Z",
+            category: "AZFWNetworkRule",
+          },
+        },
+      ],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+    expect(receiver.caughtUp.value).toBe(false);
+
+    await requireHandlers(handlers).processEvents([], { partitionId: "0" });
+
+    expect(receiver.caughtUp.value).toBe(true);
+    expect(receiver.receivedCount.value).toBe(1);
+    await receiver.disconnect();
+  });
+
   it("collects filter options incrementally and resets them on clear", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-12T12:00:10.000Z"));

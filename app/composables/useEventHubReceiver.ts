@@ -487,6 +487,11 @@ export function useEventHubReceiver({
               return;
             }
 
+            if (events.length === 0) {
+              caughtUp.value = true;
+              return;
+            }
+
             const result = eventsToFirewallLogs(events, context.partitionId, nextRecordIndex);
             nextRecordIndex = result.nextIndex;
             batcher.pushMany(result.records);
