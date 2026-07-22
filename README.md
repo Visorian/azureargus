@@ -173,12 +173,13 @@ Log delivery can take up to 30 minutes after diagnostic settings change.
 
 ## IP Geolocation
 
-`bun run geoip:update` downloads and validates current monthly
-[DB-IP Country Lite](https://db-ip.com/db/download/ip-to-country-lite) release into
-`.data/dbip-country-lite.mmdb`. This file is ignored by Git and read only by Nitro server code;
-browser receives only two-letter country results.
+`bun run geoip:update` downloads the [pinned DB-IP Country Lite](./scripts/dbip-country-lite.pin.json)
+release, verifies its archive checksum and MMDB structure, then writes
+`.data/dbip-country-lite.mmdb` atomically. This file is ignored by Git and read only by Nitro server
+code; browser receives only two-letter country results.
 
-For container or serverless deployment:
+Published image bundles pinned database at read-only default path. For deployments that do not use
+published image:
 
 1. Run `bun run geoip:update` in controlled build or update job.
 2. Mount resulting database read-only into every application instance.
@@ -187,7 +188,26 @@ For container or serverless deployment:
    not capture request bodies in access logs, APM, or traces.
 
 App remains usable without database, but destination flags stay disabled. Keep last valid database
-when update fails and refresh it monthly.
+when update fails. Refresh pin monthly by updating both `release` and `archiveSha256` from exact
+DB-IP archive before rebuilding.
+
+## Releases
+
+From clean, up-to-date `main`, publish stable release with:
+
+```bash
+bun run release -- X.Y.Z --push
+```
+
+Command requires version greater than `package.json`, updates `CHANGELOG.md`, creates signed
+`chore(release): vX.Y.Z` commit and annotated tag, then atomically pushes both. Tag workflow verifies
+source and publishes only `ghcr.io/visorian/azureargus:X.Y.Z`; no moving image tag is created. Exact
+published digest appears in workflow summary.
+
+GHCR package must be public. GitHub creates first package as private, so organization owner must
+change `azureargus` package visibility to **Public** after initial publish and before treating release
+as complete. Visibility change is permanent. See
+[GitHub package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-packages-for-an-organization).
 
 ## Development
 

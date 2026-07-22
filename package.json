@@ -12,11 +12,12 @@
     "lint": "node ./node_modules/oxlint/bin/oxlint -c oxlint.config.ts app server shared tests nuxt.config.ts vitest.config.ts playwright.config.ts oxlint.config.ts",
     "fmt": "oxfmt .",
     "typecheck": "nuxt typecheck",
+    "typecheck:scripts": "tsc --ignoreConfig --noEmit --strict --module preserve --moduleResolution bundler --target es2024 --lib es2024,dom,dom.iterable --types node scripts/update-ip-country-database.ts scripts/release.ts",
     "test:unit": "vitest run --project unit --project nuxt",
     "test:browser": "node -e \"if (!process.env.PLAYWRIGHT_EXECUTABLE_PATH) { console.error('PLAYWRIGHT_EXECUTABLE_PATH must point to the Nix-wrapped Chromium executable.'); process.exit(1); }\" && vitest run --project browser",
     "test:e2e": "playwright test",
     "bump": "bunx taze major --maturity-period -w",
-    "release": "bunx changelogen --release --push",
+    "release": "bun scripts/release.ts",
     "prepare": "if command -v git >/dev/null 2>&1; then lefthook install; fi"
   },
   "dependencies": {
@@ -44,6 +45,7 @@
     "@types/node": "^26.1.1",
     "@vitest/browser-playwright": "4.1.10",
     "@vue/test-utils": "2.4.11",
+    "changelogen": "0.6.2",
     "happy-dom": "20.10.6",
     "lefthook": "^2.1.10",
     "oxfmt": "^0.58.0",

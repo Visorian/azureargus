@@ -1,0 +1,123 @@
+name: Publish container
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="$GITHUB_REF_NAME"
+          if (( ${#tag} > 71 )) || [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid stable release tag: $tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          package_version="$(jq -r '.version' package.json)"
+          if [[ "$package_version" != "$version" ]]; then
+            echo "Tag $tag does not match package version $package_version" >&2
+            exit 1
+          fi
+
+          if [[ "$(git cat-file -t "refs/tags/$tag")" != "tag" ]]; then
+            echo "Release tag must be annotated: $tag" >&2
+            exit 1
+          fi
+
+          commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          verified="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$commit" --jq '.verification.verified')"
+          if [[ "$verified" != "true" ]]; then
+            echo "Release commit signature is not verified by GitHub: $commit" >&2
+            exit 1
+          fi
+          subject="$(git log -1 --format=%s "$commit")"
+          if [[ "$subject" != "chore(release): $tag" ]]; then
+            echo "Tag must point to chore(release): $tag" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "Release commit is not reachable from main" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reject existing image tag
+        shell: bash
+        env:
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(docker manifest inspect "$IMAGE" 2>&1)"
+          status=$?
+          set -e
+
+          if (( status == 0 )); then
+            echo "Image tag already exists: $IMAGE" >&2
+            exit 1
+          fi
+          if ! grep -Eqi 'manifest unknown|no such manifest|not found' <<< "$output"; then
+            echo "$output" >&2
+            exit 1
+          fi
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
+          build-args: |
+            VERSION_NUMBER=${{ steps.release.outputs.version }}
+            VCS_REF=${{ steps.release.outputs.commit }}
+          provenance: false
+          sbom: false
+
+      - name: Report published image
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "Published \`$IMAGE@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "For first publish, change GHCR package visibility to Public before completing release." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,14 @@
+.data
+.env
+.env.*
+.git
+.github
+.nuxt
+.output
+.playwright-cli
+coverage
+node_modules
+playwright-report
+test-results
+tests
+*PLAN.md
