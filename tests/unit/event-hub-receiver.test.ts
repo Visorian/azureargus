@@ -175,6 +175,44 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
+  it.each([
+    ["connected", false],
+    ["paused", true],
+  ] as const)(
+    "marks a quiet managed receiver caught up while %s",
+    async (expectedStatus, pauseBeforeSignal) => {
+      installNuxtMocks();
+      const encoder = new TextEncoder();
+      let streamController!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+        },
+      });
+      const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+      const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+      const receiver = useEventHubReceiver({ managedFetch });
+
+      await expect(
+        receiver.connect(createInitialEventHubConnectionForm(), "managed"),
+      ).resolves.toBe(true);
+      expect(receiver.caughtUp.value).toBe(false);
+      if (pauseBeforeSignal) {
+        receiver.pause();
+      }
+
+      streamController.enqueue(encoder.encode('{"type":"caught-up"}\n'));
+
+      await vi.waitFor(() => expect(receiver.caughtUp.value).toBe(true));
+      expect(receiver.status.value).toBe(expectedStatus);
+      expect(receiver.receivedCount.value).toBe(0);
+      expect(receiver.errors.value).toEqual([]);
+      receiver.clear();
+      expect(receiver.caughtUp.value).toBe(true);
+      await receiver.disconnect();
+    },
+  );
+
   it("publishes managed network-rule DNS with Event Hub metadata", async () => {
     vi.useFakeTimers();
     installNuxtMocks();

@@ -430,6 +430,10 @@ export function useEventHubReceiver({
             if (generation !== connectionGeneration) {
               return;
             }
+            if (envelope.type === "caught-up") {
+              caughtUp.value = true;
+              return;
+            }
             if (envelope.type === "error") {
               errors.value = [envelope.message, ...errors.value].slice(0, 5);
               return;
@@ -559,7 +563,9 @@ export function useEventHubReceiver({
     sourceRecordCount.value = 0;
     nextRecordIndex = 0;
     latestSourceTimestamp.value = null;
-    caughtUp.value = false;
+    if (managedStreamController === null) {
+      caughtUp.value = false;
+    }
     for (const sink of normalizedBatchSinks) {
       sink.onClear?.();
     }

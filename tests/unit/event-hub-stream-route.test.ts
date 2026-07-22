@@ -44,6 +44,21 @@ let currentRuntimeConfig: Record<string, unknown> = runtimeConfig;
 let handler: (event: H3Event) => Promise<unknown>;
 const useRuntimeConfig = vi.fn(() => currentRuntimeConfig);
 
+function installAzureClientMock(getPartitionIds: EventHubConsumerClient["getPartitionIds"]) {
+  const close = vi.fn<EventHubConsumerClient["close"]>(async () => undefined);
+  const client = {
+    close,
+    getPartitionIds: vi.fn<EventHubConsumerClient["getPartitionIds"]>(getPartitionIds),
+  };
+  vi.mocked(EventHubConsumerClient).mockImplementation(function () {
+    return client as Pick<
+      EventHubConsumerClient,
+      "close" | "getPartitionIds"
+    > as EventHubConsumerClient;
+  });
+  return client;
+}
+
 function createTestEvent(body?: unknown, headers: Record<string, string> = {}) {
   const request = new IncomingMessage(new Socket());
   const response = new ServerResponse(request);
@@ -60,6 +75,7 @@ function createTestEvent(body?: unknown, headers: Record<string, string> = {}) {
     request.headers["content-type"] = "application/json";
     request.push(payload);
     request.push(null);
+    request.complete = true;
   }
   return createEvent(request, response);
 }
@@ -149,6 +165,92 @@ describe("managed Event Hub stream route", () => {
   });
 
   it.each([
+    ["no partitions", async () => [] as string[]],
+    ["partition discovery failure", async () => Promise.reject(new Error("private-secret"))],
+  ])("cleans up and sanitizes %s", async (_name, getPartitionIds) => {
+    const client = installAzureClientMock(getPartitionIds);
+    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+    const initialRequestAbortListeners = event.node.req.listenerCount("aborted");
+    const initialResponseCloseListeners = event.node.res.listenerCount("close");
+
+    await expect(handler(event)).rejects.toMatchObject({
+      message: "Managed Event Hub could not start",
+      statusCode: 502,
+    });
+
+    expect(client.getPartitionIds).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+    });
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(createManagedEventHubStream).not.toHaveBeenCalled();
+    expect(pipeManagedEventHubStream).not.toHaveBeenCalled();
+    expect(event.node.req.listenerCount("aborted")).toBe(initialRequestAbortListeners);
+    expect(event.node.res.listenerCount("close")).toBe(initialResponseCloseListeners);
+  });
+
+  it("closes the client without starting discovery after the request already aborted", async () => {
+    const client = installAzureClientMock(async () => ["0"]);
+    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+    Object.defineProperty(event.node.req, "aborted", { value: true });
+
+    await expect(handler(event)).rejects.toMatchObject({
+      message: "Managed Event Hub could not start",
+      statusCode: 502,
+    });
+
+    expect(client.getPartitionIds).not.toHaveBeenCalled();
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(createManagedEventHubStream).not.toHaveBeenCalled();
+  });
+
+  it("closes the client without starting discovery after the response already ended", async () => {
+    const client = installAzureClientMock(async () => ["0"]);
+    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+    event.node.res.end();
+
+    await expect(handler(event)).rejects.toMatchObject({
+      message: "Managed Event Hub could not start",
+      statusCode: 502,
+    });
+
+    expect(client.getPartitionIds).not.toHaveBeenCalled();
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(createManagedEventHubStream).not.toHaveBeenCalled();
+  });
+
+  it("aborts partition discovery when the request closes", async () => {
+    let discoveryAborted = false;
+    const client = installAzureClientMock(
+      (options) =>
+        new Promise<string[]>((_resolve, reject) => {
+          const abortSignal = options?.abortSignal;
+          abortSignal?.addEventListener(
+            "abort",
+            () => {
+              discoveryAborted = abortSignal.aborted;
+              reject(new Error("aborted"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+    const handling = handler(event);
+    void handling.catch(() => undefined);
+    await vi.waitFor(() => expect(client.getPartitionIds).toHaveBeenCalledOnce());
+
+    event.node.req.emit("aborted");
+
+    await expect(handling).rejects.toMatchObject({
+      message: "Managed Event Hub could not start",
+      statusCode: 502,
+    });
+    expect(discoveryAborted).toBe(true);
+    expect(client.close).toHaveBeenCalledOnce();
+    expect(createManagedEventHubStream).not.toHaveBeenCalled();
+  });
+
+  it.each([
     [runtimeConfig.eventHub.connectionString, "", 2],
     [
       "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=private-secret",
@@ -164,6 +266,7 @@ describe("managed Event Hub stream route", () => {
       };
       const stream = new ReadableStream<Uint8Array>();
       const cleanup = vi.fn(async () => undefined);
+      const client = installAzureClientMock(async () => ["0", "1"]);
       vi.mocked(createManagedEventHubStream).mockReturnValue({ cleanup, stream });
       const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
 
@@ -175,9 +278,14 @@ describe("managed Event Hub stream route", () => {
       );
       expect(createManagedEventHubStream).toHaveBeenCalledWith(
         expect.objectContaining({
+          client,
+          expectedPartitionIds: ["0", "1"],
           request: { consumerGroup: "$Default", lookbackMinutes: 5 },
         }),
       );
+      expect(client.getPartitionIds).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+      });
       expect(pipeManagedEventHubStream).toHaveBeenCalledWith(event.node.res, stream);
       expect(event.node.res.getHeader("content-type")).toBe("application/x-ndjson; charset=utf-8");
       expect(event.node.res.getHeader("x-accel-buffering")).toBe("no");

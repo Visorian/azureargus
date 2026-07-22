@@ -1,4 +1,5 @@
 import { mountSuspended } from "@nuxt/test-utils/runtime";
+import { clearNuxtState } from "#app";
 import { defineComponent } from "vue";
 
 import {
@@ -15,9 +16,27 @@ const TimeFormatHarness = defineComponent({
 });
 
 describe("useLogTimeFormat", () => {
+  let unmountWrapper: (() => void) | undefined;
+
+  const clearTimeFormatState = () => {
+    window.localStorage.removeItem(LOG_TIME_FORMAT_STORAGE_KEY);
+    clearNuxtState(["log-time-format", "log-time-format-error"]);
+  };
+
+  beforeEach(() => {
+    clearTimeFormatState();
+  });
+
+  afterEach(() => {
+    unmountWrapper?.();
+    unmountWrapper = undefined;
+    clearTimeFormatState();
+  });
+
   it("loads and persists the browser-local hour cycle", async () => {
     window.localStorage.setItem(LOG_TIME_FORMAT_STORAGE_KEY, "12-hour");
     const wrapper = await mountSuspended(TimeFormatHarness);
+    unmountWrapper = () => wrapper.unmount();
 
     expect(wrapper.get("button").text()).toBe("h12");
 

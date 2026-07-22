@@ -9,7 +9,7 @@ describe("managed Event Hub NDJSON parser", () => {
         controller.enqueue(encoder.encode('{"type":"heart'));
         controller.enqueue(
           encoder.encode(
-            'beat"}\n{"type":"events","events":[{"body":{"msg":"allow"},"enqueuedTimeUtc":"2026-07-12T12:00:00.000Z",',
+            'beat"}\n{"type":"caught-up"}\n{"type":"events","events":[{"body":{"msg":"allow"},"enqueuedTimeUtc":"2026-07-12T12:00:00.000Z",',
           ),
         );
         controller.enqueue(
@@ -30,6 +30,7 @@ describe("managed Event Hub NDJSON parser", () => {
 
     expect(envelopes).toEqual([
       { type: "heartbeat" },
+      { type: "caught-up" },
       {
         type: "events",
         events: [

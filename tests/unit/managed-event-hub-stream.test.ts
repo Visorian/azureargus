@@ -33,10 +33,13 @@ function createClient() {
   };
 }
 
-async function readEnvelope(reader: ReadableStreamDefaultReader<Uint8Array>) {
-  const result = await reader.read();
+function parseEnvelope(result: ReadableStreamReadResult<Uint8Array>) {
   expect(result.done).toBe(false);
   return JSON.parse(new TextDecoder().decode(result.value).trim()) as unknown;
+}
+
+async function readEnvelope(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  return parseEnvelope(await reader.read());
 }
 
 afterEach(() => {
@@ -67,6 +70,7 @@ describe("managed Event Hub stream", () => {
     const fixture = createClient();
     const managed = createManagedEventHubStream({
       client: fixture.client,
+      expectedPartitionIds: ["0", "1"],
       request: { consumerGroup: "$Default", lookbackMinutes: 3 },
       sessionExpiresAt: 10,
       revalidateSession: async () => true,
@@ -138,10 +142,89 @@ describe("managed Event Hub stream", () => {
     expect(fixture.clientClose).toHaveBeenCalledOnce();
   });
 
+  it("emits caught-up once after every expected partition returns an empty batch", async () => {
+    const fixture = createClient();
+    const managed = createManagedEventHubStream({
+      client: fixture.client,
+      expectedPartitionIds: ["0", "1"],
+      request: { consumerGroup: "$Default", lookbackMinutes: 3 },
+      sessionExpiresAt: 10,
+      revalidateSession: async () => true,
+      now: () => 0,
+    });
+    const reader = managed.stream.getReader();
+    const eventProcessing = fixture.getHandlers().processEvents(
+      [
+        {
+          body: { message: "allow" },
+          enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
+          sequenceNumber: 42,
+        },
+      ],
+      { partitionId: "0" },
+    );
+
+    await expect(readEnvelope(reader)).resolves.toMatchObject({ type: "events" });
+    await eventProcessing;
+
+    const caughtUpRead = reader.read();
+    await fixture.getHandlers().processEvents([], { partitionId: "unknown" });
+    await expect(
+      Promise.race([
+        caughtUpRead.then(() => "envelope"),
+        new Promise<string>((resolve) => setTimeout(resolve, 0, "pending")),
+      ]),
+    ).resolves.toBe("pending");
+
+    await fixture.getHandlers().processEvents([], { partitionId: "1" });
+    await expect(
+      Promise.race([
+        caughtUpRead.then(() => "envelope"),
+        new Promise<string>((resolve) => setTimeout(resolve, 0, "pending")),
+      ]),
+    ).resolves.toBe("pending");
+
+    const finalPartition = fixture.getHandlers().processEvents([], { partitionId: "0" });
+    await expect(caughtUpRead.then(parseEnvelope)).resolves.toEqual({ type: "caught-up" });
+    await finalPartition;
+
+    const duplicateRead = reader.read();
+    await fixture.getHandlers().processEvents([], { partitionId: "0" });
+    await fixture.getHandlers().processEvents([], { partitionId: "1" });
+    await expect(
+      Promise.race([
+        duplicateRead.then(() => "envelope"),
+        new Promise<string>((resolve) => setTimeout(resolve, 0, "pending")),
+      ]),
+    ).resolves.toBe("pending");
+
+    await reader.cancel();
+  });
+
+  it("emits caught-up for a quiet single-partition stream", async () => {
+    const fixture = createClient();
+    const managed = createManagedEventHubStream({
+      client: fixture.client,
+      expectedPartitionIds: ["0"],
+      request: { consumerGroup: "$Default", lookbackMinutes: 3 },
+      sessionExpiresAt: 10,
+      revalidateSession: async () => true,
+      now: () => 0,
+    });
+    const reader = managed.stream.getReader();
+
+    const caughtUp = fixture.getHandlers().processEvents([], { partitionId: "0" });
+
+    await expect(readEnvelope(reader)).resolves.toEqual({ type: "caught-up" });
+    await caughtUp;
+    await reader.cancel();
+  });
+
   it("transports binary event bodies as compact UTF-8 text", async () => {
     const fixture = createClient();
     const managed = createManagedEventHubStream({
       client: fixture.client,
+      expectedPartitionIds: ["0", "1"],
       request: { consumerGroup: "$Default", lookbackMinutes: 3 },
       sessionExpiresAt: 10,
       revalidateSession: async () => true,
@@ -199,6 +282,7 @@ describe("managed Event Hub stream", () => {
     const fixture = createClient();
     const managed = createManagedEventHubStream({
       client: fixture.client,
+      expectedPartitionIds: ["0", "1"],
       request: { consumerGroup: "$Default", lookbackMinutes: 1 },
       sessionExpiresAt: 10,
       revalidateSession: async () => true,
@@ -224,6 +308,7 @@ describe("managed Event Hub stream", () => {
       const fixture = createClient();
       const managed = createManagedEventHubStream({
         client: fixture.client,
+        expectedPartitionIds: ["0", "1"],
         request: { consumerGroup: "$Default", lookbackMinutes: 1 },
         sessionExpiresAt: trigger === "expiry" ? 1 : 60,
         revalidateSession: async () => trigger !== "revalidation",
@@ -247,6 +332,7 @@ describe("managed Event Hub stream", () => {
     const fixture = createClient();
     const managed = createManagedEventHubStream({
       client: fixture.client,
+      expectedPartitionIds: ["0", "1"],
       request: { consumerGroup: "$Default", lookbackMinutes: 1 },
       sessionExpiresAt: 1,
       revalidateSession: async () => true,

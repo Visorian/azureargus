@@ -28,7 +28,12 @@ export interface ManagedEventHubHeartbeatEnvelope {
   type: "heartbeat";
 }
 
+export interface ManagedEventHubCaughtUpEnvelope {
+  type: "caught-up";
+}
+
 export type ManagedEventHubStreamEnvelope =
   | ManagedEventHubEventEnvelope
   | ManagedEventHubErrorEnvelope
-  | ManagedEventHubHeartbeatEnvelope;
+  | ManagedEventHubHeartbeatEnvelope
+  | ManagedEventHubCaughtUpEnvelope;

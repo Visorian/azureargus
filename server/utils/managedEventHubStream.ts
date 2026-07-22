@@ -38,6 +38,7 @@ export interface ManagedEventHubSubscription {
 
 interface ManagedEventHubStreamOptions {
   client: ManagedEventHubClient;
+  expectedPartitionIds: readonly string[];
   request: ManagedEventHubStreamRequest;
   sessionExpiresAt: number;
   revalidateSession: () => Promise<boolean>;
@@ -147,6 +148,7 @@ export function encodeManagedEventHubEnvelope(envelope: ManagedEventHubStreamEnv
 
 export function createManagedEventHubStream({
   client,
+  expectedPartitionIds,
   request,
   sessionExpiresAt,
   revalidateSession,
@@ -166,6 +168,8 @@ export function createManagedEventHubStream({
   let writeChain = Promise.resolve();
   let heartbeatPending = false;
   let sessionCheckPending = false;
+  const pendingCatchUpPartitions = new Set(expectedPartitionIds);
+  let caughtUpWritten = false;
 
   const releaseDemand = () => {
     demandResolve?.();
@@ -254,7 +258,17 @@ export function createManagedEventHubStream({
           subscription = client.subscribe(
             {
               async processEvents(events, context) {
-                if (events.length === 0 || closed) {
+                if (closed) {
+                  return;
+                }
+                if (events.length === 0) {
+                  if (caughtUpWritten || !pendingCatchUpPartitions.delete(context.partitionId)) {
+                    return;
+                  }
+                  if (pendingCatchUpPartitions.size === 0) {
+                    caughtUpWritten = true;
+                    await write({ type: "caught-up" });
+                  }
                   return;
                 }
                 await write({

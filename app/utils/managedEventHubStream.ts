@@ -18,6 +18,9 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
   if (parsed.type === "heartbeat") {
     return { type: "heartbeat" };
   }
+  if (parsed.type === "caught-up") {
+    return { type: "caught-up" };
+  }
   if (
     parsed.type === "error" &&
     (parsed.message === "Event Hub receiver error" || parsed.message === "Session expired")
