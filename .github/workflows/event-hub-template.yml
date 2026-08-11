@@ -1,0 +1,54 @@
+name: Validate Event Hub deployment template
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/event-hub/*.bicep"
+      - "infrastructure/event-hub/azuredeploy.json"
+      - ".github/workflows/event-hub-template.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "infrastructure/event-hub/*.bicep"
+      - "infrastructure/event-hub/azuredeploy.json"
+      - ".github/workflows/event-hub-template.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rebuild and compare deployment template
+        shell: bash
+        env:
+          BICEP_VERSION: v0.46.1
+          BICEP_SHA256: 3e011d629ea4311b7a7dd8f0040ab2b1a072ea4ff5d02cb75e0e55a9a6703fb9
+        run: |
+          set -euo pipefail
+
+          bicep="$RUNNER_TEMP/bicep"
+          generated="$RUNNER_TEMP/azuredeploy.json"
+
+          curl --fail --location --silent --show-error \
+            "https://github.com/Azure/bicep/releases/download/$BICEP_VERSION/bicep-linux-x64" \
+            --output "$bicep"
+          echo "$BICEP_SHA256  $bicep" | sha256sum --check -
+          chmod +x "$bicep"
+
+          "$bicep" lint infrastructure/event-hub/main.bicep
+          "$bicep" build infrastructure/event-hub/main.bicep --outfile "$generated"
+
+          if ! cmp --silent infrastructure/event-hub/azuredeploy.json "$generated"; then
+            diff -u infrastructure/event-hub/azuredeploy.json "$generated" || true
+            exit 1
+          fi

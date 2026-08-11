@@ -56,6 +56,9 @@ NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID=<application-client-id>
 
 #### Create Event Hub and forward Azure Firewall logs
 
+Canonical Bicep source publishes a generated [ARM deployment template](https://raw.githubusercontent.com/Visorian/azureargus/main/infrastructure/event-hub/azuredeploy.json)
+at a stable URL for direct deployments and deployment-button consumers.
+
 1. Create Event Hubs namespace and non-compacted event hub. For regional Azure Firewall, keep Event
    Hub in same region. Optionally create dedicated consumer group such as `azure-argus`.
 2. On namespace, create diagnostic shared-access policy with `Manage`, `Send`, and `Listen`. Azure
