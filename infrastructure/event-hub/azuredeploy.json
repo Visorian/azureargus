@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "6068191317548918038"
+      "templateHash": "50300361381240881"
     }
   },
   "parameters": {
@@ -47,13 +47,15 @@
   "variables": {
     "eventHubNamespaceName": "[format('azureargus-{0}', uniqueString(subscription().id, resourceGroup().id, parameters('eventHubName')))]",
     "eventHubResourceId": "[resourceId('Microsoft.EventHub/namespaces/eventhubs', variables('eventHubNamespaceName'), parameters('eventHubName'))]",
-    "diagnosticSettingName": "[format('azureargus-{0}', uniqueString(variables('eventHubResourceId')))]"
+    "firewallResourceGroupScope": {},
+    "diagnosticSettingName": "azureargus-event-hub",
+    "diagnosticDeploymentName": "[format('azureargus-firewall-diagnostic-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]"
   },
   "resources": [
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "[format('azureargus-firewall-{0}', uniqueString(variables('eventHubResourceId')))]",
+      "name": "[format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]",
       "resourceGroup": "[parameters('firewallResourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
@@ -96,7 +98,7 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "[format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))]",
+      "name": "[format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -113,7 +115,7 @@
             "value": "[parameters('eventHubRetentionHours')]"
           },
           "location": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(variables('eventHubResourceId')))), '2025-04-01').outputs.location.value]"
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))), '2025-04-01').outputs.location.value]"
           }
         },
         "template": {
@@ -234,13 +236,13 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(variables('eventHubResourceId'))))]"
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId'))))]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "[variables('diagnosticSettingName')]",
+      "name": "[variables('diagnosticDeploymentName')]",
       "resourceGroup": "[parameters('firewallResourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
@@ -252,7 +254,7 @@
             "value": "[variables('diagnosticSettingName')]"
           },
           "eventHubAuthorizationRuleId": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.diagnosticAuthorizationRuleResourceId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.diagnosticAuthorizationRuleResourceId.value]"
           },
           "eventHubName": {
             "value": "[parameters('eventHubName')]"
@@ -332,34 +334,34 @@
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName'))))]"
+        "[resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName'))))]"
       ]
     }
   ],
   "outputs": {
     "eventHubNamespaceName": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubNamespaceName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubNamespaceName.value]"
     },
     "eventHubNamespaceResourceId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubNamespaceResourceId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubNamespaceResourceId.value]"
     },
     "eventHubName": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubName.value]"
     },
     "eventHubResourceId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubResourceId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubResourceId.value]"
     },
     "listenerAuthorizationRuleName": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.listenerAuthorizationRuleName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.listenerAuthorizationRuleName.value]"
     },
     "listenerAuthorizationRuleResourceId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.listenerAuthorizationRuleResourceId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.listenerAuthorizationRuleResourceId.value]"
     },
     "diagnosticSettingName": {
       "type": "string",
@@ -367,7 +369,7 @@
     },
     "diagnosticSettingResourceId": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', variables('diagnosticSettingName')), '2025-04-01').outputs.diagnosticSettingResourceId.value]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', variables('diagnosticDeploymentName')), '2025-04-01').outputs.diagnosticSettingResourceId.value]"
     }
   }
 }

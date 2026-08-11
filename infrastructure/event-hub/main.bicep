@@ -22,18 +22,20 @@ param eventHubRetentionHours int = 1
 
 var eventHubNamespaceName = 'azureargus-${uniqueString(subscription().id, resourceGroup().id, eventHubName)}'
 var eventHubResourceId = resourceId('Microsoft.EventHub/namespaces/eventhubs', eventHubNamespaceName, eventHubName)
-var diagnosticSettingName = 'azureargus-${uniqueString(eventHubResourceId)}'
+var firewallResourceGroupScope = resourceGroup(firewallResourceGroupName)
+var diagnosticSettingName = 'azureargus-event-hub'
+var diagnosticDeploymentName = 'azureargus-firewall-diagnostic-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
 
 module firewallDetails './firewall.bicep' = {
-  name: 'azureargus-firewall-${uniqueString(eventHubResourceId)}'
-  scope: resourceGroup(firewallResourceGroupName)
+  name: 'azureargus-firewall-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
+  scope: firewallResourceGroupScope
   params: {
     firewallName: firewallName
   }
 }
 
 module eventHubResources './event-hub.bicep' = {
-  name: 'azureargus-event-hub-${uniqueString(eventHubNamespaceName, eventHubName)}'
+  name: 'azureargus-event-hub-${uniqueString(deployment().name, eventHubNamespaceName, eventHubName)}'
   params: {
     eventHubName: eventHubName
     eventHubNamespaceName: eventHubNamespaceName
@@ -43,8 +45,8 @@ module eventHubResources './event-hub.bicep' = {
 }
 
 module firewallDiagnosticSetting './diagnostic-setting.bicep' = {
-  name: diagnosticSettingName
-  scope: resourceGroup(firewallResourceGroupName)
+  name: diagnosticDeploymentName
+  scope: firewallResourceGroupScope
   params: {
     diagnosticSettingName: diagnosticSettingName
     eventHubAuthorizationRuleId: eventHubResources.outputs.diagnosticAuthorizationRuleResourceId
