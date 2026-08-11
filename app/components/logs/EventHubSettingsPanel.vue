@@ -4,6 +4,9 @@ import {
   type EventHubConnectionForm,
 } from "~/composables/useEventHubConnection";
 
+const DEPLOY_TO_AZURE_URL =
+  "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json";
+
 const props = defineProps<{
   clearingLogHistory: boolean;
   connectionActive: boolean;
@@ -54,6 +57,30 @@ const connectionFieldsDisabled = computed(() => props.connecting || props.connec
             : "Use a Listen-only SAS policy. Credentials stay in memory unless remembered."
         }}
       </p>
+    </div>
+
+    <div
+      v-if="!managed"
+      class="rounded-md border border-brand-gray-200 bg-brand-gray-50 p-3 dark:border-brand-gray-800 dark:bg-brand-gray-900"
+    >
+      <p class="text-xs font-semibold">Need an Event Hub?</p>
+      <p class="mt-1 text-xs text-brand-gray-600 dark:text-brand-gray-300">
+        Deploy Event Hub and firewall diagnostic settings. Then copy event-hub-level
+        <code class="font-mono">azureargus-listen</code> primary connection string containing
+        <code class="font-mono">EntityPath</code>.
+      </p>
+      <UButton
+        :to="DEPLOY_TO_AZURE_URL"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="mt-2"
+        color="neutral"
+        variant="outline"
+        size="sm"
+        icon="i-lucide-external-link"
+        label="Deploy to Azure"
+        aria-label="Deploy to Azure (opens in new tab)"
+      />
     </div>
 
     <UForm :state="connectionForm" class="space-y-3" @submit="emit('connect')">

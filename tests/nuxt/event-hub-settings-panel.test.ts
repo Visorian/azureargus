@@ -3,6 +3,9 @@ import { mountSuspended } from "@nuxt/test-utils/runtime";
 import EventHubSettingsPanel from "../../app/components/logs/EventHubSettingsPanel.vue";
 import type { EventHubConnectionForm } from "../../app/composables/useEventHubConnection";
 
+const DEPLOY_TO_AZURE_URL =
+  "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json";
+
 function createConnectionForm(): EventHubConnectionForm {
   return {
     connectionString: "",
@@ -42,6 +45,22 @@ const mountOptions = {
 };
 
 describe("EventHubSettingsPanel", () => {
+  it("offers a safe deployment handoff in anonymous mode", async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
+      ...mountOptions,
+      props: createProps(),
+    });
+
+    const deployLink = wrapper.get(`a[href="${DEPLOY_TO_AZURE_URL}"]`);
+
+    expect(deployLink.text()).toContain("Deploy to Azure");
+    expect(deployLink.attributes("aria-label")).toBe("Deploy to Azure (opens in new tab)");
+    expect(deployLink.attributes("target")).toBe("_blank");
+    expect(deployLink.attributes("rel")).toBe("noopener noreferrer");
+    expect(wrapper.text()).toContain("azureargus-listen");
+    expect(wrapper.text()).toContain("EntityPath");
+  });
+
   it("renders connection settings, updates form values, and emits connection intents", async () => {
     const connectionForm = createConnectionForm();
     const wrapper = await mountSuspended(EventHubSettingsPanel, {
@@ -109,6 +128,7 @@ describe("EventHubSettingsPanel", () => {
     });
 
     expect(wrapper.text()).toContain("Connection is configured by deployment.");
+    expect(wrapper.find(`a[href="${DEPLOY_TO_AZURE_URL}"]`).exists()).toBe(false);
     expect(wrapper.find("textarea").attributes()).toHaveProperty("disabled");
     expect(wrapper.text()).not.toContain("Remember connection string");
     const eventHubName = wrapper.findAll("input")[1];
