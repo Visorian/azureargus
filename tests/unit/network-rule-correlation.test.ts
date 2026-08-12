@@ -4,7 +4,7 @@ import {
   createNetworkRuleCorrelator,
   getNetworkRuleCorrelationKey,
 } from "../../app/utils/networkRuleCorrelation";
-import type { FirewallLogRecord } from "../../app/types/firewall";
+import type { FirewallLogRecord } from "../../shared/types/firewall";
 
 const resourceId =
   "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001";

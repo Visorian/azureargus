@@ -9,7 +9,7 @@ import { getLogAnalyticsAccessToken } from "../../server/utils/logAnalyticsAuth"
 import {
   executeLogAnalyticsQuery,
   LogAnalyticsQueryError,
-} from "../../server/utils/logAnalyticsQuery";
+} from "../../shared/utils/logAnalyticsQuery";
 
 vi.mock("nuxt-oidc-auth/runtime/server/utils/session.js", () => ({
   requireUserSession: vi.fn(),
@@ -18,8 +18,8 @@ vi.mock("../../server/utils/logAnalyticsAuth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../server/utils/logAnalyticsAuth")>()),
   getLogAnalyticsAccessToken: vi.fn(),
 }));
-vi.mock("../../server/utils/logAnalyticsQuery", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../server/utils/logAnalyticsQuery")>()),
+vi.mock("../../shared/utils/logAnalyticsQuery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/utils/logAnalyticsQuery")>()),
   executeLogAnalyticsQuery: vi.fn(),
 }));
 

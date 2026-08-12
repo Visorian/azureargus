@@ -1,8 +1,4 @@
-import type {
-  FirewallLogRecord,
-  FirewallLogSortDirection,
-  FirewallLogSortKey,
-} from "~/types/firewall";
+import type { FirewallLogRecord, FirewallLogSortDirection, FirewallLogSortKey } from "./firewall";
 
 export interface LogAnalyticsFilters {
   search: string;

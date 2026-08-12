@@ -6,7 +6,7 @@ import { parseDeploymentCapabilities } from "../../../utils/deploymentCapabiliti
 import {
   executeDnsListQuery,
   validateDnsListQueryRequest,
-} from "../../../utils/dnsLogAnalyticsQuery";
+} from "../../../../shared/utils/dnsLogAnalyticsQuery";
 import {
   getLogAnalyticsAccessToken,
   parseLogAnalyticsRuntimeConfig,

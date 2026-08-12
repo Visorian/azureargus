@@ -5,7 +5,7 @@ import type {
   FirewallLogSortDirection,
   FirewallLogSortKey,
   FirewallLogSortState,
-} from "~/types/firewall";
+} from "#shared/types/firewall";
 
 export function createDefaultLogSort(): FirewallLogSortState {
   return {

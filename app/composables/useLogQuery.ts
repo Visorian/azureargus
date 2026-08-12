@@ -1,7 +1,7 @@
 import { computed, reactive, shallowRef, watch } from "vue";
 import type { Ref } from "vue";
 
-import type { FirewallLogFilters, FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogFilters, FirewallLogRecord } from "#shared/types/firewall";
 
 import { trimToBufferSize } from "./useBoundedLogBuffer";
 

@@ -4,7 +4,7 @@ import {
 } from "~/utils/logHistoryPersistenceQueue";
 import type { LogHistoryRangeQuery, LogHistoryStoreApi } from "~/utils/logHistoryStore";
 import type { PersistedFirewallLogRecord } from "~/utils/logHistoryRecord";
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 
 let sharedQueue: LogHistoryPersistenceQueue | null = null;
 let startupCleanupPromise: Promise<void> | null = null;

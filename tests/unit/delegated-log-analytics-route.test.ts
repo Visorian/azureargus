@@ -7,10 +7,10 @@ import type { DelegatedLogAnalyticsQueryRequest } from "../../shared/types/logAn
 import {
   executeLogAnalyticsQuery,
   LogAnalyticsQueryError,
-} from "../../server/utils/logAnalyticsQuery";
+} from "../../shared/utils/logAnalyticsQuery";
 
-vi.mock("../../server/utils/logAnalyticsQuery", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../server/utils/logAnalyticsQuery")>()),
+vi.mock("../../shared/utils/logAnalyticsQuery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/utils/logAnalyticsQuery")>()),
   executeLogAnalyticsQuery: vi.fn(),
 }));
 

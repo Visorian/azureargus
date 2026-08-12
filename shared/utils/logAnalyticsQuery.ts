@@ -1,4 +1,4 @@
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "../types/firewall";
 
 import type {
   DelegatedLogAnalyticsQueryRequest,
@@ -6,8 +6,8 @@ import type {
   LogAnalyticsQueryResponse,
   LogAnalyticsSort,
   LogAnalyticsStorageKind,
-} from "../../shared/types/logAnalytics";
-import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
+} from "../types/logAnalytics";
+import { isLogAnalyticsQueryLimit } from "./logAnalytics";
 import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from "./azureDiagnosticsLogAnalytics";
 
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
@@ -185,6 +185,10 @@ function isValidSortObject(value: unknown) {
 
 function isLogAnalyticsStorageKind(value: unknown): value is LogAnalyticsStorageKind {
   return value === "resource-specific" || value === "azure-diagnostics";
+}
+
+export function isLogAnalyticsWorkspaceId(value: unknown): value is string {
+  return typeof value === "string" && WORKSPACE_ID_PATTERN.test(value);
 }
 
 function readRetryAfterSeconds(response: Response) {
@@ -386,11 +390,7 @@ export function validateDelegatedLogAnalyticsQueryRequest(
   }
 
   const { workspaceId, ...request } = value;
-  return (
-    typeof workspaceId === "string" &&
-    WORKSPACE_ID_PATTERN.test(workspaceId) &&
-    validateLogAnalyticsQueryRequest(request)
-  );
+  return isLogAnalyticsWorkspaceId(workspaceId) && validateLogAnalyticsQueryRequest(request);
 }
 
 export function encodeKqlStringLiteral(value: string) {
@@ -488,6 +488,9 @@ export async function executeLogAnalyticsRawQuery(
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
 ) {
+  if (!isLogAnalyticsWorkspaceId(target.workspaceId)) {
+    throw new LogAnalyticsQueryError("upstream");
+  }
   const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
   const controller = new AbortController();
   let timedOut = false;
@@ -515,6 +518,7 @@ export async function executeLogAnalyticsRawQuery(
             "content-type": "application/json",
           },
           body: JSON.stringify(timespan === undefined ? { query } : { query, timespan }),
+          redirect: "error",
           signal: controller.signal,
         },
       );
@@ -522,6 +526,15 @@ export async function executeLogAnalyticsRawQuery(
       throw new LogAnalyticsQueryError(timedOut ? "timeout" : "upstream");
     }
 
+    if (response.redirected) {
+      throw new LogAnalyticsQueryError("upstream");
+    }
+    if (response.url) {
+      const responseUrl = new URL(response.url);
+      if (responseUrl.origin !== "https://api.loganalytics.azure.com") {
+        throw new LogAnalyticsQueryError("upstream");
+      }
+    }
     if (!response.ok) {
       throw errorForResponse(response);
     }

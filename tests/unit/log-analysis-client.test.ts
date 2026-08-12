@@ -7,7 +7,7 @@ import {
   createDefaultLogAnalysisDateRange,
   parseLogAnalysisDateRange,
 } from "../../app/utils/logAnalysis";
-import type { FirewallLogRecord } from "../../app/types/firewall";
+import type { FirewallLogRecord } from "../../shared/types/firewall";
 import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,

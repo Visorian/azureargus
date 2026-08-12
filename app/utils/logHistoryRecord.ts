@@ -1,4 +1,4 @@
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 
 export const LOG_HISTORY_DB_NAME = "azure-argus-log-history";
 export const LOG_HISTORY_DB_VERSION = 1;

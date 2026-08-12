@@ -1,4 +1,4 @@
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 
 export const NETWORK_RULE_CORRELATION_WINDOW_MS = 250;
 const ICMP_PROTOCOL_PATTERN = /^ICMP(?:\s|$)/;

@@ -1,6 +1,6 @@
 import type { DnsEntry, DnsObservation } from "#shared/types/dns";
 import { createDnsEntries } from "#shared/utils/dns";
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 
 export interface DnsObservationStoreSnapshot {
   entries: DnsEntry[];

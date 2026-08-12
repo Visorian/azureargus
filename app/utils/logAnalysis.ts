@@ -1,4 +1,4 @@
-import type { FirewallLogFilters, FirewallLogSortState } from "~/types/firewall";
+import type { FirewallLogFilters, FirewallLogSortState } from "#shared/types/firewall";
 
 export const LOG_ANALYSIS_CATEGORIES = [
   "AZFWApplicationRule",

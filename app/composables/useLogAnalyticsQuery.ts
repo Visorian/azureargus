@@ -12,7 +12,11 @@ import {
   LOG_ANALYSIS_PROTOCOLS,
   parseLogAnalysisDateRange,
 } from "~/utils/logAnalysis";
-import type { FirewallLogFilters, FirewallLogRecord, FirewallLogSortState } from "~/types/firewall";
+import type {
+  FirewallLogFilters,
+  FirewallLogRecord,
+  FirewallLogSortState,
+} from "#shared/types/firewall";
 
 export type LogAnalyticsQueryStatus = "idle" | "loading" | "success" | "refreshing" | "error";
 type QueryRequest = (

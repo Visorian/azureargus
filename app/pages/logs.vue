@@ -40,7 +40,7 @@ import {
   LOG_ANALYSIS_CATEGORIES,
   type LogAnalysisDateRange,
 } from "~/utils/logAnalysis";
-import type { FirewallLogRecord, FirewallLogSortKey } from "~/types/firewall";
+import type { FirewallLogRecord, FirewallLogSortKey } from "#shared/types/firewall";
 import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from "#shared/utils/logAnalytics";
 import { hasDnsReadinessData } from "#shared/utils/dnsReadiness";
 

@@ -1,4 +1,4 @@
-import type { FirewallLogRecord } from "../../app/types/firewall";
+import type { FirewallLogRecord } from "../../shared/types/firewall";
 import {
   createDefaultLogSort,
   getNextSortDirection,

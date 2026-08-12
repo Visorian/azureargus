@@ -1,4 +1,4 @@
-import type { DnsObservation } from "#shared/types/dns";
+import type { DnsObservation } from "./dns";
 
 export interface FirewallLogRecord {
   id: string;

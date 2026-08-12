@@ -2,7 +2,7 @@ import type { DnsListQueryRequest } from "../../shared/types/dns";
 import {
   executeDnsDetailQuery,
   executeDnsListQuery,
-} from "../../server/utils/dnsLogAnalyticsQuery";
+} from "../../shared/utils/dnsLogAnalyticsQuery";
 import { createDnsDetailSelector } from "../../shared/utils/dns";
 import structuredFixture from "../fixtures/dns/log-analytics-azfwdnsquery.sanitized.json";
 import azureDiagnosticsNetworkFixture from "../fixtures/dns/log-analytics-azurediagnostics-azfwnetworkrule.sanitized.json";

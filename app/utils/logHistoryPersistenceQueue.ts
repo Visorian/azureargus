@@ -7,7 +7,7 @@ import {
   type PersistedFirewallLogRecord,
 } from "./logHistoryRecord";
 import type { LogHistoryStoreApi } from "./logHistoryStore";
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 
 interface IdleDeadlineLike {
   didTimeout: boolean;

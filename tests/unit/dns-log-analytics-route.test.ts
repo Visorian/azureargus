@@ -14,7 +14,7 @@ import {
   executeDnsDetailQuery,
   executeDnsListQuery,
   executeDnsReadinessQuery,
-} from "../../server/utils/dnsLogAnalyticsQuery";
+} from "../../shared/utils/dnsLogAnalyticsQuery";
 import { getLogAnalyticsAccessToken } from "../../server/utils/logAnalyticsAuth";
 
 vi.mock("nuxt-oidc-auth/runtime/server/utils/session.js", () => ({
@@ -24,8 +24,8 @@ vi.mock("../../server/utils/logAnalyticsAuth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../server/utils/logAnalyticsAuth")>()),
   getLogAnalyticsAccessToken: vi.fn<typeof getLogAnalyticsAccessToken>(),
 }));
-vi.mock("../../server/utils/dnsLogAnalyticsQuery", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../server/utils/dnsLogAnalyticsQuery")>()),
+vi.mock("../../shared/utils/dnsLogAnalyticsQuery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/utils/dnsLogAnalyticsQuery")>()),
   executeDnsDetailQuery: vi.fn<typeof executeDnsDetailQuery>(),
   executeDnsListQuery: vi.fn<typeof executeDnsListQuery>(),
   executeDnsReadinessQuery: vi.fn<typeof executeDnsReadinessQuery>(),

@@ -5,7 +5,7 @@ import { parseDeploymentCapabilities } from "../../../utils/deploymentCapabiliti
 import {
   executeDnsDetailQuery,
   validateDelegatedDnsDetailQueryRequest,
-} from "../../../utils/dnsLogAnalyticsQuery";
+} from "../../../../shared/utils/dnsLogAnalyticsQuery";
 import {
   createIncomingRequestSignal,
   readDelegatedLogAnalyticsBearerToken,

@@ -1,4 +1,4 @@
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 import { parseDnsObservation } from "#shared/utils/dns";
 
 const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i;

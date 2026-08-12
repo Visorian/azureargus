@@ -17,7 +17,7 @@ import {
   validateDelegatedDnsReadinessRequest,
   validateDnsDetailQueryRequest,
   validateDnsListQueryRequest,
-} from "../../server/utils/dnsLogAnalyticsQuery";
+} from "../../shared/utils/dnsLogAnalyticsQuery";
 
 const workspaceId = "33333333-3333-4333-8333-333333333333";
 const resourceId =
@@ -575,14 +575,14 @@ describe("DNS Log Analytics KQL", () => {
 });
 
 describe("DNS Log Analytics source mapping", () => {
-  it("assigns stable row identities across response reordering", () => {
+  it("assigns stable row identities across response reordering", async () => {
     const rows = [
       { TimeGenerated: "2026-07-10T10:00:00.000Z", QueryName: "first.example." },
       { TimeGenerated: "2026-07-10T10:00:01.000Z", QueryName: "second.example." },
     ];
 
-    const initial = assignStableLogAnalyticsRowIds("proxy-structured", rows);
-    const reordered = assignStableLogAnalyticsRowIds("proxy-structured", rows.toReversed());
+    const initial = await assignStableLogAnalyticsRowIds("proxy-structured", rows);
+    const reordered = await assignStableLogAnalyticsRowIds("proxy-structured", rows.toReversed());
     const idsByName = (assigned: typeof initial) =>
       Object.fromEntries(assigned.map(({ id, row }) => [row.QueryName, id]));
 
@@ -590,13 +590,13 @@ describe("DNS Log Analytics source mapping", () => {
     expect(initial.every(({ id }) => id.startsWith("la:proxy-structured:"))).toBe(true);
   });
 
-  it("preserves duplicate multiplicity with deterministic occurrence ordinals", () => {
+  it("preserves duplicate multiplicity with deterministic occurrence ordinals", async () => {
     const duplicate = {
       TimeGenerated: "2026-07-10T10:00:00.000Z",
       QueryName: "duplicate.example.",
     };
 
-    const assigned = assignStableLogAnalyticsRowIds("proxy-structured", [
+    const assigned = await assignStableLogAnalyticsRowIds("proxy-structured", [
       duplicate,
       { ...duplicate },
       { ...duplicate },
@@ -607,8 +607,8 @@ describe("DNS Log Analytics source mapping", () => {
     expect(assigned.every(({ collision }) => !collision)).toBe(true);
   });
 
-  it("separates non-equivalent rows when the identity digest collides", () => {
-    const assigned = assignStableLogAnalyticsRowIds(
+  it("separates non-equivalent rows when the identity digest collides", async () => {
+    const assigned = await assignStableLogAnalyticsRowIds(
       "proxy-structured",
       [{ QueryName: "z.example." }, { QueryName: "a.example." }],
       () => "forced-collision",

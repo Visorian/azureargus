@@ -18,16 +18,16 @@ import type {
   DnsSourceKind,
   DnsSourceReadiness,
   DnsSourceStatus,
-} from "../../shared/types/dns";
-import type { LogAnalyticsStorageKind } from "../../shared/types/logAnalytics";
-import { createHash } from "node:crypto";
-import { createDnsEntries, parseDnsObservation } from "../../shared/utils/dns";
-import { DNS_READINESS_SOURCE_DEFINITIONS } from "../../shared/utils/dnsReadiness";
+} from "../types/dns";
+import type { LogAnalyticsStorageKind } from "../types/logAnalytics";
+import { createDnsEntries, parseDnsObservation } from "./dns";
+import { DNS_READINESS_SOURCE_DEFINITIONS } from "./dnsReadiness";
 import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from "./azureDiagnosticsLogAnalytics";
-import { isLogAnalyticsQueryLimit } from "../../shared/utils/logAnalytics";
+import { isLogAnalyticsQueryLimit } from "./logAnalytics";
 import {
   encodeKqlStringLiteral,
   executeLogAnalyticsRawQuery,
+  isLogAnalyticsWorkspaceId,
   LogAnalyticsQueryError,
   type ExecuteLogAnalyticsQueryOptions,
   type LogAnalyticsQueryTarget,
@@ -38,7 +38,6 @@ const MAX_FILTER_LENGTH = 256;
 const MAX_SELECTOR_TEXT_LENGTH = 2_048;
 const DETAIL_LIMIT = 200;
 const RELATED_DETAIL_LIMIT = 50;
-const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const TRAILING_DOTS_PATTERN = /\.+$/;
@@ -147,11 +146,7 @@ export function validateDelegatedDnsListQueryRequest(
     return false;
   }
   const { workspaceId, ...request } = value;
-  return (
-    typeof workspaceId === "string" &&
-    WORKSPACE_ID_PATTERN.test(workspaceId) &&
-    validateDnsListQueryRequest(request)
-  );
+  return isLogAnalyticsWorkspaceId(workspaceId) && validateDnsListQueryRequest(request);
 }
 
 export function validateDelegatedDnsReadinessRequest(
@@ -160,8 +155,7 @@ export function validateDelegatedDnsReadinessRequest(
   return (
     isRecord(value) &&
     hasExactKeys(value, ["workspaceId"]) &&
-    typeof value.workspaceId === "string" &&
-    WORKSPACE_ID_PATTERN.test(value.workspaceId)
+    isLogAnalyticsWorkspaceId(value.workspaceId)
   );
 }
 
@@ -266,8 +260,7 @@ export function validateDelegatedDnsDetailQueryRequest(
   return (
     isRecord(value) &&
     hasExactKeys(value, ["workspaceId", "selector"]) &&
-    typeof value.workspaceId === "string" &&
-    WORKSPACE_ID_PATTERN.test(value.workspaceId) &&
+    isLogAnalyticsWorkspaceId(value.workspaceId) &&
     isDetailSelector(value.selector)
   );
 }
@@ -609,19 +602,22 @@ function canonicalValue(value: unknown): string {
   throw new LogAnalyticsQueryError("upstream");
 }
 
-function defaultIdentityDigest(value: string) {
-  return createHash("sha256").update(value).digest("hex");
+async function defaultIdentityDigest(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function assignStableLogAnalyticsRowIds(
+export async function assignStableLogAnalyticsRowIds(
   source: LogAnalyticsIdentitySource,
   rows: readonly Record<string, unknown>[],
-  digest: (value: string) => string = defaultIdentityDigest,
+  digest: (value: string) => string | Promise<string> = defaultIdentityDigest,
 ) {
-  const prepared = rows.map((row, index) => {
-    const canonical = canonicalValue({ source, row });
-    return { canonical, digest: digest(canonical), index, row };
-  });
+  const prepared = await Promise.all(
+    rows.map(async (row, index) => {
+      const canonical = canonicalValue({ source, row });
+      return { canonical, digest: await digest(canonical), index, row };
+    }),
+  );
   const byDigest = Map.groupBy(prepared, (item) => item.digest);
   const assigned: Array<{
     collision: boolean;
@@ -658,14 +654,14 @@ function identitySource(
   throw new LogAnalyticsQueryError("upstream");
 }
 
-function mapRows(
+async function mapRows(
   payload: unknown,
   source: DnsSourceKind,
   maxRows: number,
   storage: LogAnalyticsStorageKind = "resource-specific",
 ) {
   const rows = tableRows(payload, maxRows);
-  const observations = assignStableLogAnalyticsRowIds(identitySource(source, storage), rows)
+  const observations = (await assignStableLogAnalyticsRowIds(identitySource(source, storage), rows))
     .map(({ collision, id, row }) => {
       const timestamp = text(row.TimeGenerated);
       if (!timestamp || !Number.isFinite(Date.parse(timestamp)))
@@ -712,7 +708,7 @@ export async function executeDnsListQuery(
   const queries = buildDnsListQueries(request);
   const results = await Promise.allSettled(
     queries.map(async ({ query, source, storage }) => {
-      const mapped = mapRows(
+      const mapped = await mapRows(
         await executeLogAnalyticsRawQuery(target, query, timespan, accessToken, options),
         source,
         request.limit + 1,
@@ -1024,13 +1020,13 @@ export function buildDnsRelatedEvidenceQueries(
   return queries;
 }
 
-function mapRelatedRows(
+async function mapRelatedRows(
   payload: unknown,
   source: DnsRelatedSourceKind,
   matchBasis: string,
-): { evidence: DnsRelatedEvidence[]; truncated: boolean } {
+): Promise<{ evidence: DnsRelatedEvidence[]; truncated: boolean }> {
   const rows = tableRows(payload, RELATED_DETAIL_LIMIT + 1);
-  const evidence = assignStableLogAnalyticsRowIds(source, rows)
+  const evidence = (await assignStableLogAnalyticsRowIds(source, rows))
     .slice(0, RELATED_DETAIL_LIMIT)
     .map<DnsRelatedEvidence>(({ id, row }) => {
       const timestamp = text(row.TimeGenerated);
@@ -1088,7 +1084,7 @@ export async function executeDnsDetailQuery(
     accessToken,
     options,
   );
-  const mapped = mapRows(
+  const mapped = await mapRows(
     payload,
     request.selector.source,
     DETAIL_LIMIT + 1,
@@ -1114,11 +1110,11 @@ export async function executeDnsDetailQuery(
   const relatedResults = await Promise.allSettled(
     relatedQueries.map(async ({ source, query, timespan, matchBasis }) => ({
       source,
-      ...mapRelatedRows(
+      ...(await mapRelatedRows(
         await executeLogAnalyticsRawQuery(target, query, timespan, accessToken, options),
         source,
         matchBasis,
-      ),
+      )),
     })),
   );
   const relatedEvidence: DnsRelatedEvidence[] = [];

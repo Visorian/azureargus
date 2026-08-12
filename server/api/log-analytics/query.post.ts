@@ -10,7 +10,7 @@ import {
 import {
   executeLogAnalyticsQuery,
   validateLogAnalyticsQueryRequest,
-} from "../../utils/logAnalyticsQuery";
+} from "../../../shared/utils/logAnalyticsQuery";
 import {
   createIncomingRequestSignal,
   throwLogAnalyticsUpstreamError,

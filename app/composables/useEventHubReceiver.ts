@@ -10,7 +10,7 @@ import {
 } from "./useEventHubConnection";
 import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFirewallLogParser";
 import { createLogBatcher } from "./useLogBatcher";
-import type { FirewallLogRecord } from "~/types/firewall";
+import type { FirewallLogRecord } from "#shared/types/firewall";
 import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
 import { createNetworkRuleCorrelator } from "~/utils/networkRuleCorrelation";
 import { computed, watch, type Ref } from "vue";

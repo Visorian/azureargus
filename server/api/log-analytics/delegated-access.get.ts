@@ -4,7 +4,7 @@ import { parseDeploymentCapabilities } from "../../utils/deploymentCapabilities"
 import {
   AzureResourceDiscoveryError,
   discoverAzureLogAnalyticsAccess,
-} from "../../utils/azureResourceDiscovery";
+} from "../../../shared/utils/azureResourceDiscovery";
 import { createIncomingRequestSignal, readBearerToken } from "../../utils/logAnalyticsRoute";
 
 export default defineEventHandler(async (event) => {

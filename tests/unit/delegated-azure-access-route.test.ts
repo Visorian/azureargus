@@ -6,13 +6,13 @@ import { createEvent, type H3Event } from "h3";
 import {
   AzureResourceDiscoveryError,
   discoverAzureLogAnalyticsAccess,
-} from "../../server/utils/azureResourceDiscovery";
+} from "../../shared/utils/azureResourceDiscovery";
 
-vi.mock("../../server/utils/azureResourceDiscovery", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../server/utils/azureResourceDiscovery")>()),
+vi.mock("../../shared/utils/azureResourceDiscovery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/utils/azureResourceDiscovery")>()),
   discoverAzureLogAnalyticsAccess:
     vi.fn<
-      typeof import("../../server/utils/azureResourceDiscovery").discoverAzureLogAnalyticsAccess
+      typeof import("../../shared/utils/azureResourceDiscovery").discoverAzureLogAnalyticsAccess
     >(),
 }));
 

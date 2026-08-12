@@ -3,7 +3,7 @@ import { createError, getHeader, setResponseHeader, type H3Event } from "h3";
 import { LogAnalyticsConfigurationError, LogAnalyticsTokenError } from "./logAnalyticsAuth";
 
 const BEARER_AUTHORIZATION_PATTERN = /^Bearer ([^\s]+)$/;
-import { LogAnalyticsQueryError } from "./logAnalyticsQuery";
+import { LogAnalyticsQueryError } from "../../shared/utils/logAnalyticsQuery";
 
 export function createIncomingRequestSignal(event: H3Event) {
   const controller = new AbortController();

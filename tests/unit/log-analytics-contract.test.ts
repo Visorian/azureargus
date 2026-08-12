@@ -5,7 +5,7 @@ import type {
 import {
   validateDelegatedLogAnalyticsQueryRequest,
   validateLogAnalyticsQueryRequest,
-} from "../../server/utils/logAnalyticsQuery";
+} from "../../shared/utils/logAnalyticsQuery";
 
 function createRequest(): LogAnalyticsQueryRequest {
   return {

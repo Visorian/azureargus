@@ -9,7 +9,7 @@ import {
   type CreateEventHubReceiverClient,
   type EventHubReceiverClient,
 } from "../../app/composables/useEventHubReceiver";
-import type { FirewallLogRecord } from "../../app/types/firewall";
+import type { FirewallLogRecord } from "../../shared/types/firewall";
 
 type ReceiverHandlers = Parameters<EventHubReceiverClient["subscribe"]>[0];
 

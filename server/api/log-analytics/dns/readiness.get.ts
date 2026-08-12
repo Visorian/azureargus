@@ -2,7 +2,7 @@ import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.
 import { createError } from "h3";
 
 import { parseDeploymentCapabilities } from "../../../utils/deploymentCapabilities";
-import { executeDnsReadinessQuery } from "../../../utils/dnsLogAnalyticsQuery";
+import { executeDnsReadinessQuery } from "../../../../shared/utils/dnsLogAnalyticsQuery";
 import {
   getLogAnalyticsAccessToken,
   parseLogAnalyticsRuntimeConfig,

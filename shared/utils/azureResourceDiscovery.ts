@@ -2,7 +2,7 @@ import type {
   AzureAccessibleTenant,
   AzureAccessibleWorkspace,
   AzureLogAnalyticsAccess,
-} from "../../shared/types/azureAccess";
+} from "../types/azureAccess";
 
 const MANAGEMENT_ORIGIN = "https://management.azure.com";
 const SUBSCRIPTIONS_API_VERSION = "2022-12-01";
@@ -43,6 +43,15 @@ function validateManagementUrl(value: string) {
   return url.toString();
 }
 
+function validateManagementResponse(response: Response) {
+  if (response.redirected) {
+    throw new AzureResourceDiscoveryError(502);
+  }
+  if (response.url) {
+    validateManagementUrl(response.url);
+  }
+}
+
 async function readPage(
   url: string,
   accessToken: string,
@@ -51,8 +60,10 @@ async function readPage(
 ) {
   const response = await fetchImplementation(validateManagementUrl(url), {
     headers: { authorization: `Bearer ${accessToken}` },
+    redirect: "error",
     signal,
   });
+  validateManagementResponse(response);
   if (!response.ok) {
     throw new AzureResourceDiscoveryError(response.status);
   }
@@ -187,9 +198,11 @@ async function readWorkspaceGraph(
           "content-type": "application/json",
         },
         method: "POST",
+        redirect: "error",
         signal,
       },
     );
+    validateManagementResponse(response);
     if (!response.ok) {
       throw new AzureResourceDiscoveryError(response.status);
     }

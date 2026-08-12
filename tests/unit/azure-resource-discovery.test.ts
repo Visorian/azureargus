@@ -1,4 +1,4 @@
-import { discoverAzureLogAnalyticsAccess } from "../../server/utils/azureResourceDiscovery";
+import { discoverAzureLogAnalyticsAccess } from "../../shared/utils/azureResourceDiscovery";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const subscriptionId = "22222222-2222-4222-8222-222222222222";
@@ -104,6 +104,7 @@ describe("Azure Log Analytics access discovery", () => {
       ],
     });
     expect(graphRequest?.method).toBe("POST");
+    expect(graphRequest?.redirect).toBe("error");
     expect(graphRequest?.headers).toEqual(
       expect.objectContaining({ authorization: "Bearer management-token" }),
     );
@@ -186,5 +187,20 @@ describe("Azure Log Analytics access discovery", () => {
         fetchImplementation,
       ),
     ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("rejects redirected ARM responses", async () => {
+    const redirected = jsonResponse({ value: [] });
+    Object.defineProperty(redirected, "redirected", { value: true });
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(redirected);
+
+    await expect(
+      discoverAzureLogAnalyticsAccess(
+        "management-token",
+        new AbortController().signal,
+        fetchImplementation,
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(fetchImplementation.mock.calls[0]?.[1]?.redirect).toBe("error");
   });
 });

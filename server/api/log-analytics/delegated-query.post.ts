@@ -5,7 +5,7 @@ import { parseDeploymentCapabilities } from "../../utils/deploymentCapabilities"
 import {
   executeLogAnalyticsQuery,
   validateDelegatedLogAnalyticsQueryRequest,
-} from "../../utils/logAnalyticsQuery";
+} from "../../../shared/utils/logAnalyticsQuery";
 import {
   createIncomingRequestSignal,
   readDelegatedLogAnalyticsBearerToken,

@@ -7,7 +7,7 @@ import {
   executeLogAnalyticsQuery,
   LogAnalyticsQueryError,
   mapLogAnalyticsResponse,
-} from "../../server/utils/logAnalyticsQuery";
+} from "../../shared/utils/logAnalyticsQuery";
 
 const config: LogAnalyticsRuntimeConfig = {
   tenantId: "11111111-1111-1111-1111-111111111111",
@@ -333,6 +333,7 @@ describe("Log Analytics Azure request", () => {
       authorization: "Bearer access-token",
       "content-type": "application/json",
     });
+    expect(init.redirect).toBe("error");
     expect(JSON.parse(init.body)).toMatchObject({
       timespan: "2026-07-10T10:00:00.000Z/2026-07-10T10:15:00.000Z",
     });
@@ -385,6 +386,33 @@ describe("Log Analytics Azure request", () => {
       }),
     ).rejects.toMatchObject({ kind: "upstream" });
     expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
+  it("rejects invalid workspace targets before sending authorization", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+
+    await expect(
+      executeLogAnalyticsQuery(
+        { workspaceId: "not-a-workspace" },
+        createRequest(),
+        "access-token",
+        { fetchImplementation },
+      ),
+    ).rejects.toMatchObject({ kind: "upstream" });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("rejects redirected Log Analytics responses", async () => {
+    const redirected = response([]);
+    Object.defineProperty(redirected, "redirected", { value: true });
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(redirected);
+
+    await expect(
+      executeLogAnalyticsQuery(config, createRequest(), "access-token", {
+        fetchImplementation,
+      }),
+    ).rejects.toMatchObject({ kind: "upstream" });
+    expect(fetchImplementation.mock.calls[0]?.[1]?.redirect).toBe("error");
   });
 
   it("aborts timed-out upstream requests", async () => {
