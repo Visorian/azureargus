@@ -1,14 +1,5 @@
 targetScope = 'resourceGroup'
 
-@description('Name of the resource group containing the existing Azure Firewall. Required when deploying the firewall diagnostic setting.')
-@minLength(1)
-@maxLength(90)
-param firewallResourceGroupName string = resourceGroup().name
-
-@description('Name of the existing Azure Firewall. Required when deploying the firewall diagnostic setting.')
-@maxLength(56)
-param firewallName string = ''
-
 @description('Name of the Event Hub created for Azure Argus.')
 @minLength(1)
 @maxLength(256)
@@ -22,14 +13,25 @@ param eventHubRetentionHours int = 1
 @description('Deploy the Azure Firewall diagnostic setting that forwards logs to the Event Hub.')
 param deployFirewallDiagnosticSetting bool = true
 
+@description('Name of the resource group containing the existing Azure Firewall. Leave empty to use the deployment resource group. Ignored when the firewall diagnostic setting is not deployed.')
+@maxLength(90)
+param firewallResourceGroupName string = ''
+
+@description('Name of the existing Azure Firewall. Required when deploying the firewall diagnostic setting and ignored otherwise.')
+@maxLength(56)
+param firewallName string = ''
+
 var eventHubNamespaceName = 'azureargus-${uniqueString(subscription().id, resourceGroup().id, eventHubName)}'
 var eventHubResourceId = resourceId('Microsoft.EventHub/namespaces/eventhubs', eventHubNamespaceName, eventHubName)
-var firewallResourceGroupScope = resourceGroup(firewallResourceGroupName)
+var effectiveFirewallResourceGroupName = empty(firewallResourceGroupName)
+  ? resourceGroup().name
+  : firewallResourceGroupName
+var firewallResourceGroupScope = resourceGroup(effectiveFirewallResourceGroupName)
 var diagnosticSettingName = 'azureargus-forwarding-${uniqueString(eventHubResourceId)}'
-var diagnosticDeploymentName = 'azureargus-firewall-diagnostic-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
+var diagnosticDeploymentName = 'azureargus-firewall-diagnostic-${uniqueString(deployment().name, subscription().id, effectiveFirewallResourceGroupName, firewallName, eventHubResourceId)}'
 
 module firewallDetails './firewall.bicep' = if (deployFirewallDiagnosticSetting) {
-  name: 'azureargus-firewall-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
+  name: 'azureargus-firewall-${uniqueString(deployment().name, subscription().id, effectiveFirewallResourceGroupName, firewallName, eventHubResourceId)}'
   scope: firewallResourceGroupScope
   params: {
     firewallName: firewallName

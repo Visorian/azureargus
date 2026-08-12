@@ -35,6 +35,22 @@ resource diagnosticSetting 'Microsoft.Insights/diagnosticSettings@2021-05-01-pre
         category: 'AZFWNatRule'
         enabled: true
       }
+      {
+        category: 'AZFWThreatIntel'
+        enabled: true
+      }
+      {
+        category: 'AZFWFqdnResolveFailure'
+        enabled: true
+      }
+      {
+        category: 'AZFWDnsQuery'
+        enabled: true
+      }
+      {
+        category: 'AZFWIdpsSignature'
+        enabled: true
+      }
     ]
   }
 }
