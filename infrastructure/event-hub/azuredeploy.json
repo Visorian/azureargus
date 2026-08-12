@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9328456148133332939"
+      "templateHash": "13994618419783504637"
     }
   },
   "parameters": {
@@ -48,7 +48,7 @@
     "eventHubNamespaceName": "[format('azureargus-{0}', uniqueString(subscription().id, resourceGroup().id, parameters('eventHubName')))]",
     "eventHubResourceId": "[resourceId('Microsoft.EventHub/namespaces/eventhubs', variables('eventHubNamespaceName'), parameters('eventHubName'))]",
     "firewallResourceGroupScope": {},
-    "diagnosticSettingName": "[format('azureargus-event-hub-{0}', uniqueString(variables('eventHubResourceId')))]",
+    "diagnosticSettingName": "[format('azureargus-forwarding-{0}', uniqueString(variables('eventHubResourceId')))]",
     "diagnosticDeploymentName": "[format('azureargus-firewall-diagnostic-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]"
   },
   "resources": [

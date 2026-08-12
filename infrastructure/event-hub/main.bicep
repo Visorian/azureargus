@@ -23,7 +23,7 @@ param eventHubRetentionHours int = 1
 var eventHubNamespaceName = 'azureargus-${uniqueString(subscription().id, resourceGroup().id, eventHubName)}'
 var eventHubResourceId = resourceId('Microsoft.EventHub/namespaces/eventhubs', eventHubNamespaceName, eventHubName)
 var firewallResourceGroupScope = resourceGroup(firewallResourceGroupName)
-var diagnosticSettingName = 'azureargus-event-hub-${uniqueString(eventHubResourceId)}'
+var diagnosticSettingName = 'azureargus-forwarding-${uniqueString(eventHubResourceId)}'
 var diagnosticDeploymentName = 'azureargus-firewall-diagnostic-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
 
 module firewallDetails './firewall.bicep' = {
