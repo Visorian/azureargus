@@ -54,21 +54,27 @@ set one browser-visible identifier and restart Azure Argus:
 NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID=<application-client-id>
 ```
 
-#### Deploy temporary Event Hub forwarding
+#### Deploy temporary Event Hub resources
 
-This deployment creates a one-throughput-unit Standard Event Hubs namespace and Event Hub in the
-resource group selected in the Azure portal, then adds one diagnostic setting to an existing Azure
-Firewall.
+Choose whether to deploy only the Event Hub resources or also add diagnostic forwarding to an
+existing Azure Firewall. Both deployments create a one-throughput-unit Standard Event Hubs namespace,
+an Event Hub, and the event-hub-level `azureargus-listen` policy.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json)
+**Event Hub only**
+
+[![Deploy Event Hub only to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json)
+
+**Event Hub + firewall diagnostic settings**
+
+[![Deploy Event Hub and firewall diagnostics to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json)
 
 Before deployment:
 
-- Select the subscription containing the firewall. This template requires the Event Hubs and
-  firewall resource groups to be in the same subscription.
-- Verify Event Hubs Standard is available in the firewall region. The template creates the namespace
-  in the firewall's region because regional diagnostic destinations must match.
-- A firewall supports at most five diagnostic settings. This deployment uses one.
+- For firewall diagnostics, select the subscription containing the firewall. The Event Hubs and
+  firewall resource groups must be in the same subscription.
+- For firewall diagnostics, verify Event Hubs Standard is available in the firewall region. The
+  template creates the namespace in that region because regional diagnostic destinations must match.
+- A firewall supports at most five diagnostic settings. The diagnostics deployment uses one.
 - The Standard namespace uses one throughput unit and incurs charges until deleted. Check current
   [regional pricing](https://azure.microsoft.com/pricing/details/event-hubs/) before deployment.
 
@@ -78,20 +84,21 @@ The deploying identity needs these control-plane permissions, directly or throug
   access for Event Hubs namespaces, event hubs, and authorization rules;
   `Microsoft.EventHub/namespaces/authorizationRules/listkeys/action`; and
   `Microsoft.EventHub/namespaces/eventhubs/authorizationRules/listkeys/action`.
-- On the firewall resource group: `Microsoft.Resources/deployments/*`,
+- For firewall diagnostics, on the firewall resource group: `Microsoft.Resources/deployments/*`,
   `Microsoft.Network/azureFirewalls/read`, `Microsoft.Insights/diagnosticSettings/read`, and
   `Microsoft.Insights/diagnosticSettings/write`.
 
-In the portal, choose the Event Hubs resource group as the deployment resource group, then enter:
+In the portal, choose the Event Hubs resource group as the deployment resource group. Both templates
+accept **Event Hub name** (default `azureargus`) and **Event Hub retention hours** (default `1`, range
+`1`–`168`). The diagnostics template also requires:
 
-- **Firewall resource group name** and **Firewall name** for the existing firewall.
-- **Event Hub name**, default `azureargus`.
-- **Event Hub retention hours**, default `1`, allowed range `1`–`168`.
+- **Firewall resource group name**.
+- **Firewall name**.
 
-The deployment outputs the generated namespace and Event Hub identities plus the exact diagnostic
-setting name and resource ID. It uses namespace `RootManageSharedAccessKey` only for Azure Monitor
-diagnostic delivery and creates a separate event-hub-level `azureargus-listen` policy with only
-`Listen` permission for Azure Argus.
+Both deployments output the generated namespace and Event Hub identities. The diagnostics deployment
+also outputs the exact diagnostic-setting name and resource ID. It uses namespace
+`RootManageSharedAccessKey` only for Azure Monitor diagnostic delivery. Both deployments create a
+separate event-hub-level `azureargus-listen` policy with only `Listen` permission for Azure Argus.
 
 After deployment, open the generated namespace, select the Event Hub, then open **Shared access
 policies** > **azureargus-listen**. Copy its **Primary Connection String**. The string must contain
@@ -106,8 +113,9 @@ unless **Remember connection string** stores it unencrypted in browser storage.
 The Event Hub retention setting controls how long Azure retains unread broker events; default is one
 hour. Event Hub lookback controls where Azure Argus starts reading within that retained stream and
 remains 1–15 minutes. Local log retention separately stores records already received by the browser,
-optionally up to 100,000 records for 24 hours. After diagnostic-setting creation, data can take up to
-90 minutes to start flowing. See [Azure Monitor diagnostic settings](https://learn.microsoft.com/azure/azure-monitor/platform/diagnostic-settings)
+optionally up to 100,000 records for 24 hours. After diagnostic-setting creation, check once per
+minute for incoming events; they usually start flowing within 20 minutes. See
+[Azure Monitor diagnostic settings](https://learn.microsoft.com/azure/azure-monitor/platform/diagnostic-settings)
 and [Event Hubs connection-string guidance](https://learn.microsoft.com/azure/event-hubs/event-hubs-get-connection-string).
 
 To clean up:
@@ -115,12 +123,11 @@ To clean up:
 1. Disconnect Azure Argus, uncheck **Remember connection string**, reload the page, and confirm the
    connection string remains cleared. Complete this before deleting `azureargus-listen` or Event Hubs
    resources.
-2. Record `diagnosticSettingName` and `diagnosticSettingResourceId` from deployment outputs. On the
-   firewall, delete only that exact diagnostic setting. Do not remove unrelated firewall settings.
-3. Wait at least one hour for Azure Monitor's diagnostic-setting cache to expire before deleting the
-   Event Hub or namespace. This prevents the deleted destination from being
-   [recreated automatically](https://learn.microsoft.com/troubleshoot/azure/azure-monitor/diagnostic-settings/data-flow/deleted-event-hub-automatically-recreated).
-4. Delete the generated namespace identified by `eventHubNamespaceName` to stop Standard namespace
+2. If firewall diagnostics were deployed, record `diagnosticSettingName` and
+   `diagnosticSettingResourceId` from deployment outputs. On the firewall, delete only that exact
+   diagnostic setting. Do not remove unrelated firewall settings. Check once per minute and continue
+   after the setting is absent twice in a row. Event Hub-only deployments skip this step.
+3. Delete the generated namespace identified by `eventHubNamespaceName` to stop Standard namespace
    charges. Delete the selected resource group only when it was dedicated to this deployment and
    contains nothing else. To revoke browser access while retaining forwarding, delete only the
    event-hub-level `azureargus-listen` policy instead.

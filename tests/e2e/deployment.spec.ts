@@ -2,6 +2,11 @@ import { expect, test } from "@playwright/test";
 
 import { enterAnonymousMode, openSettings } from "./support/logsWorkspace";
 
+const eventHubOnlyDeploymentUrl =
+  "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json";
+const eventHubWithDiagnosticsDeploymentUrl =
+  "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json";
+
 test("anonymous deployment bypasses application login", async ({ page }) => {
   await page.goto("/login");
 
@@ -24,6 +29,34 @@ test("anonymous deployment starts directly in logs", async ({ page }) => {
 
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
+});
+
+test("anonymous Event Hub settings expose both bounded deployment choices", async ({ page }) => {
+  await page.setViewportSize({ height: 812, width: 375 });
+  await enterAnonymousMode(page);
+
+  const settingsDrawer = await openSettings(page);
+  const eventHubOnlyLink = settingsDrawer.getByRole("link", {
+    name: "Deploy Event Hub only to Azure (opens in new tab)",
+  });
+  const eventHubWithDiagnosticsLink = settingsDrawer.getByRole("link", {
+    name: "Deploy Event Hub and firewall diagnostics to Azure (opens in new tab)",
+  });
+
+  await expect(eventHubOnlyLink).toHaveAttribute("href", eventHubOnlyDeploymentUrl);
+  await expect(eventHubWithDiagnosticsLink).toHaveAttribute(
+    "href",
+    eventHubWithDiagnosticsDeploymentUrl,
+  );
+  await expect(eventHubOnlyLink).toHaveAttribute("target", "_blank");
+  await expect(eventHubWithDiagnosticsLink).toHaveAttribute("target", "_blank");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
 });
 
 test("managed deployment requires application login", async ({ page }) => {

@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - "infrastructure/event-hub/*.bicep"
-      - "infrastructure/event-hub/azuredeploy.json"
+      - "infrastructure/event-hub/azuredeploy*.json"
       - ".github/workflows/event-hub-template.yml"
   push:
     branches:
       - main
     paths:
       - "infrastructure/event-hub/*.bicep"
-      - "infrastructure/event-hub/azuredeploy.json"
+      - "infrastructure/event-hub/azuredeploy*.json"
       - ".github/workflows/event-hub-template.yml"
 
 permissions:
@@ -38,6 +38,7 @@ jobs:
 
           bicep="$RUNNER_TEMP/bicep"
           generated="$RUNNER_TEMP/azuredeploy.json"
+          generated_event_hub_only="$RUNNER_TEMP/azuredeploy-event-hub-only.json"
 
           curl --fail --location --silent --show-error \
             "https://github.com/Azure/bicep/releases/download/$BICEP_VERSION/bicep-linux-x64" \
@@ -47,8 +48,67 @@ jobs:
 
           "$bicep" lint infrastructure/event-hub/main.bicep
           "$bicep" build infrastructure/event-hub/main.bicep --outfile "$generated"
+          "$bicep" lint infrastructure/event-hub/event-hub-only.bicep
+          "$bicep" build infrastructure/event-hub/event-hub-only.bicep --outfile "$generated_event_hub_only"
 
           if ! cmp --silent infrastructure/event-hub/azuredeploy.json "$generated"; then
             diff -u infrastructure/event-hub/azuredeploy.json "$generated" || true
             exit 1
           fi
+
+          if ! cmp --silent infrastructure/event-hub/azuredeploy-event-hub-only.json "$generated_event_hub_only"; then
+            diff -u infrastructure/event-hub/azuredeploy-event-hub-only.json "$generated_event_hub_only" || true
+            exit 1
+          fi
+
+          jq --exit-status '
+            (.parameters | keys | sort) == [
+              "eventHubName",
+              "eventHubRetentionHours",
+              "firewallName",
+              "firewallResourceGroupName"
+            ]
+            and .parameters.firewallName.minLength == 1
+            and .parameters.firewallResourceGroupName.minLength == 1
+            and (.parameters.firewallName | has("defaultValue") | not)
+            and (.parameters.firewallResourceGroupName | has("defaultValue") | not)
+            and all(.resources[]; has("condition") | not)
+            and ([
+              .resources[]
+              | select(any(
+                  .properties.template.resources[]?;
+                  .type == "Microsoft.EventHub/namespaces"
+                ))
+              | .properties.parameters.location.value
+            ] | length == 1 and (.[0] | contains("outputs.location.value")))
+            and ([
+              .resources[]
+              | .properties.template.resources[]
+              | select(.type == "Microsoft.Insights/diagnosticSettings")
+              | .properties.logs[].category
+            ] == [
+              "AZFWNetworkRule",
+              "AZFWApplicationRule",
+              "AZFWNatRule",
+              "AZFWThreatIntel",
+              "AZFWFqdnResolveFailure",
+              "AZFWDnsQuery",
+              "AZFWIdpsSignature"
+            ])
+          ' infrastructure/event-hub/azuredeploy.json
+
+          jq --exit-status '
+            (.parameters | keys | sort) == [
+              "eventHubName",
+              "eventHubRetentionHours"
+            ]
+            and all(.resources[]; has("condition") | not)
+            and ([
+              .resources[]
+              | select(any(
+                  .properties.template.resources[]?;
+                  .type == "Microsoft.EventHub/namespaces"
+                ))
+              | .properties.parameters.location.value
+            ] == ["[resourceGroup().location]"])
+          ' infrastructure/event-hub/azuredeploy-event-hub-only.json

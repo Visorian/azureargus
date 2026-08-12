@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "12829931156793276210"
+      "templateHash": "16589596184386838911"
     }
   },
   "parameters": {
@@ -27,45 +27,36 @@
         "description": "Number of hours that Event Hub records are retained."
       }
     },
-    "deployFirewallDiagnosticSetting": {
-      "type": "bool",
-      "defaultValue": true,
-      "metadata": {
-        "description": "Deploy the Azure Firewall diagnostic setting that forwards logs to the Event Hub."
-      }
-    },
     "firewallResourceGroupName": {
       "type": "string",
-      "defaultValue": "",
+      "minLength": 1,
       "maxLength": 90,
       "metadata": {
-        "description": "Name of the resource group containing the existing Azure Firewall. Leave empty to use the deployment resource group. Ignored when the firewall diagnostic setting is not deployed."
+        "description": "Name of the resource group containing the existing Azure Firewall."
       }
     },
     "firewallName": {
       "type": "string",
-      "defaultValue": "",
+      "minLength": 1,
       "maxLength": 56,
       "metadata": {
-        "description": "Name of the existing Azure Firewall. Required when deploying the firewall diagnostic setting and ignored otherwise."
+        "description": "Name of the existing Azure Firewall."
       }
     }
   },
   "variables": {
     "eventHubNamespaceName": "[format('azureargus-{0}', uniqueString(subscription().id, resourceGroup().id, parameters('eventHubName')))]",
     "eventHubResourceId": "[resourceId('Microsoft.EventHub/namespaces/eventhubs', variables('eventHubNamespaceName'), parameters('eventHubName'))]",
-    "effectiveFirewallResourceGroupName": "[if(empty(parameters('firewallResourceGroupName')), resourceGroup().name, parameters('firewallResourceGroupName'))]",
     "firewallResourceGroupScope": {},
     "diagnosticSettingName": "[format('azureargus-forwarding-{0}', uniqueString(variables('eventHubResourceId')))]",
-    "diagnosticDeploymentName": "[format('azureargus-firewall-diagnostic-{0}', uniqueString(deployment().name, subscription().id, variables('effectiveFirewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]"
+    "diagnosticDeploymentName": "[format('azureargus-firewall-diagnostic-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]"
   },
   "resources": [
     {
-      "condition": "[parameters('deployFirewallDiagnosticSetting')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "[format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, variables('effectiveFirewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]",
-      "resourceGroup": "[variables('effectiveFirewallResourceGroupName')]",
+      "name": "[format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))]",
+      "resourceGroup": "[parameters('firewallResourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -124,7 +115,7 @@
             "value": "[parameters('eventHubRetentionHours')]"
           },
           "location": {
-            "value": "[coalesce(tryGet(if(parameters('deployFirewallDiagnosticSetting'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('effectiveFirewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, variables('effectiveFirewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))), '2025-04-01'), null()), 'outputs', 'location', 'value'), resourceGroup().location)]"
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId')))), '2025-04-01').outputs.location.value]"
           }
         },
         "template": {
@@ -245,15 +236,14 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('effectiveFirewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, variables('effectiveFirewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId'))))]"
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', format('azureargus-firewall-{0}', uniqueString(deployment().name, subscription().id, parameters('firewallResourceGroupName'), parameters('firewallName'), variables('eventHubResourceId'))))]"
       ]
     },
     {
-      "condition": "[parameters('deployFirewallDiagnosticSetting')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[variables('diagnosticDeploymentName')]",
-      "resourceGroup": "[variables('effectiveFirewallResourceGroupName')]",
+      "resourceGroup": "[parameters('firewallResourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -391,11 +381,11 @@
     },
     "diagnosticSettingName": {
       "type": "string",
-      "value": "[if(parameters('deployFirewallDiagnosticSetting'), variables('diagnosticSettingName'), '')]"
+      "value": "[variables('diagnosticSettingName')]"
     },
     "diagnosticSettingResourceId": {
       "type": "string",
-      "value": "[coalesce(tryGet(if(parameters('deployFirewallDiagnosticSetting'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('effectiveFirewallResourceGroupName')), 'Microsoft.Resources/deployments', variables('diagnosticDeploymentName')), '2025-04-01'), null()), 'outputs', 'diagnosticSettingResourceId', 'value'), '')]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('firewallResourceGroupName')), 'Microsoft.Resources/deployments', variables('diagnosticDeploymentName')), '2025-04-01').outputs.diagnosticSettingResourceId.value]"
     }
   }
 }

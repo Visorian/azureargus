@@ -1,0 +1,203 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "13712523671156245507"
+    }
+  },
+  "parameters": {
+    "eventHubName": {
+      "type": "string",
+      "defaultValue": "azureargus",
+      "minLength": 1,
+      "maxLength": 256,
+      "metadata": {
+        "description": "Name of the Event Hub created for Azure Argus."
+      }
+    },
+    "eventHubRetentionHours": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 168,
+      "metadata": {
+        "description": "Number of hours that Event Hub records are retained."
+      }
+    }
+  },
+  "variables": {
+    "eventHubNamespaceName": "[format('azureargus-{0}', uniqueString(subscription().id, resourceGroup().id, parameters('eventHubName')))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "eventHubName": {
+            "value": "[parameters('eventHubName')]"
+          },
+          "eventHubNamespaceName": {
+            "value": "[variables('eventHubNamespaceName')]"
+          },
+          "eventHubRetentionHours": {
+            "value": "[parameters('eventHubRetentionHours')]"
+          },
+          "location": {
+            "value": "[resourceGroup().location]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "11552914577622110251"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the Event Hubs namespace."
+              }
+            },
+            "eventHubNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Event Hubs namespace."
+              }
+            },
+            "eventHubName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Event Hub created for Azure Argus."
+              }
+            },
+            "eventHubRetentionHours": {
+              "type": "int",
+              "metadata": {
+                "description": "Number of hours that Event Hub records are retained."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.EventHub/namespaces",
+              "apiVersion": "2024-01-01",
+              "name": "[parameters('eventHubNamespaceName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "Standard",
+                "tier": "Standard",
+                "capacity": 1
+              },
+              "properties": {
+                "disableLocalAuth": false,
+                "isAutoInflateEnabled": false,
+                "minimumTlsVersion": "1.2",
+                "publicNetworkAccess": "Enabled",
+                "zoneRedundant": false
+              }
+            },
+            {
+              "type": "Microsoft.EventHub/namespaces/eventhubs",
+              "apiVersion": "2024-01-01",
+              "name": "[format('{0}/{1}', parameters('eventHubNamespaceName'), parameters('eventHubName'))]",
+              "properties": {
+                "partitionCount": 1,
+                "retentionDescription": {
+                  "cleanupPolicy": "Delete",
+                  "retentionTimeInHours": "[parameters('eventHubRetentionHours')]"
+                },
+                "status": "Active"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.EventHub/namespaces', parameters('eventHubNamespaceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.EventHub/namespaces/eventhubs/authorizationRules",
+              "apiVersion": "2024-01-01",
+              "name": "[format('{0}/{1}/{2}', parameters('eventHubNamespaceName'), parameters('eventHubName'), 'azureargus-listen')]",
+              "properties": {
+                "rights": [
+                  "Listen"
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.EventHub/namespaces/eventhubs', parameters('eventHubNamespaceName'), parameters('eventHubName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "eventHubNamespaceName": {
+              "type": "string",
+              "value": "[parameters('eventHubNamespaceName')]"
+            },
+            "eventHubNamespaceResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.EventHub/namespaces', parameters('eventHubNamespaceName'))]"
+            },
+            "eventHubName": {
+              "type": "string",
+              "value": "[parameters('eventHubName')]"
+            },
+            "eventHubResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.EventHub/namespaces/eventhubs', parameters('eventHubNamespaceName'), parameters('eventHubName'))]"
+            },
+            "diagnosticAuthorizationRuleResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.EventHub/namespaces/authorizationRules', parameters('eventHubNamespaceName'), 'RootManageSharedAccessKey')]"
+            },
+            "listenerAuthorizationRuleName": {
+              "type": "string",
+              "value": "azureargus-listen"
+            },
+            "listenerAuthorizationRuleResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.EventHub/namespaces/eventhubs/authorizationRules', parameters('eventHubNamespaceName'), parameters('eventHubName'), 'azureargus-listen')]"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "eventHubNamespaceName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubNamespaceName.value]"
+    },
+    "eventHubNamespaceResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubNamespaceResourceId.value]"
+    },
+    "eventHubName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubName.value]"
+    },
+    "eventHubResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.eventHubResourceId.value]"
+    },
+    "listenerAuthorizationRuleName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.listenerAuthorizationRuleName.value]"
+    },
+    "listenerAuthorizationRuleResourceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('azureargus-event-hub-{0}', uniqueString(deployment().name, variables('eventHubNamespaceName'), parameters('eventHubName')))), '2025-04-01').outputs.listenerAuthorizationRuleResourceId.value]"
+    }
+  }
+}

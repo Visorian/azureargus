@@ -4,7 +4,9 @@ import {
   type EventHubConnectionForm,
 } from "~/composables/useEventHubConnection";
 
-const DEPLOY_TO_AZURE_URL =
+const DEPLOY_EVENT_HUB_URL =
+  "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json";
+const DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL =
   "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json";
 
 const props = defineProps<{
@@ -65,22 +67,35 @@ const connectionFieldsDisabled = computed(() => props.connecting || props.connec
     >
       <p class="text-xs font-semibold">Need an Event Hub?</p>
       <p class="mt-1 text-xs text-brand-gray-600 dark:text-brand-gray-300">
-        Deploy Event Hub and firewall diagnostic settings. Then copy event-hub-level
+        Deploy an Event Hub by itself or include Azure Firewall diagnostic forwarding. Then copy
+        event-hub-level
         <code class="font-mono">azureargus-listen</code> primary connection string containing
         <code class="font-mono">EntityPath</code>.
       </p>
-      <UButton
-        :to="DEPLOY_TO_AZURE_URL"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="mt-2"
-        color="neutral"
-        variant="outline"
-        size="sm"
-        icon="i-lucide-external-link"
-        label="Deploy to Azure"
-        aria-label="Deploy to Azure (opens in new tab)"
-      />
+      <div class="mt-2 flex flex-wrap gap-2">
+        <UButton
+          :to="DEPLOY_EVENT_HUB_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-external-link"
+          label="Event Hub only"
+          aria-label="Deploy Event Hub only to Azure (opens in new tab)"
+        />
+        <UButton
+          :to="DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-external-link"
+          label="Event Hub + firewall diagnostics"
+          aria-label="Deploy Event Hub and firewall diagnostics to Azure (opens in new tab)"
+        />
+      </div>
     </div>
 
     <UForm :state="connectionForm" class="space-y-3" @submit="emit('connect')">

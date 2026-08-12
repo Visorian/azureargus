@@ -3,7 +3,9 @@ import { mountSuspended } from "@nuxt/test-utils/runtime";
 import EventHubSettingsPanel from "../../app/components/logs/EventHubSettingsPanel.vue";
 import type { EventHubConnectionForm } from "../../app/composables/useEventHubConnection";
 
-const DEPLOY_TO_AZURE_URL =
+const DEPLOY_EVENT_HUB_URL =
+  "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json";
+const DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL =
   "https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json";
 
 function createConnectionForm(): EventHubConnectionForm {
@@ -51,12 +53,24 @@ describe("EventHubSettingsPanel", () => {
       props: createProps(),
     });
 
-    const deployLink = wrapper.get(`a[href="${DEPLOY_TO_AZURE_URL}"]`);
+    const eventHubLink = wrapper.get(`a[href="${DEPLOY_EVENT_HUB_URL}"]`);
+    const diagnosticsLink = wrapper.get(`a[href="${DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL}"]`);
 
-    expect(deployLink.text()).toContain("Deploy to Azure");
-    expect(deployLink.attributes("aria-label")).toBe("Deploy to Azure (opens in new tab)");
-    expect(deployLink.attributes("target")).toBe("_blank");
-    expect(deployLink.attributes("rel")).toBe("noopener noreferrer");
+    expect(
+      wrapper.findAll('a[href^="https://portal.azure.com/#create/Microsoft.Template/uri/"]'),
+    ).toHaveLength(2);
+    expect(eventHubLink.text()).toContain("Event Hub only");
+    expect(eventHubLink.attributes("aria-label")).toBe(
+      "Deploy Event Hub only to Azure (opens in new tab)",
+    );
+    expect(diagnosticsLink.text()).toContain("Event Hub + firewall diagnostics");
+    expect(diagnosticsLink.attributes("aria-label")).toBe(
+      "Deploy Event Hub and firewall diagnostics to Azure (opens in new tab)",
+    );
+    for (const deployLink of [eventHubLink, diagnosticsLink]) {
+      expect(deployLink.attributes("target")).toBe("_blank");
+      expect(deployLink.attributes("rel")).toBe("noopener noreferrer");
+    }
     expect(wrapper.text()).toContain("azureargus-listen");
     expect(wrapper.text()).toContain("EntityPath");
   });
@@ -128,7 +142,8 @@ describe("EventHubSettingsPanel", () => {
     });
 
     expect(wrapper.text()).toContain("Connection is configured by deployment.");
-    expect(wrapper.find(`a[href="${DEPLOY_TO_AZURE_URL}"]`).exists()).toBe(false);
+    expect(wrapper.find(`a[href="${DEPLOY_EVENT_HUB_URL}"]`).exists()).toBe(false);
+    expect(wrapper.find(`a[href="${DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL}"]`).exists()).toBe(false);
     expect(wrapper.find("textarea").attributes()).toHaveProperty("disabled");
     expect(wrapper.text()).not.toContain("Remember connection string");
     const eventHubName = wrapper.findAll("input")[1];
