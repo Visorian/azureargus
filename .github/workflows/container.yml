@@ -99,12 +99,13 @@ jobs:
             exit 1
           fi
 
-      - name: Build and publish image
-        id: build
+      - name: Build image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          push: true
+          load: true
+          platforms: linux/amd64
+          push: false
           tags: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
           build-args: |
             VERSION_NUMBER=${{ steps.release.outputs.version }}
@@ -112,10 +113,55 @@ jobs:
           provenance: false
           sbom: false
 
+      - name: Smoke test image
+        shell: bash
+        env:
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          container="$(docker run --detach --publish 127.0.0.1::3000 "$IMAGE")"
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true' EXIT
+
+          port="$(docker port "$container" 3000/tcp | sed 's/.*://')"
+          for _ in {1..30}; do
+            if curl --fail --silent --show-error "http://127.0.0.1:$port/" >/dev/null \
+              && curl --fail --silent --show-error "http://127.0.0.1:$port/api/capabilities" \
+                | jq --exit-status '.mode == "anonymous" and .errors == []' >/dev/null; then
+              exit 0
+            fi
+            if ! docker inspect --format '{{.State.Running}}' "$container" | grep --quiet '^true$'; then
+              docker logs "$container"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker logs "$container"
+          echo "Container did not become ready within 30 seconds" >&2
+          exit 1
+
+      - name: Publish image
+        id: publish
+        shell: bash
+        env:
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          output="$(docker push "$IMAGE")"
+          printf '%s\n' "$output"
+          digest="$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' <<< "$output" | tail -n 1)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Unable to determine published image digest" >&2
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Report published image
         shell: bash
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
           IMAGE: ghcr.io/visorian/azureargus:${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail

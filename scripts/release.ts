@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const MAX_RELEASE_VERSION_LENGTH = 70;
+const RELEASE_REMOTE = "origin";
 
 type StableVersion = readonly [bigint, bigint, bigint];
 
@@ -85,7 +86,7 @@ function ensureTagDoesNotExist(tag: string): void {
     "ls-remote",
     "--exit-code",
     "--tags",
-    "upstream",
+    RELEASE_REMOTE,
     `refs/tags/${tag}`,
   ]);
   if (remote.status === 0) {
@@ -120,12 +121,12 @@ function release(version: string): void {
     throw new Error("Release must run from main");
   }
 
-  command("git", ["fetch", "upstream", "main"]);
+  command("git", ["fetch", RELEASE_REMOTE, "main"]);
   if (
     capture("git", ["rev-parse", "HEAD"]) !==
-    capture("git", ["rev-parse", "refs/remotes/upstream/main"])
+    capture("git", ["rev-parse", `refs/remotes/${RELEASE_REMOTE}/main`])
   ) {
-    throw new Error("Local main must exactly match upstream/main");
+    throw new Error(`Local main must exactly match ${RELEASE_REMOTE}/main`);
   }
 
   const currentVersion = readPackageVersion();
@@ -156,7 +157,7 @@ function release(version: string): void {
   command("git", ["add", "CHANGELOG.md", "package.json"]);
   command("git", ["commit", "-S", "-m", `chore(release): ${tag}`]);
   command("git", ["tag", "-a", tag, "-m", tag]);
-  command("git", ["push", "--atomic", "upstream", "HEAD:refs/heads/main", `refs/tags/${tag}`]);
+  command("git", ["push", "--atomic", RELEASE_REMOTE, "HEAD:refs/heads/main", `refs/tags/${tag}`]);
 }
 
 function main(): void {
