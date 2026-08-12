@@ -1,0 +1,77 @@
+# Changelog
+
+
+## v0.1.1
+
+
+### 🚀 Enhancements
+
+- **frontend:** Argus initial commit ([faa4f14](https://github.com/Visorian/azureargus/commit/faa4f14))
+- **frontend:** Add indexeddb log history persistence ([5f1c580](https://github.com/Visorian/azureargus/commit/5f1c580))
+- **frontend:** Add local log retention control ([056ece8](https://github.com/Visorian/azureargus/commit/056ece8))
+- **frontend:** Add log analysis mode ([1dd849d](https://github.com/Visorian/azureargus/commit/1dd849d))
+- **frontend:** Improve logs workspace controls ([2d2c7d9](https://github.com/Visorian/azureargus/commit/2d2c7d9))
+- **frontend:** Refine logs workspace behavior ([92b2c88](https://github.com/Visorian/azureargus/commit/92b2c88))
+- **frontend:** Improve log filtering and details ([7f66a26](https://github.com/Visorian/azureargus/commit/7f66a26))
+- **frontend:** Add destination country flags ([899b89a](https://github.com/Visorian/azureargus/commit/899b89a))
+- **frontend:** Add analysis source context rail ([1cc44ea](https://github.com/Visorian/azureargus/commit/1cc44ea))
+- **frontend:** Identify internal destination addresses ([1e3e8ed](https://github.com/Visorian/azureargus/commit/1e3e8ed))
+- **config:** Bind data sources to deployment mode ([ab9afbe](https://github.com/Visorian/azureargus/commit/ab9afbe))
+- **frontend:** Enrich firewall log details ([b5e9f0d](https://github.com/Visorian/azureargus/commit/b5e9f0d))
+- **frontend:** Add DNS troubleshooting workspace ([f646c39](https://github.com/Visorian/azureargus/commit/f646c39))
+- **frontend:** Guide delegated workspace setup ([2b1144d](https://github.com/Visorian/azureargus/commit/2b1144d))
+- **frontend:** Improve DNS log analysis readiness ([aa3df22](https://github.com/Visorian/azureargus/commit/aa3df22))
+- **frontend:** Expand DNS troubleshooting evidence ([40ad452](https://github.com/Visorian/azureargus/commit/40ad452))
+- **frontend:** Support AzureDiagnostics queries ([cff66ce](https://github.com/Visorian/azureargus/commit/cff66ce))
+- **frontend:** Add dark mode toggle ([68f263d](https://github.com/Visorian/azureargus/commit/68f263d))
+- **frontend:** Support multi-category log filters ([5ce0c8a](https://github.com/Visorian/azureargus/commit/5ce0c8a))
+- **frontend:** Correlate duplicate network rule logs ([6b5987e](https://github.com/Visorian/azureargus/commit/6b5987e))
+- **release:** Add versioned container publishing ([d0e09f0](https://github.com/Visorian/azureargus/commit/d0e09f0))
+- **infrastructure:** Add Event Hub monitoring template ([90ba1fe](https://github.com/Visorian/azureargus/commit/90ba1fe))
+- **frontend:** Add Event Hub deployment entry points ([584ab9b](https://github.com/Visorian/azureargus/commit/584ab9b))
+- **config:** Make firewall diagnostics optional ([2adeb5d](https://github.com/Visorian/azureargus/commit/2adeb5d))
+- **config:** Expand firewall diagnostic deployment ([0152f55](https://github.com/Visorian/azureargus/commit/0152f55))
+- **config:** Split Event Hub deployment templates ([c61142c](https://github.com/Visorian/azureargus/commit/c61142c))
+- **frontend:** Query Azure directly in temporary mode ([6b870bc](https://github.com/Visorian/azureargus/commit/6b870bc))
+
+### 🔥 Performance
+
+- **frontend:** Optimize streaming log ingestion ([2dad120](https://github.com/Visorian/azureargus/commit/2dad120))
+
+### 🩹 Fixes
+
+- **frontend:** Label default network actions ([a1a0e49](https://github.com/Visorian/azureargus/commit/a1a0e49))
+- **frontend:** Harden geoip integration coverage ([2b7a452](https://github.com/Visorian/azureargus/commit/2b7a452))
+- **config:** Decouple login and log analytics identities ([095bcfe](https://github.com/Visorian/azureargus/commit/095bcfe))
+- **frontend:** Harden DNS troubleshooting evidence ([f8eba84](https://github.com/Visorian/azureargus/commit/f8eba84))
+- **frontend:** Preserve Event Hub state across source switches ([6934d88](https://github.com/Visorian/azureargus/commit/6934d88))
+- **frontend:** Improve temporary workspace setup ([e9d1d46](https://github.com/Visorian/azureargus/commit/e9d1d46))
+- **frontend:** Scope workspaces to selected tenant ([19c0069](https://github.com/Visorian/azureargus/commit/19c0069))
+- **frontend:** Lock active Event Hub settings ([49dd039](https://github.com/Visorian/azureargus/commit/49dd039))
+- **frontend:** Normalize default action rules ([fefe9c7](https://github.com/Visorian/azureargus/commit/fefe9c7))
+- **frontend:** Preserve raw log buffer across remounts ([76c06f6](https://github.com/Visorian/azureargus/commit/76c06f6))
+- **frontend:** Parse legacy firewall rule metadata ([1c32ab7](https://github.com/Visorian/azureargus/commit/1c32ab7))
+- **frontend:** Correct log catch-up and time display ([f682fa3](https://github.com/Visorian/azureargus/commit/f682fa3))
+- **frontend:** Complete managed catch-up and test coverage ([98413fb](https://github.com/Visorian/azureargus/commit/98413fb))
+- **config:** Use readable diagnostic setting name ([512419f](https://github.com/Visorian/azureargus/commit/512419f))
+- **config:** Keep diagnostic names collision safe ([42b2e49](https://github.com/Visorian/azureargus/commit/42b2e49))
+- **config:** Clarify forwarding diagnostic name ([baeb926](https://github.com/Visorian/azureargus/commit/baeb926))
+- **release:** Unblock container publication ([23d2294](https://github.com/Visorian/azureargus/commit/23d2294))
+
+### 💅 Refactors
+
+- **frontend:** Move log settings into drawer ([d71c51a](https://github.com/Visorian/azureargus/commit/d71c51a))
+- **frontend:** Share log analytics runtime logic ([5682664](https://github.com/Visorian/azureargus/commit/5682664))
+
+### 📖 Documentation
+
+- **docs:** Document temporary and permanent setup ([47fccce](https://github.com/Visorian/azureargus/commit/47fccce))
+
+### 🏡 Chore
+
+- **config:** Enable type-aware oxlint ([64dbb8d](https://github.com/Visorian/azureargus/commit/64dbb8d))
+
+### 🤖 CI
+
+- **ci:** Validate generated ARM template ([017ae9e](https://github.com/Visorian/azureargus/commit/017ae9e))
+
