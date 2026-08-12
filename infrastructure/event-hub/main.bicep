@@ -1,14 +1,13 @@
 targetScope = 'resourceGroup'
 
-@description('Name of the resource group containing the existing Azure Firewall.')
+@description('Name of the resource group containing the existing Azure Firewall. Required when deploying the firewall diagnostic setting.')
 @minLength(1)
 @maxLength(90)
-param firewallResourceGroupName string
+param firewallResourceGroupName string = resourceGroup().name
 
-@description('Name of the existing Azure Firewall.')
-@minLength(1)
+@description('Name of the existing Azure Firewall. Required when deploying the firewall diagnostic setting.')
 @maxLength(56)
-param firewallName string
+param firewallName string = ''
 
 @description('Name of the Event Hub created for Azure Argus.')
 @minLength(1)
@@ -20,13 +19,16 @@ param eventHubName string = 'azureargus'
 @maxValue(168)
 param eventHubRetentionHours int = 1
 
+@description('Deploy the Azure Firewall diagnostic setting that forwards logs to the Event Hub.')
+param deployFirewallDiagnosticSetting bool = true
+
 var eventHubNamespaceName = 'azureargus-${uniqueString(subscription().id, resourceGroup().id, eventHubName)}'
 var eventHubResourceId = resourceId('Microsoft.EventHub/namespaces/eventhubs', eventHubNamespaceName, eventHubName)
 var firewallResourceGroupScope = resourceGroup(firewallResourceGroupName)
 var diagnosticSettingName = 'azureargus-forwarding-${uniqueString(eventHubResourceId)}'
 var diagnosticDeploymentName = 'azureargus-firewall-diagnostic-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
 
-module firewallDetails './firewall.bicep' = {
+module firewallDetails './firewall.bicep' = if (deployFirewallDiagnosticSetting) {
   name: 'azureargus-firewall-${uniqueString(deployment().name, subscription().id, firewallResourceGroupName, firewallName, eventHubResourceId)}'
   scope: firewallResourceGroupScope
   params: {
@@ -40,11 +42,11 @@ module eventHubResources './event-hub.bicep' = {
     eventHubName: eventHubName
     eventHubNamespaceName: eventHubNamespaceName
     eventHubRetentionHours: eventHubRetentionHours
-    location: firewallDetails.outputs.location
+    location: firewallDetails.?outputs.location ?? resourceGroup().location
   }
 }
 
-module firewallDiagnosticSetting './diagnostic-setting.bicep' = {
+module firewallDiagnosticSetting './diagnostic-setting.bicep' = if (deployFirewallDiagnosticSetting) {
   name: diagnosticDeploymentName
   scope: firewallResourceGroupScope
   params: {
@@ -61,5 +63,5 @@ output eventHubName string = eventHubResources.outputs.eventHubName
 output eventHubResourceId string = eventHubResources.outputs.eventHubResourceId
 output listenerAuthorizationRuleName string = eventHubResources.outputs.listenerAuthorizationRuleName
 output listenerAuthorizationRuleResourceId string = eventHubResources.outputs.listenerAuthorizationRuleResourceId
-output diagnosticSettingName string = diagnosticSettingName
-output diagnosticSettingResourceId string = firewallDiagnosticSetting.outputs.diagnosticSettingResourceId
+output diagnosticSettingName string = deployFirewallDiagnosticSetting ? diagnosticSettingName : ''
+output diagnosticSettingResourceId string = firewallDiagnosticSetting.?outputs.diagnosticSettingResourceId ?? ''
