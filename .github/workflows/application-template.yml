@@ -1,0 +1,80 @@
+name: Validate application deployment template
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/application/**"
+      - ".github/workflows/application-template.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "infrastructure/application/**"
+      - ".github/workflows/application-template.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rebuild and compare deployment template
+        shell: bash
+        env:
+          BICEP_VERSION: v0.46.1
+          BICEP_SHA256: 3e011d629ea4311b7a7dd8f0040ab2b1a072ea4ff5d02cb75e0e55a9a6703fb9
+        run: |
+          set -euo pipefail
+
+          bicep="$RUNNER_TEMP/bicep"
+          generated="$RUNNER_TEMP/azuredeploy.json"
+
+          curl --fail --location --silent --show-error \
+            "https://github.com/Azure/bicep/releases/download/$BICEP_VERSION/bicep-linux-x64" \
+            --output "$bicep"
+          echo "$BICEP_SHA256  $bicep" | sha256sum --check -
+          chmod +x "$bicep"
+
+          "$bicep" lint infrastructure/application/main.bicep
+          "$bicep" build infrastructure/application/main.bicep --outfile "$generated"
+
+          if ! cmp --silent infrastructure/application/azuredeploy.json "$generated"; then
+            diff -u infrastructure/application/azuredeploy.json "$generated" || true
+            exit 1
+          fi
+
+          jq --exit-status '
+            (.parameters | length) == 0
+            and .variables.containerImage
+              == "ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387"
+            and ([.resources[] | select(.name == "azureargus-environment")]
+              | length == 1)
+            and ([.resources[] | select(.name == "azureargus-application")]
+              | length == 1)
+            and ([.resources[] | select(.name == "azureargus-environment")
+              | .properties.template.resources[]
+              | select(.type == "Microsoft.App/managedEnvironments")]
+              | length == 1)
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.template.resources[]
+              | select(.type == "Microsoft.App/containerApps")]
+              | length == 1)
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.containers.value[]
+              | select(.name == "azureargus") | .probes[].type] | sort)
+              == ["Liveness", "Readiness", "Startup"]
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.containers.value[]
+              | select(.name == "azureargus") | .image]
+              == ["[variables(\u0027containerImage\u0027)]"])
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters | has("secrets")] == [false])
+          ' infrastructure/application/azuredeploy.json
