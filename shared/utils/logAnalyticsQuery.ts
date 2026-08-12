@@ -494,7 +494,7 @@ export async function executeLogAnalyticsRawQuery(
   const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
   const controller = new AbortController();
   let timedOut = false;
-  const handleIncomingAbort = () => controller.abort();
+  const handleIncomingAbort = () => controller.abort(options.signal?.reason);
   if (options.signal?.aborted) {
     controller.abort();
   } else {
@@ -523,6 +523,11 @@ export async function executeLogAnalyticsRawQuery(
         },
       );
     } catch {
+      if (!timedOut && options.signal?.aborted) {
+        throw options.signal.reason instanceof Error
+          ? options.signal.reason
+          : new DOMException("The operation was aborted", "AbortError");
+      }
       throw new LogAnalyticsQueryError(timedOut ? "timeout" : "upstream");
     }
 

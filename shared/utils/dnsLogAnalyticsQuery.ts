@@ -508,6 +508,13 @@ function isReadinessSampleCount(value: unknown): value is 0 | 1 | 2 {
   return value === 0 || value === 1 || value === 2;
 }
 
+function throwIfAborted(signal: AbortSignal | undefined) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted", "AbortError");
+}
+
 function readinessProbeResult(payload: unknown) {
   const rows = tableRows(payload, 1);
   const tableExists = rows[0]?.TableExists;
@@ -531,6 +538,7 @@ export async function executeDnsReadinessQuery(
       executeLogAnalyticsRawQuery(target, query, undefined, accessToken, options),
     ),
   );
+  throwIfAborted(options.signal);
 
   const attempts = results.flatMap<ReadinessAttempt>((result, index): ReadinessAttempt[] => {
     const probe = probes[index]!;
@@ -724,6 +732,7 @@ export async function executeDnsListQuery(
       };
     }),
   );
+  throwIfAborted(options.signal);
 
   const observations: DnsObservation[] = [];
   const sources: DnsSourceStatus[] = [];
@@ -1117,6 +1126,7 @@ export async function executeDnsDetailQuery(
       )),
     })),
   );
+  throwIfAborted(options.signal);
   const relatedEvidence: DnsRelatedEvidence[] = [];
   const relatedSources: DnsRelatedSourceStatus[] = RELATED_SOURCE_KINDS.map((source) => ({
     source,
