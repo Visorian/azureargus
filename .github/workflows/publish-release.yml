@@ -1,0 +1,871 @@
+name: Publish release
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+    secrets:
+      AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY:
+        required: true
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      checks: read
+      contents: read
+      packages: write
+      pull-requests: read
+      statuses: read
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+      latest_digest: ${{ steps.publish.outputs.latest_digest }}
+      latest_equal: ${{ steps.publish.outputs.latest_equal }}
+      release_url: ${{ steps.promote.outputs.url || steps.release.outputs.url }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Mint release automation token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AZURE_ARGUS_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-metadata: read
+          permission-pull-requests: write
+
+      - name: Resolve exact release candidate
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TOKEN: ${{ steps.release-token.outputs.token }}
+          WANT_SHA: ${{ inputs.sha }}
+          WANT_TAG: ${{ inputs.tag }}
+          WANT_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="$WANT_TAG"
+          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            printf 'invalid stable release tag: %s\n' "$tag" >&2
+            exit 1
+          }
+          version="${tag#v}"
+          [ -z "${WANT_VERSION:-}" ] || [ "$WANT_VERSION" = "$version" ] || {
+            printf 'tag %s implies version %s, caller provided %s\n' "$tag" "$version" "$WANT_VERSION" >&2
+            exit 1
+          }
+
+          releases="$(
+            GH_TOKEN="$RELEASE_TOKEN" gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+              jq -c --arg tag "$tag" '[.[][] | select(.tag_name == $tag)]'
+          )"
+          release_count="$(jq 'length' <<<"$releases")"
+          [ "$release_count" -le 1 ] || {
+            printf 'expected at most one release for %s, found %s\n' "$tag" "$release_count" >&2
+            exit 1
+          }
+          release_id=''
+          published='false'
+          release_url=''
+          if [ "$release_count" -eq 1 ]; then
+            release="$(jq -c '.[0]' <<<"$releases")"
+            release_id="$(jq -r '.id' <<<"$release")"
+            release_url="$(jq -r '.html_url' <<<"$release")"
+            [ "$(jq -r '.draft' <<<"$release")" = 'true' ] || published='true'
+            if [ "$published" = 'true' ]; then
+              latest_release_tag="$(GH_TOKEN="$RELEASE_TOKEN" gh api \
+                "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+              [ "$latest_release_tag" = "$tag" ] || {
+                printf 'published release %s is not latest release %s\n' "$tag" "$latest_release_tag" >&2
+                exit 1
+              }
+            fi
+            sha="$(jq -r '.target_commitish' <<<"$release")"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+              printf 'draft target is not exact lowercase hex: %s\n' "$sha" >&2
+              exit 1
+            }
+          else
+            candidates="$(
+              gh api --paginate --slurp \
+                "repos/${GITHUB_REPOSITORY}/pulls?state=closed&base=main&per_page=100" |
+                jq -c --arg repo "$GITHUB_REPOSITORY" --arg title "chore(main): release ${version}" '[.[][] |
+                  select(.merged_at != null) |
+                  select(.title == $title) |
+                  select(.user.login == "azureargus-release[bot]") |
+                  select(.head.repo.full_name == $repo) |
+                  select(.head.ref == "release-please--branches--main--components--azure-argus") |
+                  select(any(.labels[]?; .name == "autorelease: pending"))
+                ]'
+            )"
+            [ "$(jq 'length' <<<"$candidates")" -eq 1 ] || {
+              printf 'expected one merged pending release candidate for %s\n' "$tag" >&2
+              exit 1
+            }
+            sha="$(jq -r '.[0].merge_commit_sha' <<<"$candidates")"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+              printf 'candidate SHA is not exact lowercase hex: %s\n' "$sha" >&2
+              exit 1
+            }
+          fi
+          [ -z "${WANT_SHA:-}" ] || [ "$WANT_SHA" = "$sha" ] || {
+            printf 'release %s targets %s, caller provided %s\n' "$tag" "$sha" "$WANT_SHA" >&2
+            exit 1
+          }
+
+          candidates="$(
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls?state=closed&base=main&per_page=100" |
+              jq -c --arg repo "$GITHUB_REPOSITORY" --arg sha "$sha" \
+                --arg title "chore(main): release ${version}" '[.[][] |
+                  select(.merged_at != null) |
+                  select(.merge_commit_sha == $sha) |
+                  select(.title == $title) |
+                  select(.user.login == "azureargus-release[bot]") |
+                  select(.head.repo.full_name == $repo) |
+                  select(.head.ref == "release-please--branches--main--components--azure-argus")
+                ]'
+          )"
+          [ "$(jq 'length' <<<"$candidates")" -eq 1 ] || {
+            printf 'release target does not have one exact Release Please pull request\n' >&2
+            exit 1
+          }
+          candidate_number="$(jq -r '.[0].number' <<<"$candidates")"
+          candidate_head="$(jq -r '.[0].head.sha' <<<"$candidates")"
+          files="$(
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls/${candidate_number}/files?per_page=100" |
+              jq -c '[.[][] | .filename] | sort'
+          )"
+          expected_files='[".release-please-manifest.json","CHANGELOG.md","infrastructure/application/public-gwc.bicepparam","package.json"]'
+          [ "$files" = "$expected_files" ] || {
+            printf 'release pull request changed unexpected files: %s\n' "$files" >&2
+            exit 1
+          }
+          reviews="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${candidate_number}/reviews")"
+          jq -e --arg head "$candidate_head" \
+            'any(.[]; .user.login == "copilot-pull-request-reviewer" and .commit_id == $head)' \
+            <<<"$reviews" >/dev/null || {
+              printf 'release pull request lacks Copilot review for %s\n' "$candidate_head" >&2
+              exit 1
+            }
+          statuses="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${candidate_head}/status")"
+          jq -e 'any(.statuses[]; .context == "Semantic PR" and .state == "success")' \
+            <<<"$statuses" >/dev/null || {
+              printf 'release pull request lacks successful Semantic PR status\n' >&2
+              exit 1
+            }
+          checks="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${candidate_head}/check-runs")"
+          jq -e 'any(.check_runs[]; .name == "validate" and .conclusion == "success")' \
+            <<<"$checks" >/dev/null || {
+              printf 'release pull request lacks successful application template validation\n' >&2
+              exit 1
+            }
+
+          exact_ref="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${tag}" |
+              jq -c --arg ref "refs/tags/${tag}" '.[] | select(.ref == $ref)'
+          )"
+          if [ -n "$exact_ref" ]; then
+            [ "$(jq -r '.object.type' <<<"$exact_ref")" = 'commit' ] &&
+              [ "$(jq -r '.object.sha' <<<"$exact_ref")" = "$sha" ] || {
+                printf 'tag %s does not point directly to %s\n' "$tag" "$sha" >&2
+                exit 1
+              }
+          elif [ -n "$release_id" ]; then
+            printf 'draft %s exists without its exact tag\n' "$tag" >&2
+            exit 1
+          fi
+          {
+            printf 'pull_number=%s\n' "$candidate_number"
+            printf 'release_id=%s\n' "$release_id"
+            printf 'release_url=%s\n' "$release_url"
+            printf 'published=%s\n' "$published"
+            printf 'sha=%s\n' "$sha"
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "$version"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Check out release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.resolve.outputs.sha }}
+
+      - name: Validate candidate contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_version="$(jq -r '.version' package.json)"
+          manifest_version="$(jq -r '.["."]' .release-please-manifest.json)"
+          hosted_version="$(sed -n "s/^param targetVersion = '\([^']*\)'.*/\1/p" infrastructure/application/public-gwc.bicepparam)"
+          [ "$package_version" = "$VERSION" ] || {
+            printf 'package version %s != %s\n' "$package_version" "$VERSION" >&2
+            exit 1
+          }
+          [ "$manifest_version" = "$VERSION" ] || {
+            printf 'manifest version %s != %s\n' "$manifest_version" "$VERSION" >&2
+            exit 1
+          }
+          [ "$hosted_version" = "$VERSION" ] || {
+            printf 'hosted parameter version %s != %s\n' "$hosted_version" "$VERSION" >&2
+            exit 1
+          }
+          grep -F "## [${VERSION}]" CHANGELOG.md >/dev/null || {
+            printf 'changelog lacks release notes for %s\n' "$VERSION" >&2
+            exit 1
+          }
+          verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}" --jq .commit.verification.verified)"
+          [ "$verified" = 'true' ] || {
+            printf 'release commit is not GitHub-verified: %s\n' "$SHA" >&2
+            exit 1
+          }
+          git fetch --quiet --no-tags origin main
+          git merge-base --is-ancestor "$SHA" origin/main || {
+            printf 'release commit is not an ancestor of main: %s\n' "$SHA" >&2
+            exit 1
+          }
+          rulesets="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets")"
+          default_ruleset_id="$(jq -er '.[] | select(.name == "default" and .target == "branch" and .enforcement == "active") | .id' <<<"$rulesets")"
+          default_ruleset="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${default_ruleset_id}")"
+          jq -e '
+            (.bypass_actors | length) == 0
+            and any(.rules[]; .type == "pull_request")
+            and any(.rules[]; .type == "required_signatures")
+            and any(.rules[]; .type == "copilot_code_review")
+          ' <<<"$default_ruleset" >/dev/null || {
+            printf 'default branch rules no longer match release gates\n' >&2
+            exit 1
+          }
+          creation_ruleset_id="$(jq -er '.[] | select(.name == "tag creation" and .target == "tag" and .enforcement == "active") | .id' <<<"$rulesets")"
+          creation_ruleset="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${creation_ruleset_id}")"
+          jq -e '
+            .conditions.ref_name.include == ["refs/tags/v*"]
+            and (.conditions.ref_name.exclude | length) == 0
+            and .rules == [{"type":"creation"}]
+            and .bypass_actors == [{"actor_id":4584294,"actor_type":"Integration","bypass_mode":"always"}]
+          ' <<<"$creation_ruleset" >/dev/null || {
+            printf 'release tag creation ruleset no longer grants only Azure Argus release app\n' >&2
+            exit 1
+          }
+          immutability_ruleset_id="$(jq -er '.[] | select(.name == "tag immutability" and .target == "tag" and .enforcement == "active") | .id' <<<"$rulesets")"
+          immutability_ruleset="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${immutability_ruleset_id}")"
+          jq -e '
+            .conditions.ref_name.include == ["refs/tags/v*"]
+            and (.conditions.ref_name.exclude | length) == 0
+            and (.bypass_actors | length) == 0
+            and ([.rules[].type] | sort) == ["deletion","non_fast_forward","update"]
+          ' <<<"$immutability_ruleset" >/dev/null || {
+            printf 'release tag immutability ruleset no longer blocks all actors\n' >&2
+            exit 1
+          }
+          writers="$(grep --recursive --files-with-matches --extended-regexp \
+            '^([[:space:]]*)packages:[[:space:]]*write[[:space:]]*$' .github/workflows | sort)"
+          expected_writers="$(printf '%s\n' \
+            .github/workflows/publish-release.yml .github/workflows/release-please.yml | sort)"
+          [ "$writers" = "$expected_writers" ] || {
+            printf 'unexpected package-writing workflows:\n%s\n' "$writers" >&2
+            exit 1
+          }
+
+      - name: Create exact lightweight tag
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          read_ref() {
+            gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${TAG}" |
+              jq -c --arg ref "refs/tags/${TAG}" '.[] | select(.ref == $ref)'
+          }
+          require_ref() {
+            [ "$(jq -r '.object.type' <<<"$1")" = 'commit' ] &&
+              [ "$(jq -r '.object.sha' <<<"$1")" = "$SHA" ] || {
+                printf 'tag %s does not point directly to %s\n' "$TAG" "$SHA" >&2
+                exit 1
+              }
+          }
+
+          exact_ref="$(read_ref)"
+          if [ -n "$exact_ref" ]; then
+            require_ref "$exact_ref"
+            exit 0
+          fi
+          if ! created="$(
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="$SHA" 2>&1
+          )"; then
+            exact_ref="$(read_ref)"
+            [ -n "$exact_ref" ] && require_ref "$exact_ref" && exit 0
+            printf 'failed to create %s: %s\n' "$TAG" "$created" >&2
+            exit 1
+          fi
+          require_ref "$created"
+
+      - name: Create release draft
+        if: steps.resolve.outputs.published != 'true' && steps.resolve.outputs.release_id == ''
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          notes="$(awk -v heading="## [${VERSION}]" '
+            index($0, heading) == 1 {found=1}
+            found && $0 ~ /^## / && index($0, heading) != 1 {exit}
+            found {print}
+          ' CHANGELOG.md)"
+          [ -n "$notes" ] || {
+            printf 'release notes not found for %s\n' "$VERSION" >&2
+            exit 1
+          }
+          if ! result="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$TAG" -f target_commitish="$SHA" -f name="$TAG" -f body="$notes" \
+            -F draft=true -F prerelease=false 2>&1)"; then
+            matches="$(
+              gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+                jq -c --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]'
+            )"
+            [ "$(jq 'length' <<<"$matches")" -eq 1 ] || {
+              printf 'failed to create draft %s: %s\n' "$TAG" "$result" >&2
+              exit 1
+            }
+          fi
+
+      - name: Resolve exact release
+        id: release
+        env:
+          EXISTING_ID: ${{ steps.resolve.outputs.release_id }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          PUBLISHED: ${{ steps.resolve.outputs.published }}
+          PR: ${{ steps.resolve.outputs.pull_number }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$PUBLISHED" = 'true' ]; then
+            release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${EXISTING_ID}")"
+          else
+            release=''
+            for attempt in $(seq 1 12); do
+              matches="$(
+                gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+                  jq -c --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]'
+              )"
+              [ "$(jq 'length' <<<"$matches")" -le 1 ] || exit 1
+              if [ "$(jq 'length' <<<"$matches")" -eq 1 ]; then
+                release="$(jq -c '.[0]' <<<"$matches")"
+                break
+              fi
+              [ "$attempt" -eq 12 ] || sleep 5
+            done
+          fi
+          [ -n "$release" ] || {
+            printf 'release draft for %s was not created\n' "$TAG" >&2
+            exit 1
+          }
+          id="$(jq -r '.id' <<<"$release")"
+          [ "$(jq -r '.draft' <<<"$release")" != "$PUBLISHED" ] &&
+            [ "$(jq -r '.tag_name' <<<"$release")" = "$TAG" ] &&
+            [ "$(jq -r '.target_commitish' <<<"$release")" = "$SHA" ] || {
+              printf 'release does not match %s at %s\n' "$TAG" "$SHA" >&2
+              exit 1
+            }
+          [ -z "$EXISTING_ID" ] || [ "$EXISTING_ID" = "$id" ] || {
+            printf 'release draft ID changed from %s to %s\n' "$EXISTING_ID" "$id" >&2
+            exit 1
+          }
+          {
+            printf 'release_id=%s\n' "$id"
+            printf 'url=%s\n' "$(jq -r '.html_url' <<<"$release")"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Inspect existing version image
+        id: existing
+        env:
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.resolve.outputs.version }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if docker buildx imagetools inspect "$IMAGE" --raw >/dev/null 2>inspect-error; then
+            digest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | jq -r '.')"
+            revision="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image.Config.Labels."org.opencontainers.image.revision"}}' | jq -r '.')"
+            image_version="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image.Config.Labels."org.opencontainers.image.version"}}' | jq -r '.')"
+            [ "$revision" = "$SHA" ] && [ "$image_version" = "$VERSION" ] || {
+              printf 'existing %s identifies version %s revision %s\n' "$IMAGE" "$image_version" "$revision" >&2
+              exit 1
+            }
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              printf 'existing digest is invalid: %s\n' "$digest" >&2
+              exit 1
+            }
+            printf 'digest=%s\nstate=match\n' "$digest" >>"$GITHUB_OUTPUT"
+          elif grep -Eqi 'manifest unknown|not found|no such manifest' inspect-error; then
+            echo 'state=absent' >>"$GITHUB_OUTPUT"
+          else
+            cat inspect-error >&2
+            exit 1
+          fi
+
+      - name: Build image
+        if: steps.existing.outputs.state == 'absent'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          build-args: |
+            VERSION_NUMBER=${{ steps.resolve.outputs.version }}
+            VCS_REF=${{ steps.resolve.outputs.sha }}
+          context: .
+          load: true
+          platforms: linux/amd64
+          provenance: false
+          push: false
+          sbom: false
+          tags: ghcr.io/visorian/azureargus:${{ steps.resolve.outputs.version }}
+
+      - name: Smoke test image
+        if: steps.existing.outputs.state == 'absent'
+        env:
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          container="$(docker run --detach --publish 127.0.0.1::3000 "$IMAGE")"
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true' EXIT
+          port="$(docker port "$container" 3000/tcp | sed 's/.*://')"
+          for _ in $(seq 1 30); do
+            root_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}/" || true)"
+            capabilities="$(curl --fail --silent "http://127.0.0.1:${port}/api/capabilities" || true)"
+            if [ "$root_status" = '200' ] &&
+              jq -e '.mode == "anonymous" and .errors == []' <<<"$capabilities" >/dev/null 2>&1; then
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "$container")" != 'true' ]; then
+              docker logs "$container"
+              exit 1
+            fi
+            sleep 1
+          done
+          docker logs "$container"
+          exit 1
+
+      - name: Publish and verify image tags
+        id: publish
+        env:
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+          IMAGE: ghcr.io/visorian/azureargus:${{ steps.resolve.outputs.version }}
+          PUBLISHED: ${{ steps.resolve.outputs.published }}
+          STATE: ${{ steps.existing.outputs.state }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$STATE" = 'absent' ]; then
+            docker push "$IMAGE"
+          fi
+          digest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | jq -r '.')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'published digest is invalid: %s\n' "$digest" >&2
+            exit 1
+          }
+          [ -z "$EXISTING_DIGEST" ] || [ "$EXISTING_DIGEST" = "$digest" ] || {
+            printf 'version digest changed from %s to %s\n' "$EXISTING_DIGEST" "$digest" >&2
+            exit 1
+          }
+          if [ "$PUBLISHED" != 'true' ]; then
+            docker buildx imagetools create --prefer-index=false \
+              --tag ghcr.io/visorian/azureargus:latest "${IMAGE}@${digest}"
+          fi
+          docker logout ghcr.io
+          version_digest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | jq -r '.')"
+          latest_digest="$(docker buildx imagetools inspect ghcr.io/visorian/azureargus:latest --format '{{json .Manifest.Digest}}' | jq -r '.')"
+          [ "$version_digest" = "$digest" ] || {
+            printf 'anonymous version digest mismatch: %s %s\n' "$digest" "$version_digest" >&2
+            exit 1
+          }
+          if [ "$latest_digest" != "$digest" ]; then
+            printf 'version/latest digest mismatch: %s %s\n' "$digest" "$latest_digest" >&2
+            exit 1
+          fi
+          latest_equal='false'
+          [ "$latest_digest" != "$digest" ] || latest_equal='true'
+          docker pull "${IMAGE}@${digest}"
+          printf 'digest=%s\nlatest_digest=%s\nlatest_equal=%s\n' \
+            "$digest" "$latest_digest" "$latest_equal" >>"$GITHUB_OUTPUT"
+
+      - name: Smoke test published image
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="ghcr.io/visorian/azureargus@${DIGEST}"
+          revision="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          version="$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')"
+          [ "$revision" = '${{ steps.resolve.outputs.sha }}' ] &&
+            [ "$version" = '${{ steps.resolve.outputs.version }}' ] || exit 1
+          container="$(docker run --detach --publish 127.0.0.1::3000 "$image")"
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true' EXIT
+          port="$(docker port "$container" 3000/tcp | sed 's/.*://')"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent "http://127.0.0.1:${port}/" >/dev/null &&
+              curl --fail --silent "http://127.0.0.1:${port}/api/capabilities" |
+                jq -e '.mode == "anonymous" and .errors == []' >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container"
+          exit 1
+
+      - name: Publish GitHub Release
+        id: promote
+        if: steps.resolve.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          PR: ${{ steps.resolve.outputs.pull_number }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}")"
+          [ "$(jq -r '.draft' <<<"$release")" = 'true' ] &&
+            [ "$(jq -r '.tag_name' <<<"$release")" = "$TAG" ] &&
+            [ "$(jq -r '.target_commitish' <<<"$release")" = "$SHA" ] || exit 1
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false >/dev/null
+          gh issue edit "$PR" --repo "$GITHUB_REPOSITORY" \
+            --remove-label 'autorelease: pending'
+          url="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq .html_url)"
+          printf 'url=%s\n' "$url" >>"$GITHUB_OUTPUT"
+
+  template-pr:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+      statuses: read
+    steps:
+      - name: Resolve current main
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          printf 'sha=%s\n' "$sha" >>"$GITHUB_OUTPUT"
+
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.main.outputs.sha }}
+
+      - name: Generate public template update
+        id: generate
+        env:
+          BICEP_SHA256: 3e011d629ea4311b7a7dd8f0040ab2b1a072ea4ff5d02cb75e0e55a9a6703fb9
+          BICEP_VERSION: v0.46.1
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_version="$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" infrastructure/application/main.bicep)"
+          arm_version="$(jq -r '.parameters.targetVersion.defaultValue' infrastructure/application/azuredeploy.json)"
+          if [ "$source_version" = "$VERSION" ] && [ "$arm_version" = "$VERSION" ]; then
+            echo 'current=true' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$source_version" = "$arm_version" ] || {
+            printf 'public template versions disagree: %s %s\n' "$source_version" "$arm_version" >&2
+            exit 1
+          }
+
+          sed -i "s/^param targetVersion string = '[^']*'$/param targetVersion string = '${VERSION}'/" \
+            infrastructure/application/main.bicep
+          bicep="$RUNNER_TEMP/bicep"
+          curl --fail --location --silent --show-error \
+            "https://github.com/Azure/bicep/releases/download/${BICEP_VERSION}/bicep-linux-x64" \
+            --output "$bicep"
+          echo "$BICEP_SHA256  $bicep" | sha256sum --check -
+          chmod +x "$bicep"
+          "$bicep" lint infrastructure/application/main.bicep
+          "$bicep" build infrastructure/application/main.bicep \
+            --outfile infrastructure/application/azuredeploy.json
+          [ "$(jq -r '.parameters.targetVersion.defaultValue' infrastructure/application/azuredeploy.json)" = "$VERSION" ]
+          echo 'current=false' >>"$GITHUB_OUTPUT"
+
+      - name: Mint release automation token
+        if: steps.generate.outputs.current != 'true'
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AZURE_ARGUS_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-metadata: read
+          permission-pull-requests: write
+
+      - name: Create signed template update
+        if: steps.generate.outputs.current != 'true'
+        id: update
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          MAIN_SHA: ${{ steps.main.outputs.sha }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branch="release-template-v${VERSION}"
+          if existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" 2>/dev/null)"; then
+            branch_sha="$(jq -r '.object.sha' <<<"$existing")"
+            if [ "$branch_sha" != "$MAIN_SHA" ]; then
+              gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/main.bicep?ref=${branch}" \
+                --jq .content | base64 --decode >"$RUNNER_TEMP/branch-main.bicep"
+              gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=${branch}" \
+                --jq .content | base64 --decode >"$RUNNER_TEMP/branch-azuredeploy.json"
+              if ! cmp infrastructure/application/main.bicep "$RUNNER_TEMP/branch-main.bicep" ||
+                ! cmp infrastructure/application/azuredeploy.json "$RUNNER_TEMP/branch-azuredeploy.json"; then
+                printf 'template branch %s contains different content\n' "$branch" >&2
+                exit 1
+              fi
+              verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch_sha}" --jq .commit.verification.verified)"
+              author="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch_sha}" --jq .author.login)"
+              [ "$verified" = 'true' ] && [ "$author" = 'azureargus-release[bot]' ] || {
+                printf 'template branch %s is not a verified release-app commit\n' "$branch" >&2
+                exit 1
+              }
+              files="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${MAIN_SHA}...${branch}" \
+                --jq '[.files[].filename] | sort')"
+              expected='["infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
+              [ "$files" = "$expected" ] || {
+                printf 'template branch %s changes unexpected files: %s\n' "$branch" "$files" >&2
+                exit 1
+              }
+              printf 'branch=%s\ncommit=%s\n' "$branch" "$branch_sha" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/heads/${branch}" -f sha="$MAIN_SHA" >/dev/null
+          fi
+
+          additions="$(jq -n \
+            --arg bicep "$(base64 -w0 infrastructure/application/main.bicep)" \
+            --arg arm "$(base64 -w0 infrastructure/application/azuredeploy.json)" \
+            '[
+              {path: "infrastructure/application/main.bicep", contents: $bicep},
+              {path: "infrastructure/application/azuredeploy.json", contents: $arm}
+            ]')"
+          variables="$(jq -n \
+            --arg branch "$branch" --arg head "$MAIN_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            --argjson additions "$additions" \
+            '{input: {
+              branch: {repositoryNameWithOwner: $repo, refName: $branch},
+              expectedHeadOid: $head,
+              message: {headline: "chore(release): update public template"},
+              fileChanges: {additions: $additions}
+            }}')"
+          result="$(gh api graphql \
+            -f query="mutation(\$input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: \$input) { commit { oid } } }" \
+            --input - <<<"$variables")"
+          commit="$(jq -r '.data.createCommitOnBranch.commit.oid' <<<"$result")"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq .commit.verification.verified)"
+          author="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq .author.login)"
+          [ "$verified" = 'true' ] && [ "$author" = 'azureargus-release[bot]' ] || {
+            printf 'template commit %s is not GitHub-verified for release app\n' "$commit" >&2
+            exit 1
+          }
+          printf 'branch=%s\ncommit=%s\n' "$branch" "$commit" >>"$GITHUB_OUTPUT"
+
+      - name: Open template update pull request
+        if: steps.generate.outputs.current != 'true'
+        id: pull-request
+        env:
+          BRANCH: ${{ steps.update.outputs.branch }}
+          EXPECTED_COMMIT: ${{ steps.update.outputs.commit }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          existing="$(gh pr list --state open --head "$BRANCH" --json number,url --jq '.[0] // empty')"
+          if [ -n "$existing" ]; then
+            number="$(jq -r '.number' <<<"$existing")"
+            url="$(jq -r '.url' <<<"$existing")"
+          else
+            url="$(gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore(release): update public template to ${VERSION}" \
+              --body "Updates public deployment template default to released Azure Argus ${VERSION}. Hosted deployment parameter already targets this exact release.")"
+            number="$(gh pr view "$url" --json number --jq .number)"
+          fi
+          pull="$(gh pr view "$number" --json baseRefName,headRefName,headRefOid)"
+          [ "$(jq -r '.baseRefName' <<<"$pull")" = 'main' ] &&
+            [ "$(jq -r '.headRefName' <<<"$pull")" = "$BRANCH" ] &&
+            [ "$(jq -r '.headRefOid' <<<"$pull")" = "$EXPECTED_COMMIT" ] || {
+              printf 'template pull request does not match expected branch and commit\n' >&2
+              exit 1
+            }
+          files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}/files" --jq '[.[].filename] | sort')"
+          expected='["infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
+          [ "$files" = "$expected" ] || {
+            printf 'template pull request changes unexpected files: %s\n' "$files" >&2
+            exit 1
+          }
+          printf 'number=%s\nurl=%s\n' "$number" "$url" >>"$GITHUB_OUTPUT"
+
+      - name: Wait for template checks and Copilot review
+        if: steps.generate.outputs.current != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.update.outputs.commit }}
+          PR: ${{ steps.pull-request.outputs.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 24); do
+            checks="$(gh pr checks "$PR" --json name,state,bucket 2>/dev/null || true)"
+            if jq -e 'any(.[]; .name == "validate") and any(.[]; .name == "Semantic PR")' \
+              <<<"$checks" >/dev/null 2>&1; then
+              break
+            fi
+            [ "$attempt" -eq 24 ] && {
+              printf 'template checks did not start\n' >&2
+              exit 1
+            }
+            sleep 10
+          done
+          gh pr checks "$PR" --watch --fail-fast
+
+          for attempt in $(seq 1 36); do
+            reviewed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --jq \
+              "any(.[]; .user.login == \"copilot-pull-request-reviewer\" and .commit_id == \"${HEAD_SHA}\")")"
+            [ "$reviewed" = 'true' ] && exit 0
+            [ "$attempt" -eq 36 ] || sleep 10
+          done
+          printf 'Copilot review did not complete for %s\n' "$HEAD_SHA" >&2
+          exit 1
+
+      - name: Merge public template update
+        if: steps.generate.outputs.current != 'true'
+        id: merge
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          PR: ${{ steps.pull-request.outputs.number }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "$(gh pr view "$PR" --json mergeStateStatus --jq .mergeStateStatus)" = 'CLEAN' ] || {
+            printf 'template pull request is not cleanly mergeable\n' >&2
+            exit 1
+          }
+          gh pr merge "$PR" --squash \
+            --subject "chore(release): update public template to ${VERSION}" --body ''
+          merged="$(gh pr view "$PR" --json mergeCommit,state,url)"
+          [ "$(jq -r '.state' <<<"$merged")" = 'MERGED' ] || exit 1
+          commit="$(jq -r '.mergeCommit.oid' <<<"$merged")"
+          verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq .commit.verification.verified)"
+          author="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq .author.login)"
+          [ "$verified" = 'true' ] && [ "$author" = 'azureargus-release[bot]' ] || {
+            printf 'merged template commit %s is not GitHub-verified for release app\n' "$commit" >&2
+            exit 1
+          }
+          printf 'commit=%s\nurl=%s\n' "$commit" "$(jq -r '.url' <<<"$merged")" >>"$GITHUB_OUTPUT"
+
+      - name: Verify public template version
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          LATEST_DIGEST: ${{ needs.publish.outputs.latest_digest }}
+          LATEST_EQUAL: ${{ needs.publish.outputs.latest_equal }}
+          RELEASE_URL: ${{ needs.publish.outputs.release_url }}
+          SHA: ${{ needs.publish.outputs.sha }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bicep="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/main.bicep?ref=main" \
+              --jq .content | base64 --decode
+          )"
+          arm="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=main" \
+              --jq .content | base64 --decode
+          )"
+          [ "$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" <<<"$bicep")" = "$VERSION" ]
+          [ "$(jq -r '.parameters.targetVersion.defaultValue' <<<"$arm")" = "$VERSION" ]
+          {
+            printf '## Azure Argus %s\n\n' "$TAG"
+            printf -- "- Commit: \`%s\`\n" "$SHA"
+            printf -- "- Release: %s\n" "$RELEASE_URL"
+            printf -- "- Image: \`ghcr.io/visorian/azureargus:%s@%s\`\n" "$VERSION" "$DIGEST"
+            printf -- "- \`latest\`: \`%s\` (equals version: %s)\n" "$LATEST_DIGEST" "$LATEST_EQUAL"
+            printf -- "- Package writer audit: Release Please caller and this reusable publisher are sole \`packages: write\` declarations; only publisher job uses grant. Recovery access assumes package permission inheritance from linked repository.\n"
+            printf -- "- Public template: \`%s\`\n" "$VERSION"
+          } >>"$GITHUB_STEP_SUMMARY"

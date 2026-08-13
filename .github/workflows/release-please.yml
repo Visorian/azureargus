@@ -1,4 +1,4 @@
-name: Prepare release
+name: Release Please
 
 on:
   push:
@@ -13,7 +13,76 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
+  candidate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pending: ${{ steps.resolve.outputs.pending }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve merged release candidate
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          candidates="$(
+            gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls?state=closed&base=main&per_page=100" |
+              jq -c --arg repo "$GITHUB_REPOSITORY" '[.[][] |
+                select(.merged_at != null) |
+                select(.user.login == "azureargus-release[bot]") |
+                select(.head.repo.full_name == $repo) |
+                select(.head.ref == "release-please--branches--main--components--azure-argus") |
+                select(any(.labels[]?; .name == "autorelease: pending"))
+              ]'
+          )"
+          count="$(jq 'length' <<<"$candidates")"
+          if [ "$count" -eq 0 ]; then
+            echo 'pending=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "$count" -eq 1 ] || {
+            printf 'expected at most one merged pending release candidate, found %s\n' "$count" >&2
+            exit 1
+          }
+
+          candidate="$(jq -c '.[0]' <<<"$candidates")"
+          sha="$(jq -r '.merge_commit_sha' <<<"$candidate")"
+          title="$(jq -r '.title' <<<"$candidate")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            printf 'release candidate SHA is not exact lowercase hex: %s\n' "$sha" >&2
+            exit 1
+          }
+          manifest="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/.release-please-manifest.json?ref=${sha}" \
+              --jq .content | base64 --decode
+          )"
+          version="$(jq -er '.["."] | select(type == "string")' <<<"$manifest")"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            printf 'release version is not stable X.Y.Z: %s\n' "$version" >&2
+            exit 1
+          }
+          [ "$title" = "chore(main): release ${version}" ] || {
+            printf 'release pull request title %s does not identify %s\n' "$title" "$version" >&2
+            exit 1
+          }
+          {
+            echo 'pending=true'
+            printf 'sha=%s\n' "$sha"
+            printf 'tag=v%s\n' "$version"
+            printf 'version=%s\n' "$version"
+          } >>"$GITHUB_OUTPUT"
+
+  prepare:
+    needs: candidate
+    if: needs.candidate.outputs.pending != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -35,3 +104,20 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           skip-github-release: true
+
+  publish:
+    needs: candidate
+    if: needs.candidate.outputs.pending == 'true'
+    permissions:
+      checks: read
+      contents: read
+      packages: write
+      pull-requests: read
+      statuses: read
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      sha: ${{ needs.candidate.outputs.sha }}
+      tag: ${{ needs.candidate.outputs.tag }}
+      version: ${{ needs.candidate.outputs.version }}
+    secrets:
+      AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY: ${{ secrets.AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY }}
