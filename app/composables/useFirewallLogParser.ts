@@ -4,6 +4,9 @@ import { parseDnsObservation } from "#shared/utils/dns";
 const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i;
 const LEGACY_RULE_COLLECTION_PATTERN = /\bRule Collection\s*:\s*(.*?)(?=\.\s*Rule\s*:|$)/i;
 const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/i;
+const LEGACY_ENDPOINTS_PATTERN = /\bfrom\s+(?<source>\S+)\s+to\s+(?<destination>\S+)/i;
+const ENDPOINT_PORT_PATTERN = /^(?<address>.+):(?<port>\d{1,5})$/;
+const TRAILING_ENDPOINT_PUNCTUATION_PATTERN = /[.,;]+$/;
 const ESCAPED_MESSAGE_PROPERTIES_PATTERN =
   /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g;
 const utf8Decoder = new TextDecoder();
@@ -118,7 +121,29 @@ function extractLegacyRule(message: string) {
   return message.match(LEGACY_RULE_PATTERN)?.[1]?.trim();
 }
 
+function parseEndpoint(value: string) {
+  const endpoint = value.replace(TRAILING_ENDPOINT_PUNCTUATION_PATTERN, "");
+  const match = endpoint.match(ENDPOINT_PORT_PATTERN);
+  const address = match?.groups?.address ?? endpoint;
+  return {
+    address: address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address,
+    port: match?.groups?.port,
+  };
+}
+
 function extractIpPorts(message: string) {
+  const endpoints = message.match(LEGACY_ENDPOINTS_PATTERN)?.groups;
+  if (endpoints?.source && endpoints.destination) {
+    const source = parseEndpoint(endpoints.source);
+    const destination = parseEndpoint(endpoints.destination);
+    return {
+      sourceIp: source.address,
+      sourcePort: source.port,
+      destinationIp: destination.address,
+      destinationPort: destination.port,
+    };
+  }
+
   const matches = [
     ...message.matchAll(/\b(?<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?<port>\d{1,5}))?\b/g),
   ];
@@ -236,8 +261,28 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     readString(rawRecord, ["sourceIp", "sourceIP", "SourceIp", "SourceIP"]) ||
     legacyAddressParts.sourceIp;
   const destinationIp =
-    readString(properties, ["destinationIp", "destinationIP", "DestinationIp", "DestinationIP"]) ||
-    readString(rawRecord, ["destinationIp", "destinationIP", "DestinationIp", "DestinationIP"]) ||
+    readString(properties, [
+      "destinationIp",
+      "destinationIP",
+      "DestinationIp",
+      "DestinationIP",
+      "fqdn",
+      "Fqdn",
+      "FQDN",
+      "destinationFqdn",
+      "DestinationFqdn",
+    ]) ||
+    readString(rawRecord, [
+      "destinationIp",
+      "destinationIP",
+      "DestinationIp",
+      "DestinationIP",
+      "fqdn",
+      "Fqdn",
+      "FQDN",
+      "destinationFqdn",
+      "DestinationFqdn",
+    ]) ||
     legacyAddressParts.destinationIp;
   const sourcePort =
     readString(properties, ["sourcePort", "SourcePort"]) ||

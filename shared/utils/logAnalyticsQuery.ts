@@ -407,8 +407,10 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
     search: "SearchableText",
     action: "Action",
     protocol: "Protocol",
-    source: 'strcat(SourceIp, ":", SourcePort)',
-    destination: 'strcat(DestinationIp, ":", DestinationPort)',
+  } as const;
+  const endpointFilters = {
+    source: { address: "SourceIp", port: "SourcePort" },
+    destination: { address: "DestinationIp", port: "DestinationPort" },
   } as const;
 
   const categories = [
@@ -422,11 +424,24 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
     clauses.push(`| where Category in~ (${categories.map(encodeKqlStringLiteral).join(", ")})`);
   }
 
-  for (const key of TEXT_FILTER_KEYS) {
+  for (const key of ["search", "action", "protocol"] as const) {
     const value = request.filters[key].trim().toLowerCase();
     if (value.length > 0) {
       clauses.push(`| where ${filters[key]} contains ${encodeKqlStringLiteral(value)}`);
     }
+  }
+
+  for (const key of ["source", "destination"] as const) {
+    const value = request.filters[key].trim().toLowerCase();
+    if (value.length === 0) {
+      continue;
+    }
+
+    const { address, port } = endpointFilters[key];
+    const encodedValue = encodeKqlStringLiteral(value);
+    clauses.push(
+      `| where ${address} =~ ${encodedValue} or ${port} =~ ${encodedValue} or strcat(${address}, ":", ${port}) =~ ${encodedValue}`,
+    );
   }
 
   const limit = getLogAnalyticsResultLimit(request);

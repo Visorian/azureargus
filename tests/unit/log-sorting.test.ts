@@ -20,14 +20,16 @@ function createLog(overrides: Partial<FirewallLogRecord>): FirewallLogRecord {
 }
 
 describe("log sorting", () => {
-  it("keeps incoming newest-first order for the default sort", () => {
+  it("sorts out-of-order realtime logs by timestamp", () => {
     const logs = [
-      createLog({ id: "newest", timestamp: "2026-07-09T12:00:01.000Z" }),
-      createLog({ id: "oldest", timestamp: "2026-07-09T12:00:00.000Z" }),
+      createLog({ id: "middle", timestamp: "2026-08-13T13:05:07.659Z" }),
+      createLog({ id: "oldest", timestamp: "2026-08-13T11:55:11.945Z" }),
+      createLog({ id: "newest", timestamp: "2026-08-13T13:06:47.932Z" }),
     ];
 
     expect(sortFirewallLogs(logs, createDefaultLogSort()).map((log) => log.id)).toEqual([
       "newest",
+      "middle",
       "oldest",
     ]);
   });
@@ -50,7 +52,7 @@ describe("log sorting", () => {
       createLog({ id: "newest", timestamp: "2026-07-09T12:00:01.000Z" }),
     ];
 
-    const result = sortFirewallLogs(logs, createDefaultLogSort(), false);
+    const result = sortFirewallLogs(logs, createDefaultLogSort());
 
     expect(result.map((log) => log.id)).toEqual(["newest", "oldest"]);
   });

@@ -109,6 +109,7 @@ const logTableGridClass = computed(() =>
     ? "grid-cols-[14rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]"
     : "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]",
 );
+const logTableMinWidthClass = computed(() => (use12HourTime.value ? "min-w-360" : "min-w-352"));
 const connectionForm = reactive<EventHubConnectionForm>(
   createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
 );
@@ -315,7 +316,7 @@ const logResultQuery = useLogQuery(logQuery.records, {
   filters: logFilters,
   visibleLimit: logQuery.visibleLimit,
 });
-const logResultSorting = useLogSorting(logResultQuery.filteredLogs, false, logSort);
+const logResultSorting = useLogSorting(logResultQuery.filteredLogs, logSort);
 async function requestDnsList(body: DnsListQueryRequest, signal: AbortSignal) {
   if (managedMode.value) {
     return requestFetch<DnsListQueryResponse>("/api/log-analytics/dns/list", {
@@ -1015,21 +1016,6 @@ function formatTime(timestamp: string) {
   return date.toISOString().replace("T", " ").replace(".000Z", "Z");
 }
 
-function rowTitle(log: FirewallLogRecord) {
-  return [
-    formatTime(log.timestamp),
-    log.category,
-    log.action,
-    log.protocol,
-    `${displayValue(log.sourceIp)}:${displayValue(log.sourcePort)}`,
-    `${displayValue(log.destinationIp)}:${displayValue(log.destinationPort)}`,
-    log.rule,
-    log.message,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
 function statusColor(status: string) {
   if (status === "connected" || status === "success") {
     return "success";
@@ -1381,6 +1367,10 @@ function statusColor(status: string) {
                 multiple
                 placeholder="Categories"
                 class="w-38"
+                :ui="{
+                  content: 'min-w-64 w-max',
+                  itemLabel: 'overflow-visible text-clip whitespace-nowrap',
+                }"
               />
               <USelectMenu
                 v-model="actionFilter"
@@ -1440,13 +1430,15 @@ function statusColor(status: string) {
           <div
             role="table"
             aria-label="Firewall logs"
-            class="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-brand-gray-200 dark:border-brand-gray-700"
+            data-testid="log-table-scroll"
+            class="flex h-full min-h-0 flex-col overflow-x-auto overflow-y-hidden rounded-md border border-brand-gray-200 dark:border-brand-gray-700"
           >
             <div
               role="row"
               :class="[
                 'grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100',
                 logTableGridClass,
+                logTableMinWidthClass,
               ]"
             >
               <button
@@ -1474,12 +1466,11 @@ function statusColor(status: string) {
                 :item-size="64"
                 :emit-update="false"
                 key-field="id"
-                class="min-h-0 flex-1"
+                :class="['min-h-0 flex-1', logTableMinWidthClass]"
               >
                 <div
                   role="row"
                   tabindex="0"
-                  :title="rowTitle(item)"
                   :class="[
                     'grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900',
                     logTableGridClass,
@@ -1505,7 +1496,11 @@ function statusColor(status: string) {
                       :hour-cycle="logHourCycle"
                     />
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2"
+                    :title="displayValue(item.category)"
+                  >
                     <span class="truncate">{{ displayValue(item.category) }}</span>
                     <button
                       type="button"
@@ -1522,7 +1517,11 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-medium">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2 font-medium"
+                    :title="displayValue(item.action)"
+                  >
                     <span class="truncate">{{ displayValue(item.action) }}</span>
                     <button
                       type="button"
@@ -1539,7 +1538,11 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2"
+                    :title="displayValue(item.protocol)"
+                  >
                     <span class="truncate">{{ displayValue(item.protocol) }}</span>
                     <button
                       type="button"
@@ -1556,7 +1559,11 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2"
+                    :title="displayValue(item.sourceIp)"
+                  >
                     <span class="truncate">{{ displayValue(item.sourceIp) }}</span>
                     <button
                       v-if="item.sourceIp"
@@ -1574,7 +1581,11 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs"
+                    :title="displayValue(item.sourcePort)"
+                  >
                     <span class="truncate">{{ displayValue(item.sourcePort) }}</span>
                     <button
                       v-if="item.sourcePort"
@@ -1592,7 +1603,11 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2"
+                    :title="displayValue(item.destinationIp)"
+                  >
                     <DestinationCountryFlag
                       :destination="item.destinationIp"
                       :lookup="ipCountryLookup"
@@ -1614,7 +1629,11 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs">
+                  <span
+                    role="cell"
+                    class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs"
+                    :title="displayValue(item.destinationPort)"
+                  >
                     <span class="truncate">{{ displayValue(item.destinationPort) }}</span>
                     <button
                       v-if="item.destinationPort"
@@ -1632,7 +1651,9 @@ function statusColor(status: string) {
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
                   </span>
-                  <span role="cell" class="truncate px-2">{{ displayValue(item.rule) }}</span>
+                  <span role="cell" class="truncate px-2" :title="displayValue(item.rule)">
+                    {{ displayValue(item.rule) }}
+                  </span>
                 </div>
               </RecycleScroller>
               <div v-else class="grid min-h-0 flex-1 place-items-center p-8 text-center">

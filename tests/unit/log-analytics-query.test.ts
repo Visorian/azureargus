@@ -132,10 +132,10 @@ describe("Log Analytics KQL builder", () => {
     expect(result.query).toContain('| where Action contains "deny"');
     expect(result.query).toContain('| where Protocol contains "tcp"');
     expect(result.query).toContain(
-      '| where strcat(SourceIp, ":", SourcePort) contains "10.0.0.4:443"',
+      '| where SourceIp =~ "10.0.0.4:443" or SourcePort =~ "10.0.0.4:443" or strcat(SourceIp, ":", SourcePort) =~ "10.0.0.4:443"',
     );
     expect(result.query).toContain(
-      '| where strcat(DestinationIp, ":", DestinationPort) contains "example.com:443"',
+      '| where DestinationIp =~ "example.com:443" or DestinationPort =~ "example.com:443" or strcat(DestinationIp, ":", DestinationPort) =~ "example.com:443"',
     );
     expect(result.query).toContain("| order by tolower(Rule) asc");
     expect(result.query).toContain("| take 5001");
@@ -186,10 +186,10 @@ describe("Log Analytics KQL builder", () => {
     expect(result.query).toContain('| where Category in~ ("azfwnetworkrule")');
     expect(result.query).toContain('| where Action contains "allow"');
     expect(result.query).toContain(
-      '| where strcat(SourceIp, ":", SourcePort) contains "10.0.0.5:51001"',
+      '| where SourceIp =~ "10.0.0.5:51001" or SourcePort =~ "10.0.0.5:51001" or strcat(SourceIp, ":", SourcePort) =~ "10.0.0.5:51001"',
     );
     expect(result.query).toContain(
-      '| where strcat(DestinationIp, ":", DestinationPort) contains "10.0.0.53:53"',
+      '| where DestinationIp =~ "10.0.0.53:53" or DestinationPort =~ "10.0.0.53:53" or strcat(DestinationIp, ":", DestinationPort) =~ "10.0.0.53:53"',
     );
     expect(result.query).toContain("| take 1001");
     expect(result.query).not.toContain("AzureFirewallNetworkRule");

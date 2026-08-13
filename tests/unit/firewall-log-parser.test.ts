@@ -84,6 +84,56 @@ describe("firewall log parser", () => {
     expect(log.rule).toBe("allow-web");
   });
 
+  it("extracts an FQDN destination from legacy application-rule messages", () => {
+    const log = normalizeFirewallLogRecord({
+      raw: {
+        time: "2026-08-13T13:57:01.735317+00:00",
+        operationName: "AzureFirewallApplicationRuleLog",
+        properties: {
+          msg: "HTTPS request from 10.141.8.11:52386 to login.live.com:443. Action: Allow. Policy: obh-afwp-glob-001. Rule Collection Group: obh-rcg-glob-Internet-001. Rule Collection: Allow_Outbound_Internet_SNAT. Rule: Internet-Access",
+        },
+        category: "AzureFirewallApplicationRule",
+      },
+    });
+
+    expect(log).toMatchObject({
+      sourceIp: "10.141.8.11",
+      sourcePort: "52386",
+      destinationIp: "login.live.com",
+      destinationPort: "443",
+    });
+  });
+
+  it("uses a structured application-rule FQDN when destination IP is empty", () => {
+    const fqdn = "germanywestcentral-gas.guestconfiguration.azure.com";
+    const log = normalizeFirewallLogRecord({
+      raw: {
+        time: "2026-08-13T14:08:50.152602+00:00",
+        properties: {
+          Protocol: "HTTPS",
+          SourceIp: "10.140.17.5",
+          SourcePort: 41936,
+          DestinationIp: "",
+          DestinationPort: 443,
+          Fqdn: fqdn,
+          Action: "Allow",
+        },
+        category: "AZFWApplicationRule",
+      },
+    });
+
+    expect(log.destinationIp).toBe(fqdn);
+    expect(log.destinationPort).toBe("443");
+
+    const logWithIp = normalizeFirewallLogRecord({
+      raw: {
+        properties: { DestinationIp: "20.30.40.50", Fqdn: fqdn },
+        category: "AZFWApplicationRule",
+      },
+    });
+    expect(logWithIp.destinationIp).toBe("20.30.40.50");
+  });
+
   it("maps live Event Hub DNS proxy requests and preserves delivery metadata", () => {
     const message =
       "DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s";

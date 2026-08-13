@@ -60,6 +60,20 @@ function includes(value: string | undefined, query: string) {
   return query.length === 0 || (value ?? "").toLowerCase().includes(query);
 }
 
+function matchesEndpoint(address: string | undefined, port: string | undefined, query: string) {
+  if (query.length === 0) {
+    return true;
+  }
+
+  const normalizedAddress = (address ?? "").trim().toLowerCase();
+  const normalizedPort = (port ?? "").trim().toLowerCase();
+  return (
+    normalizedAddress === query ||
+    normalizedPort === query ||
+    `${normalizedAddress}:${normalizedPort}` === query
+  );
+}
+
 export function filterFirewallLogs(
   logs: readonly FirewallLogRecord[],
   filters: FirewallLogFilters,
@@ -90,9 +104,8 @@ export function filterFirewallLogs(
       (categories.size === 0 || categories.has(log.category.trim().toLowerCase())) &&
       includes(log.action, action) &&
       includes(log.protocol, protocol) &&
-      (source.length === 0 || includes(`${log.sourceIp ?? ""}:${log.sourcePort ?? ""}`, source)) &&
-      (destination.length === 0 ||
-        includes(`${log.destinationIp ?? ""}:${log.destinationPort ?? ""}`, destination))
+      matchesEndpoint(log.sourceIp, log.sourcePort, source) &&
+      matchesEndpoint(log.destinationIp, log.destinationPort, destination)
     ) {
       matches.push(log);
       if (matches.length >= maxMatches) {

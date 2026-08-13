@@ -227,6 +227,41 @@ test("data source rail remains bounded at narrow viewport", async ({ page }) => 
     .toEqual({ horizontal: true, vertical: true });
 });
 
+test("main log table scrolls horizontally at a narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ height: 700, width: 900 });
+  await startManagedEventHub(page);
+  await enqueueDetailLog(page);
+
+  const table = page.getByTestId("log-table-scroll");
+  await expect(table).toHaveCSS("overflow-x", "auto");
+  await expect
+    .poll(() => table.evaluate((element) => element.scrollWidth > element.clientWidth))
+    .toBe(true);
+
+  await table.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth - element.clientWidth;
+  });
+  await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+
+  const ruleHeader = table.getByRole("columnheader", { name: "Rule" });
+  const ruleCell = table.getByRole("row").filter({ hasText: "deny-web" }).getByRole("cell").nth(8);
+  await expect(ruleHeader).toBeInViewport();
+  await expect(ruleCell).toBeInViewport();
+  await expect(async () => {
+    const [headerBox, cellBox] = await Promise.all([
+      ruleHeader.boundingBox(),
+      ruleCell.boundingBox(),
+    ]);
+    expect(headerBox).not.toBeNull();
+    expect(cellBox).not.toBeNull();
+    expect(Math.abs(headerBox!.x - cellBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(headerBox!.width - cellBox!.width)).toBeLessThanOrEqual(1);
+  }).toPass();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .toBe(true);
+});
+
 test("log detail renders destination flag and separates Event Hub metadata", async ({ page }) => {
   await page.route("**/api/ip-country", async (route) => {
     const body = route.request().postDataJSON() as { ips: string[] };
@@ -274,6 +309,175 @@ test("log detail explains a known ICMP type", async ({ page }) => {
   await page.getByRole("row").filter({ hasText: "deny-web" }).getByRole("cell").first().click();
   const dialog = page.getByRole("dialog", { name: "Log detail" });
   await expect(dialog.getByText("ICMP Type=8 (Echo Request)", { exact: true })).toBeVisible();
+});
+
+test("orders realtime logs by source timestamp", async ({ page }) => {
+  await startManagedEventHub(page);
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: [
+      {
+        body: {
+          category: "AZFWNetworkRule",
+          properties: { Action: "Allow", Protocol: "UDP", Rule: "newest" },
+          time: "2026-08-13T13:06:47.932Z",
+        },
+        enqueuedTimeUtc: "2026-08-13T13:07:00.000Z",
+        partitionId: "0",
+        sequenceNumber: 1,
+      },
+      {
+        body: {
+          category: "AZFWDnsQuery",
+          properties: { Action: "DNS query", Protocol: "UDP", Rule: "oldest" },
+          time: "2026-08-13T11:55:11.945Z",
+        },
+        enqueuedTimeUtc: "2026-08-13T13:07:00.001Z",
+        partitionId: "0",
+        sequenceNumber: 2,
+      },
+      {
+        body: {
+          category: "AzureFirewallApplicationRule",
+          properties: { Action: "Allow", Protocol: "HTTPS", Rule: "middle" },
+          time: "2026-08-13T13:05:07.659Z",
+        },
+        enqueuedTimeUtc: "2026-08-13T13:07:00.002Z",
+        partitionId: "0",
+        sequenceNumber: 3,
+      },
+    ],
+  });
+
+  await expect(page.getByText("3 visible / 3 received")).toBeVisible();
+  const rows = page.getByRole("table", { name: "Firewall logs" }).getByRole("row");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(1)).toContainText("newest");
+  await expect(rows.nth(2)).toContainText("middle");
+  await expect(rows.nth(3)).toContainText("oldest");
+});
+
+test("filters source and destination endpoints exactly", async ({ page }) => {
+  await startManagedEventHub(page);
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: [
+      {
+        body: {
+          category: "AZFWApplicationRule",
+          properties: {
+            Action: "Allow",
+            DestinationIp: "20.30.40.5",
+            DestinationPort: 443,
+            Protocol: "HTTPS",
+            Rule: "exact-endpoints",
+            SourceIp: "10.141.8.1",
+            SourcePort: 52_385,
+          },
+          time: "2026-08-13T13:57:01.000Z",
+        },
+        enqueuedTimeUtc: "2026-08-13T13:58:00.000Z",
+        partitionId: "0",
+        sequenceNumber: 1,
+      },
+      {
+        body: {
+          category: "AZFWApplicationRule",
+          properties: {
+            Action: "Allow",
+            DestinationIp: "20.30.40.50",
+            DestinationPort: 443,
+            Protocol: "HTTPS",
+            Rule: "prefix-endpoints",
+            SourceIp: "10.141.8.11",
+            SourcePort: 52_389,
+          },
+          time: "2026-08-13T13:57:02.000Z",
+        },
+        enqueuedTimeUtc: "2026-08-13T13:58:00.001Z",
+        partitionId: "0",
+        sequenceNumber: 2,
+      },
+    ],
+  });
+
+  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+  const table = page.getByRole("table", { name: "Firewall logs" });
+
+  await page.getByPlaceholder("Source").fill("10.141.8.1");
+  await expect(table.getByRole("row").filter({ hasText: "exact-endpoints" })).toBeVisible();
+  await expect(table.getByRole("row").filter({ hasText: "prefix-endpoints" })).toHaveCount(0);
+
+  await page.getByPlaceholder("Source").fill("");
+  await page.getByPlaceholder("Destination").fill("20.30.40.5");
+  await expect(table.getByRole("row").filter({ hasText: "exact-endpoints" })).toBeVisible();
+  await expect(table.getByRole("row").filter({ hasText: "prefix-endpoints" })).toHaveCount(0);
+});
+
+test("renders application-rule FQDN destinations and full category names", async ({ page }) => {
+  await startManagedEventHub(page);
+  const structuredFqdn = "germanywestcentral-gas.guestconfiguration.azure.com";
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: [
+      {
+        body: {
+          time: "2026-08-13T13:57:01.735317+00:00",
+          operationName: "AzureFirewallApplicationRuleLog",
+          properties: {
+            msg: "HTTPS request from 10.141.8.11:52386 to login.live.com:443. Action: Allow. Policy: obh-afwp-glob-001. Rule Collection Group: obh-rcg-glob-Internet-001. Rule Collection: Allow_Outbound_Internet_SNAT. Rule: Internet-Access",
+          },
+          category: "AzureFirewallApplicationRule",
+        },
+        enqueuedTimeUtc: "2026-08-13T14:09:00.000Z",
+        partitionId: "0",
+        sequenceNumber: 1,
+      },
+      {
+        body: {
+          time: "2026-08-13T14:08:50.152602+00:00",
+          properties: {
+            Protocol: "HTTPS",
+            SourceIp: "10.140.17.5",
+            SourcePort: 41_936,
+            DestinationPort: 443,
+            Fqdn: structuredFqdn,
+            Action: "Allow",
+            Rule: "Internet-Access",
+          },
+          category: "AZFWApplicationRule",
+        },
+        enqueuedTimeUtc: "2026-08-13T14:09:00.001Z",
+        partitionId: "0",
+        sequenceNumber: 2,
+      },
+    ],
+  });
+
+  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+  const table = page.getByRole("table", { name: "Firewall logs" });
+  const legacyRow = table.getByRole("row").filter({ hasText: "login.live.com" });
+  const structuredRow = table.getByRole("row").filter({ hasText: structuredFqdn });
+  await expect(legacyRow).toContainText("443");
+  await expect(structuredRow).toContainText("443");
+  await expect(structuredRow).not.toHaveAttribute("title");
+  await expect(structuredRow.getByRole("cell").nth(1)).toHaveAttribute(
+    "title",
+    "AZFWApplicationRule",
+  );
+  await expect(structuredRow.getByRole("cell").nth(6)).toHaveAttribute("title", structuredFqdn);
+  await expect(structuredRow.getByRole("cell").nth(8)).toHaveAttribute("title", "Internet-Access");
+
+  await page.getByRole("button", { name: "Category filter" }).click();
+  for (const category of ["AZFWApplicationRule", "AzureFirewallApplicationRule"]) {
+    const label = page.getByRole("option", { name: category, exact: true }).getByText(category, {
+      exact: true,
+    });
+    await expect(label).toBeVisible();
+    await expect
+      .poll(() => label.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .toBe(true);
+  }
 });
 
 test("time format setting controls rendered log and DNS timestamps", async ({ page }) => {

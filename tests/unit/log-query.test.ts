@@ -90,6 +90,45 @@ describe("log query", () => {
     expect(result.map((log) => log.id)).toEqual(["1"]);
   });
 
+  it("matches source and destination endpoints exactly", () => {
+    const logs = [
+      createLog({
+        id: "exact",
+        sourceIp: "10.141.8.1",
+        sourcePort: "443",
+        destinationIp: "Example.COM",
+        destinationPort: "8443",
+      }),
+      createLog({
+        id: "prefix",
+        sourceIp: "10.141.8.11",
+        sourcePort: "4431",
+        destinationIp: "example.com.evil",
+        destinationPort: "84431",
+      }),
+    ];
+    const filters = createDefaultLogFilters();
+
+    filters.source = "10.141.8.1";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+
+    filters.source = "443";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+
+    filters.source = "10.141.8.1:443";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+
+    filters.source = "";
+    filters.destination = "example.com";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+
+    filters.destination = "8443";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+
+    filters.destination = "EXAMPLE.COM:8443";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+  });
+
   it("matches any selected category exactly and case-insensitively", () => {
     const filters = createDefaultLogFilters();
     filters.category = ["azfwnetworkrule", "AZFWApplicationRule"];
