@@ -1,5 +1,8 @@
 targetScope = 'resourceGroup'
 
+@description('Optional. Multitenant Entra application client ID used for temporary Log Analytics access.')
+param delegatedClientId string = ''
+
 var containerImage = 'ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387'
 var resourceSuffix = uniqueString(subscription().id, resourceGroup().id)
 var environmentName = 'azureargus-env-${resourceSuffix}'
@@ -24,6 +27,14 @@ module application 'br/public:avm/res/app/container-app:0.23.0' = {
     activeRevisionsMode: 'Single'
     containers: [
       {
+        env: empty(delegatedClientId)
+          ? []
+          : [
+              {
+                name: 'NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID'
+                value: delegatedClientId
+              }
+            ]
         image: containerImage
         name: 'azureargus'
         probes: [

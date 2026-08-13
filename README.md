@@ -36,8 +36,10 @@ Open `http://localhost:3000`.
 This deploys public anonymous-mode Azure Argus to Azure Container Apps using immutable image
 `ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387`.
 The app uses HTTPS ingress, scales from zero to one replica, and stores no Event Hub credential or
-Azure token server-side. Anyone with the generated URL can open the application. Event Hub and
-firewall diagnostic resources remain separate deployments below. Review
+Azure token server-side. Anyone with the generated URL can open the application. Leave **Delegated
+Client ID** empty for Event Hub-only use, or enter a multitenant Entra application client ID to
+enable temporary Log Analytics access. Event Hub and firewall diagnostic resources remain separate
+deployments below. Review
 [Azure Container Apps pricing](https://azure.microsoft.com/pricing/details/container-apps/) before
 deployment.
 

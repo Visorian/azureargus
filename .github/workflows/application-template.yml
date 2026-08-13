@@ -52,7 +52,8 @@ jobs:
           fi
 
           jq --exit-status '
-            (.parameters | length) == 0
+            ([.parameters | keys[]] == ["delegatedClientId"])
+            and .parameters.delegatedClientId.defaultValue == ""
             and .variables.containerImage
               == "ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387"
             and ([.resources[] | select(.name == "azureargus-environment")]
@@ -75,6 +76,10 @@ jobs:
               | .properties.parameters.containers.value[]
               | select(.name == "azureargus") | .image]
               == ["[variables(\u0027containerImage\u0027)]"])
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.containers.value[]
+              | select(.name == "azureargus") | .env]
+              == ["[if(empty(parameters(\u0027delegatedClientId\u0027)), createArray(), createArray(createObject(\u0027name\u0027, \u0027NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID\u0027, \u0027value\u0027, parameters(\u0027delegatedClientId\u0027))))]"])
             and ([.resources[] | select(.name == "azureargus-application")
               | .properties.parameters | has("secrets")] == [false])
           ' infrastructure/application/azuredeploy.json

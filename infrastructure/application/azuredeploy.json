@@ -5,7 +5,16 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "14988957863755729224"
+      "templateHash": "18179341500216108287"
+    }
+  },
+  "parameters": {
+    "delegatedClientId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Multitenant Entra application client ID used for temporary Log Analytics access."
+      }
     }
   },
   "variables": {
@@ -2354,6 +2363,7 @@
           "containers": {
             "value": [
               {
+                "env": "[if(empty(parameters('delegatedClientId')), createArray(), createArray(createObject('name', 'NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID', 'value', parameters('delegatedClientId'))))]",
                 "image": "[variables('containerImage')]",
                 "name": "azureargus",
                 "probes": [
