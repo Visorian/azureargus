@@ -285,21 +285,14 @@ DB-IP archive before rebuilding.
 
 ## Releases
 
-From clean, up-to-date `main`, publish stable release with:
+Release Please maintains stable versions and `CHANGELOG.md` through a release pull request. Merge a
+release pull request only after its checks pass. Merging it does not create a tag or GitHub Release;
+the separate publication workflow validates the exact merged candidate before publishing release
+artifacts.
 
-```bash
-bun run release -- X.Y.Z --push
-```
-
-Command requires version greater than `package.json`, updates `CHANGELOG.md`, creates signed
-`chore(release): vX.Y.Z` commit and annotated tag, then atomically pushes both. Tag workflow verifies
-source and publishes only `ghcr.io/visorian/azureargus:X.Y.Z`; no moving image tag is created. Exact
-published digest appears in workflow summary.
-
-GHCR package must be public. GitHub creates first package as private, so organization owner must
-change `azureargus` package visibility to **Public** after initial publish and before treating release
-as complete. Visibility change is permanent. See
-[GitHub package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-packages-for-an-organization).
+Published containers use `ghcr.io/visorian/azureargus:X.Y.Z` and `latest`. Release evidence records
+the immutable image digest; deployments use the stable version tag selected by their committed
+parameter file and never use `latest` as release identity.
 
 ## Development
 
