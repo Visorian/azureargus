@@ -134,8 +134,8 @@ jobs:
             exit 1
           fi
 
-          if rg --line-number --ignore-case 'azureargus:latest|Microsoft.Network/dnsZones' \
-            infrastructure/application; then
+          if grep --recursive --line-number --ignore-case --extended-regexp \
+            'azureargus:latest|Microsoft.Network/dnsZones' infrastructure/application; then
             echo "Application IaC must not use latest or deploy Azure DNS resources" >&2
             exit 1
           fi
