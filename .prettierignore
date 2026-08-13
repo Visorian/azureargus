@@ -1,1 +1,2 @@
-infrastructure/event-hub/azuredeploy.json
+CHANGELOG.md
+infrastructure/**/azuredeploy*.json
