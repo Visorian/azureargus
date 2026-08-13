@@ -5,23 +5,60 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "18179341500216108287"
+      "templateHash": "4066049518031380856"
     }
   },
   "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Optional. Azure region for the Container Apps resources."
+      }
+    },
     "delegatedClientId": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
         "description": "Optional. Multitenant Entra application client ID used for temporary Log Analytics access."
       }
+    },
+    "targetVersion": {
+      "type": "string",
+      "defaultValue": "0.1.1",
+      "minLength": 5,
+      "maxLength": 70,
+      "metadata": {
+        "description": "Optional. Stable Azure Argus container version in X.Y.Z form."
+      }
+    },
+    "managedEnvironmentName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Managed Environment name. A deployment-specific name is generated when empty."
+      }
+    },
+    "applicationName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Container App name. A deployment-specific name is generated when empty."
+      }
+    },
+    "customDomainName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Custom hostname. Leave empty during initial DNS bootstrap."
+      }
     }
   },
   "variables": {
-    "containerImage": "ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387",
+    "containerImage": "[format('ghcr.io/visorian/azureargus:{0}', parameters('targetVersion'))]",
     "resourceSuffix": "[uniqueString(subscription().id, resourceGroup().id)]",
-    "environmentName": "[format('azureargus-env-{0}', variables('resourceSuffix'))]",
-    "applicationName": "[format('azureargus-{0}', variables('resourceSuffix'))]"
+    "resolvedEnvironmentName": "[if(empty(parameters('managedEnvironmentName')), format('azureargus-env-{0}', variables('resourceSuffix')), parameters('managedEnvironmentName'))]",
+    "resolvedApplicationName": "[if(empty(parameters('applicationName')), format('azureargus-{0}', variables('resourceSuffix')), parameters('applicationName'))]"
   },
   "resources": [
     {
@@ -42,8 +79,11 @@
           "enableTelemetry": {
             "value": false
           },
+          "location": {
+            "value": "[parameters('location')]"
+          },
           "name": {
-            "value": "[variables('environmentName')]"
+            "value": "[variables('resolvedEnvironmentName')]"
           },
           "publicNetworkAccess": {
             "value": "Enabled"
@@ -2406,6 +2446,7 @@
               }
             ]
           },
+          "customDomains": "[if(empty(parameters('customDomainName')), createObject('value', null()), createObject('value', createArray(createObject('bindingType', 'Auto', 'name', parameters('customDomainName')))))]",
           "enableTelemetry": {
             "value": false
           },
@@ -2424,8 +2465,11 @@
           "ingressTransport": {
             "value": "auto"
           },
+          "location": {
+            "value": "[parameters('location')]"
+          },
           "name": {
-            "value": "[variables('applicationName')]"
+            "value": "[variables('resolvedApplicationName')]"
           },
           "scaleSettings": {
             "value": {

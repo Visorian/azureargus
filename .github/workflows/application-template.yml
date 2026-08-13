@@ -29,6 +29,7 @@ jobs:
       - name: Rebuild and compare deployment template
         shell: bash
         env:
+          AZUREARGUS_DELEGATED_CLIENT_ID: 00000000-0000-0000-0000-000000000000
           BICEP_VERSION: v0.46.1
           BICEP_SHA256: 3e011d629ea4311b7a7dd8f0040ab2b1a072ea4ff5d02cb75e0e55a9a6703fb9
         run: |
@@ -36,6 +37,8 @@ jobs:
 
           bicep="$RUNNER_TEMP/bicep"
           generated="$RUNNER_TEMP/azuredeploy.json"
+          generated_parameters="$RUNNER_TEMP/public-gwc.json"
+          stable_version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
           curl --fail --location --silent --show-error \
             "https://github.com/Azure/bicep/releases/download/$BICEP_VERSION/bicep-linux-x64" \
@@ -45,6 +48,8 @@ jobs:
 
           "$bicep" lint infrastructure/application/main.bicep
           "$bicep" build infrastructure/application/main.bicep --outfile "$generated"
+          "$bicep" build-params infrastructure/application/public-gwc.bicepparam \
+            --outfile "$generated_parameters"
 
           if ! cmp --silent infrastructure/application/azuredeploy.json "$generated"; then
             diff -u infrastructure/application/azuredeploy.json "$generated" || true
@@ -52,10 +57,13 @@ jobs:
           fi
 
           jq --exit-status '
-            ([.parameters | keys[]] == ["delegatedClientId"])
+            ([.parameters | keys[]]
+              == ["applicationName", "customDomainName", "delegatedClientId", "location", "managedEnvironmentName", "targetVersion"])
             and .parameters.delegatedClientId.defaultValue == ""
+            and .parameters.targetVersion.minLength == 5
+            and .parameters.targetVersion.maxLength == 70
             and .variables.containerImage
-              == "ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387"
+              == "[format(\u0027ghcr.io/visorian/azureargus:{0}\u0027, parameters(\u0027targetVersion\u0027))]"
             and ([.resources[] | select(.name == "azureargus-environment")]
               | length == 1)
             and ([.resources[] | select(.name == "azureargus-application")]
@@ -68,6 +76,18 @@ jobs:
               | .properties.template.resources[]
               | select(.type == "Microsoft.App/containerApps")]
               | length == 1)
+            and ([.resources[] | select(.name == "azureargus-environment")
+              | .properties.parameters.location.value]
+              == ["[parameters(\u0027location\u0027)]"])
+            and ([.resources[] | select(.name == "azureargus-environment")
+              | .properties.parameters.name.value]
+              == ["[variables(\u0027resolvedEnvironmentName\u0027)]"])
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.location.value]
+              == ["[parameters(\u0027location\u0027)]"])
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.name.value]
+              == ["[variables(\u0027resolvedApplicationName\u0027)]"])
             and ([.resources[] | select(.name == "azureargus-application")
               | .properties.parameters.containers.value[]
               | select(.name == "azureargus") | .probes[].type] | sort)
@@ -81,5 +101,41 @@ jobs:
               | select(.name == "azureargus") | .env]
               == ["[if(empty(parameters(\u0027delegatedClientId\u0027)), createArray(), createArray(createObject(\u0027name\u0027, \u0027NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID\u0027, \u0027value\u0027, parameters(\u0027delegatedClientId\u0027))))]"])
             and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.customDomains]
+              | tostring
+              | contains("bindingType") and contains("Auto") and contains("customDomainName"))
+            and ([.resources[] | select(.name == "azureargus-application")
+              | .properties.parameters.scaleSettings.value]
+              == [{"maxReplicas": 1, "minReplicas": 0}])
+            and ([.resources[] | select(.name == "azureargus-application")
               | .properties.parameters | has("secrets")] == [false])
+            and ([.resources[] | select(.name == "azureargus-environment")
+              | .properties.parameters | has("certificates")] == [false])
+            and ([.. | objects | select(.type? == "Microsoft.Network/dnsZones")]
+              | length == 0)
           ' infrastructure/application/azuredeploy.json
+
+          jq --exit-status '
+            .parameters.location.value == "germanywestcentral"
+            and .parameters.delegatedClientId.value == "00000000-0000-0000-0000-000000000000"
+            and .parameters.managedEnvironmentName.value == "azureargus-env-gwc"
+            and .parameters.applicationName.value == "azureargus-gwc"
+            and .parameters.customDomainName.value == "azureargus.vsrn.cc"
+          ' "$generated_parameters"
+
+          template_version="$(jq --raw-output '.parameters.targetVersion.defaultValue' "$generated")"
+          hosted_version="$(jq --raw-output '.parameters.targetVersion.value' "$generated_parameters")"
+          if [[ ! "$template_version" =~ $stable_version_pattern ]]; then
+            echo "Public template targetVersion must be stable X.Y.Z: $template_version" >&2
+            exit 1
+          fi
+          if [[ ! "$hosted_version" =~ $stable_version_pattern ]]; then
+            echo "Hosted deployment targetVersion must be stable X.Y.Z: $hosted_version" >&2
+            exit 1
+          fi
+
+          if rg --line-number --ignore-case 'azureargus:latest|Microsoft.Network/dnsZones' \
+            infrastructure/application; then
+            echo "Application IaC must not use latest or deploy Azure DNS resources" >&2
+            exit 1
+          fi

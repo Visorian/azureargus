@@ -33,8 +33,9 @@ Open `http://localhost:3000`.
 
 [![Deploy Azure Argus to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fapplication%2Fazuredeploy.json)
 
-This deploys public anonymous-mode Azure Argus to Azure Container Apps using immutable image
-`ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387`.
+This deploys public anonymous-mode Azure Argus to Azure Container Apps using stable version image
+`ghcr.io/visorian/azureargus:0.1.1`. Published release metadata records image digest as immutable
+release identity.
 The app uses HTTPS ingress, scales from zero to one replica, and stores no Event Hub credential or
 Azure token server-side. Anyone with the generated URL can open the application. Leave **Delegated
 Client ID** empty for Event Hub-only use, or enter a multitenant Entra application client ID to
@@ -42,6 +43,23 @@ enable temporary Log Analytics access. Event Hub and firewall diagnostic resourc
 deployments below. Review
 [Azure Container Apps pricing](https://azure.microsoft.com/pricing/details/container-apps/) before
 deployment.
+
+For first-time custom-domain setup, deploy with **Custom Domain Name** empty, then use the
+`applicationName` and `applicationUrl` outputs to configure the direct CNAME. Retrieve the TXT
+verification value with:
+
+```bash
+AZUREARGUS_DELEGATED_CLIENT_ID=<application-client-id> az deployment group create \
+  --resource-group <resource-group> \
+  --parameters infrastructure/application/public-gwc.bicepparam customDomainName=''
+
+az containerapp show --resource-group <resource-group> --name <applicationName> \
+  --query properties.customDomainVerificationId --output tsv
+```
+
+After external CNAME/TXT and any required DigiCert CAA policy are ready, configure the managed
+certificate in the Container Apps portal. Subsequent deployments can set the custom domain with
+automatic binding. The template creates no Azure DNS or certificate resources.
 
 ### Choose setup mode
 

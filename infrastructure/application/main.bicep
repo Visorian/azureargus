@@ -1,12 +1,31 @@
 targetScope = 'resourceGroup'
 
+@description('Optional. Azure region for the Container Apps resources.')
+param location string = resourceGroup().location
+
 @description('Optional. Multitenant Entra application client ID used for temporary Log Analytics access.')
 param delegatedClientId string = ''
 
-var containerImage = 'ghcr.io/visorian/azureargus@sha256:d2acc8a74cfa71e8b1503403f26348d82aba0a52a547a5a2c7bc55e3d7f8e387'
+@minLength(5)
+@maxLength(70)
+@description('Optional. Stable Azure Argus container version in X.Y.Z form.')
+param targetVersion string = '0.1.1'
+
+@description('Optional. Managed Environment name. A deployment-specific name is generated when empty.')
+param managedEnvironmentName string = ''
+
+@description('Optional. Container App name. A deployment-specific name is generated when empty.')
+param applicationName string = ''
+
+@description('Optional. Custom hostname. Leave empty during initial DNS bootstrap.')
+param customDomainName string = ''
+
+var containerImage = 'ghcr.io/visorian/azureargus:${targetVersion}'
 var resourceSuffix = uniqueString(subscription().id, resourceGroup().id)
-var environmentName = 'azureargus-env-${resourceSuffix}'
-var applicationName = 'azureargus-${resourceSuffix}'
+var resolvedEnvironmentName = empty(managedEnvironmentName)
+  ? 'azureargus-env-${resourceSuffix}'
+  : managedEnvironmentName
+var resolvedApplicationName = empty(applicationName) ? 'azureargus-${resourceSuffix}' : applicationName
 
 module environment 'br/public:avm/res/app/managed-environment:0.15.0' = {
   name: 'azureargus-environment'
@@ -15,7 +34,8 @@ module environment 'br/public:avm/res/app/managed-environment:0.15.0' = {
       destination: 'azure-monitor'
     }
     enableTelemetry: false
-    name: environmentName
+    location: location
+    name: resolvedEnvironmentName
     publicNetworkAccess: 'Enabled'
     zoneRedundant: false
   }
@@ -76,13 +96,22 @@ module application 'br/public:avm/res/app/container-app:0.23.0' = {
         }
       }
     ]
+    customDomains: empty(customDomainName)
+      ? null
+      : [
+          {
+            bindingType: 'Auto'
+            name: customDomainName
+          }
+        ]
     enableTelemetry: false
     environmentResourceId: environment.outputs.resourceId
     ingressAllowInsecure: false
     ingressExternal: true
     ingressTargetPort: 3000
     ingressTransport: 'auto'
-    name: applicationName
+    location: location
+    name: resolvedApplicationName
     scaleSettings: {
       maxReplicas: 1
       minReplicas: 0
