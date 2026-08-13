@@ -2,6 +2,14 @@
 
 Browser workspace for receiving, inspecting, and querying Azure Firewall logs.
 
+## Live Event Hub streaming
+
+![Azure Argus showing live Azure Firewall logs streamed from Event Hub](./docs/assets/azure-argus-eventhub-streaming.png)
+
+## DNS analytics
+
+![Azure Argus showing DNS activity and analysis controls](./docs/assets/azure-argus-dns-analytics.png)
+
 ## Features
 
 - Stream Azure Firewall logs directly from Event Hubs with pause/resume controls and wall-time lag.
@@ -283,26 +291,9 @@ App remains usable without database, but destination flags stay disabled. Keep l
 when update fails. Refresh pin monthly by updating both `release` and `archiveSha256` from exact
 DB-IP archive before rebuilding.
 
-## Releases
+## Contributing
 
-Release Please maintains stable versions and `CHANGELOG.md` through a release pull request. Merge a
-release pull request only after its checks pass. Merging it does not create a tag or GitHub Release;
-the separate publication workflow validates the exact merged candidate before publishing release
-artifacts.
-
-Published containers use `ghcr.io/visorian/azureargus:X.Y.Z` and `latest`. Release evidence records
-the immutable image digest; deployments use the stable version tag selected by their committed
-parameter file and never use `latest` as release identity.
-
-## Development
-
-```bash
-bun run lint
-bun run typecheck
-bun run test:unit
-bun run test:e2e
-bun run build
-```
+Development and release guidance is in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
