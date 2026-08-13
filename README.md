@@ -2,14 +2,6 @@
 
 Browser workspace for receiving, inspecting, and querying Azure Firewall logs.
 
-## Live Event Hub streaming
-
-![Azure Argus showing live Azure Firewall logs streamed from Event Hub](./docs/assets/azure-argus-eventhub-streaming.png)
-
-## DNS analytics
-
-![Azure Argus showing DNS activity and analysis controls](./docs/assets/azure-argus-dns-analytics.png)
-
 ## Features
 
 - Stream Azure Firewall logs directly from Event Hubs with pause/resume controls and wall-time lag.
@@ -23,6 +15,14 @@ Browser workspace for receiving, inspecting, and querying Azure Firewall logs.
 - Optionally retain up to 100,000 normalized logs in browser IndexedDB.
 - Resolve public destination IPs to country flags through a server-local MMDB database.
 - Use managed application login or deployment-derived anonymous mode.
+
+## Live Event Hub streaming
+
+![Azure Argus showing live Azure Firewall logs streamed from Event Hub](./docs/assets/azure-argus-eventhub-streaming.png)
+
+## DNS analytics
+
+![Azure Argus showing DNS activity and analysis controls](./docs/assets/azure-argus-dns-analytics.png)
 
 ## Getting started
 
