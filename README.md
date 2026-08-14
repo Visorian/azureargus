@@ -114,9 +114,12 @@ Deploying identity needs these control-plane permissions, directly or through br
 
 #### Deployment parameters and outputs
 
-In portal, choose Event Hubs resource group as deployment resource group. Both templates accept
-**Event Hub name** (default `azureargus`) and **Event Hub retention hours** (default `1`, range
-`1`–`168`). Diagnostics template also requires:
+In portal, choose Event Hubs resource group as deployment resource group. Both templates accept:
+
+- **Event Hub name** (default `azureargus`).
+- **Event Hub retention hours** (default `1`, range `1`–`168`).
+
+Diagnostics template also requires:
 
 - **Firewall resource group name**.
 - **Firewall name**.
@@ -200,8 +203,8 @@ Log delivery can take up to 30 minutes after diagnostic settings change.
 Setting any `NUXT_EVENT_HUB_*` or `NUXT_LOG_ANALYTICS_*` value selects managed mode and requires
 complete OIDC login configuration. Partial or malformed fixed-source groups make deployment invalid;
 Azure Argus does not fall back to temporary mode. `NUXT_PUBLIC_LOG_ANALYTICS_DELEGATED_CLIENT_ID`
-alone keeps temporary mode. Managed deployment with only one fixed source does not retain temporary
-access to other source.
+alone keeps temporary mode. Managed deployment does not retain temporary access to sources that are
+not configured.
 
 ### Temporary mode
 
@@ -300,8 +303,8 @@ Hub authentication. Connection-string-free managed Event Hub setup is unavailabl
 ### Application deployment
 
 Application template deploys public temporary-mode Azure Argus to Azure Container Apps using stable
-version image `ghcr.io/visorian/azureargus:0.3.0`. Published release metadata records image digest as
-immutable release identity.
+version image `ghcr.io/visorian/azureargus:0.3.0` by default. `targetVersion` can select another stable
+release. Published release metadata records image digest as immutable release identity.
 
 Application uses HTTPS ingress, scales from zero to one replica, and stores no Event Hub credential or
 Azure token server-side. Anyone with generated URL can open application. Leave **Delegated Client
