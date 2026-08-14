@@ -258,10 +258,22 @@ jobs:
             local expected_revision="$3"
             local actual_id
             local actual_revision
-            actual_id="$(jq -r '.id' <<<"$ruleset")"
-            actual_revision="$(date --date "$(jq -r '.updated_at' <<<"$ruleset")" +%s%3N)"
+            local actual_updated_at
+            actual_id="$(jq -er '.id | select(. != null) | tostring' <<<"$ruleset")" || {
+              printf 'ruleset response lacks an ID\n' >&2
+              exit 1
+            }
+            actual_updated_at="$(jq -er '.updated_at | strings | select(length > 0)' <<<"$ruleset")" || {
+              printf 'ruleset %s response lacks an update timestamp\n' "$actual_id" >&2
+              exit 1
+            }
+            actual_revision="$(date --date "$actual_updated_at" +%s%3N 2>/dev/null)" || {
+              printf 'ruleset %s has invalid update timestamp %s\n' "$actual_id" "$actual_updated_at" >&2
+              exit 1
+            }
             [ "$actual_id" = "$expected_id" ] && [ "$actual_revision" = "$expected_revision" ] || {
-              printf 'ruleset %s no longer matches audited revision\n' "$expected_id" >&2
+              printf 'ruleset %s revision mismatch: got ID %s at %s\n' \
+                "$expected_id" "$actual_id" "$actual_updated_at" >&2
               exit 1
             }
           }
@@ -296,7 +308,7 @@ jobs:
             and (.conditions.ref_name.exclude | length) == 0
             and ([.rules[].type] | sort) == ["deletion","non_fast_forward","update"]
           ' <<<"$immutability_ruleset" >/dev/null || {
-            printf 'release tag immutability ruleset no longer blocks all actors\n' >&2
+            printf 'release tag immutability ruleset shape changed\n' >&2
             exit 1
           }
           writers="$(grep --recursive --files-with-matches --extended-regexp \
