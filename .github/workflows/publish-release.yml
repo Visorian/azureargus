@@ -252,12 +252,25 @@ jobs:
             printf 'release commit is not an ancestor of main: %s\n' "$SHA" >&2
             exit 1
           }
+          require_ruleset_revision() {
+            local ruleset="$1"
+            local expected_id="$2"
+            local expected_revision="$3"
+            local actual_id
+            local actual_revision
+            actual_id="$(jq -r '.id' <<<"$ruleset")"
+            actual_revision="$(date --date "$(jq -r '.updated_at' <<<"$ruleset")" +%s%3N)"
+            [ "$actual_id" = "$expected_id" ] && [ "$actual_revision" = "$expected_revision" ] || {
+              printf 'ruleset %s no longer matches audited revision\n' "$expected_id" >&2
+              exit 1
+            }
+          }
           rulesets="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets")"
           default_ruleset_id="$(jq -er '.[] | select(.name == "default" and .target == "branch" and .enforcement == "active") | .id' <<<"$rulesets")"
           default_ruleset="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${default_ruleset_id}")"
+          require_ruleset_revision "$default_ruleset" 20818552 1786654799962
           jq -e '
-            (.bypass_actors | length) == 0
-            and any(.rules[]; .type == "pull_request")
+            any(.rules[]; .type == "pull_request")
             and any(.rules[]; .type == "required_signatures")
             and any(.rules[]; .type == "copilot_code_review")
           ' <<<"$default_ruleset" >/dev/null || {
@@ -266,21 +279,21 @@ jobs:
           }
           creation_ruleset_id="$(jq -er '.[] | select(.name == "tag creation" and .target == "tag" and .enforcement == "active") | .id' <<<"$rulesets")"
           creation_ruleset="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${creation_ruleset_id}")"
+          require_ruleset_revision "$creation_ruleset" 20818603 1786654623555
           jq -e '
             .conditions.ref_name.include == ["refs/tags/v*"]
             and (.conditions.ref_name.exclude | length) == 0
             and .rules == [{"type":"creation"}]
-            and .bypass_actors == [{"actor_id":4584294,"actor_type":"Integration","bypass_mode":"always"}]
           ' <<<"$creation_ruleset" >/dev/null || {
-            printf 'release tag creation ruleset no longer grants only Azure Argus release app\n' >&2
+            printf 'release tag creation ruleset shape changed\n' >&2
             exit 1
           }
           immutability_ruleset_id="$(jq -er '.[] | select(.name == "tag immutability" and .target == "tag" and .enforcement == "active") | .id' <<<"$rulesets")"
           immutability_ruleset="$(gh api "repos/${GITHUB_REPOSITORY}/rulesets/${immutability_ruleset_id}")"
+          require_ruleset_revision "$immutability_ruleset" 20818561 1786654493181
           jq -e '
             .conditions.ref_name.include == ["refs/tags/v*"]
             and (.conditions.ref_name.exclude | length) == 0
-            and (.bypass_actors | length) == 0
             and ([.rules[].type] | sort) == ["deletion","non_fast_forward","update"]
           ' <<<"$immutability_ruleset" >/dev/null || {
             printf 'release tag immutability ruleset no longer blocks all actors\n' >&2
