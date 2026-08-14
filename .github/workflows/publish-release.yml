@@ -653,7 +653,15 @@ jobs:
 
           source_version="$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" infrastructure/application/main.bicep)"
           arm_version="$(jq -r '.parameters.targetVersion.defaultValue' infrastructure/application/azuredeploy.json)"
-          readme_image="$(grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' README.md)"
+          mapfile -t readme_images < <(
+            grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' README.md || true
+          )
+          [ "${#readme_images[@]}" -eq 1 ] || {
+            printf 'README must contain one stable Azure Argus image, found %s\n' \
+              "${#readme_images[@]}" >&2
+            exit 1
+          }
+          readme_image="${readme_images[0]}"
           readme_version="${readme_image##*:}"
           if [ "$source_version" = "$VERSION" ] && [ "$arm_version" = "$VERSION" ] &&
             [ "$readme_version" = "$VERSION" ]; then
@@ -667,8 +675,11 @@ jobs:
           }
 
           old_image="ghcr.io/visorian/azureargus:${source_version}"
-          [ "$readme_image" = "$old_image" ]
-          [ "$(grep -Fc "$old_image" README.md)" -eq 1 ]
+          [ "$readme_image" = "$old_image" ] || {
+            printf 'README image %s does not match public template %s\n' \
+              "$readme_image" "$old_image" >&2
+            exit 1
+          }
           sed -i "s|${old_image}|ghcr.io/visorian/azureargus:${VERSION}|" README.md
           sed -i "s/^param targetVersion string = '[^']*'$/param targetVersion string = '${VERSION}'/" \
             infrastructure/application/main.bicep
@@ -899,8 +910,14 @@ jobs:
           )"
           [ "$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" <<<"$bicep")" = "$VERSION" ]
           [ "$(jq -r '.parameters.targetVersion.defaultValue' <<<"$arm")" = "$VERSION" ]
-          [ "$(grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' <<<"$readme")" = \
-            "ghcr.io/visorian/azureargus:${VERSION}" ]
+          mapfile -t readme_images < <(
+            grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' <<<"$readme" || true
+          )
+          [ "${#readme_images[@]}" -eq 1 ] &&
+            [ "${readme_images[0]}" = "ghcr.io/visorian/azureargus:${VERSION}" ] || {
+              printf 'README does not contain exact released image %s\n' "$VERSION" >&2
+              exit 1
+            }
           {
             printf '## Azure Argus %s\n\n' "$TAG"
             printf -- "- Commit: \`%s\`\n" "$SHA"
