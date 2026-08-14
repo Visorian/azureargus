@@ -1,6 +1,29 @@
 # Changelog
 
 
+## [0.2.0](https://github.com/Visorian/azureargus/compare/v0.1.1...v0.2.0) (2026-08-14)
+
+
+### Features
+
+* **config:** add application deployment template ([37478c0](https://github.com/Visorian/azureargus/commit/37478c04345374d5733ef259963d15a5aa96948d))
+* **config:** enable delegated application deployment ([e937b76](https://github.com/Visorian/azureargus/commit/e937b7616c1ba5c5add702baafe4cf2025e19027))
+* **frontend:** refine Azure Argus presentation ([6a8c992](https://github.com/Visorian/azureargus/commit/6a8c9926d915e1cc5e3037f89621afef4ae50f88))
+* **release:** make application deployment version aware ([107fad9](https://github.com/Visorian/azureargus/commit/107fad957e42567875cc3c311cd45a02e1ff3195))
+* **release:** prepare releases with release please ([c0c10e9](https://github.com/Visorian/azureargus/commit/c0c10e99a49c464518221a8e09b3628ec3ebe7eb))
+* **release:** publish guarded artifacts ([#30](https://github.com/Visorian/azureargus/issues/30)) ([97a08d3](https://github.com/Visorian/azureargus/commit/97a08d379d2f7bb42c51b6c2703c4fb7c9cca6d6))
+
+
+### Bug Fixes
+
+* **ci:** enforce application template scans ([f5d83fe](https://github.com/Visorian/azureargus/commit/f5d83febf2dcff5bdad5c0ddff5899da7cea95cd))
+* **config:** protect generated files from formatting ([76dcc8a](https://github.com/Visorian/azureargus/commit/76dcc8a4bc3d9f876ddf38c16184dac28512439a))
+* **frontend:** correct firewall log table behavior ([f2bf793](https://github.com/Visorian/azureargus/commit/f2bf79345cb8ae6fd9b0d67426d04ffffc4ce9e7))
+* **release:** keep release please pr only ([f6b279b](https://github.com/Visorian/azureargus/commit/f6b279b3cad8590cac54d19683df4d3fbe869d6c))
+* **release:** read app client id from variable ([742e045](https://github.com/Visorian/azureargus/commit/742e0455689b6a55f7bbd53196d96d390d282f50))
+* **release:** use configured app secrets ([2d76e6f](https://github.com/Visorian/azureargus/commit/2d76e6fdb8ba8b5a69d0c3fc65b6edfa5c963e5c))
+* **release:** use dedicated app private key ([c8b36df](https://github.com/Visorian/azureargus/commit/c8b36df15e3b22cb860bb91de15a2c1a8480f52c))
+
 ## v0.1.1
 
 
@@ -74,4 +97,3 @@
 ### 🤖 CI
 
 - **ci:** Validate generated ARM template ([017ae9e](https://github.com/Visorian/azureargus/commit/017ae9e))
-
