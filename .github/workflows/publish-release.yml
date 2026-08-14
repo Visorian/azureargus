@@ -779,7 +779,7 @@ jobs:
             '{
               query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
               variables: {input: {
-                branch: {repositoryNameWithOwner: $repo, refName: $branch},
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
                 expectedHeadOid: $head,
                 message: {headline: "chore(release): update public template"},
                 fileChanges: {additions: [
