@@ -837,6 +837,9 @@ jobs:
             printf 'template pull request changes unexpected files: %s\n' "$files" >&2
             exit 1
           }
+          reviewed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}/reviews" --jq \
+            "any(.[]; .user.login == \"copilot-pull-request-reviewer[bot]\" and .commit_id == \"${EXPECTED_COMMIT}\")")"
+          [ "$reviewed" = 'true' ] || gh pr edit "$number" --add-reviewer @copilot
           printf 'number=%s\nurl=%s\n' "$number" "$url" >>"$GITHUB_OUTPUT"
 
       - name: Wait for template checks and Copilot review
