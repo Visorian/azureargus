@@ -20,6 +20,7 @@ test("anonymous deployment starts directly in logs", async ({ page }) => {
   await page.goto("/logs");
   await expect(page).toHaveURL(/\/logs/);
   await expect(page.getByText("Temporary session")).toBeVisible();
+  await expect(page.getByText("Azure Firewall Analytics", { exact: true })).toBeVisible();
 
   const darkModeToggle = page.getByRole("button", { name: "Switch to dark mode" });
   await expect(darkModeToggle).toBeVisible();
