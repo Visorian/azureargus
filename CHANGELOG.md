@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [0.3.0](https://github.com/Visorian/azureargus/compare/v0.2.0...v0.3.0) (2026-08-14)
+
+
+### Features
+
+* **ci:** add public release deployment ([#40](https://github.com/Visorian/azureargus/issues/40)) ([8bd13f5](https://github.com/Visorian/azureargus/commit/8bd13f5420c8acb30ec3d3c6d3867b25fc6f521b))
+
+
+### Bug Fixes
+
+* **frontend:** update hosted instance onboarding ([#41](https://github.com/Visorian/azureargus/issues/41)) ([3a5cab1](https://github.com/Visorian/azureargus/commit/3a5cab1d48e8bd3ee4ef12ec9afc4c8b44233c20))
+* **release:** guard redacted rulesets ([#32](https://github.com/Visorian/azureargus/issues/32)) ([67815d9](https://github.com/Visorian/azureargus/commit/67815d96c84c469585bdc1771d9e45493e03f9dd))
+* **release:** inspect existing image labels ([#34](https://github.com/Visorian/azureargus/issues/34)) ([2b53093](https://github.com/Visorian/azureargus/commit/2b53093c28c4763579d5847b813fa64957e8a83b))
+* **release:** match Copilot review identity ([#31](https://github.com/Visorian/azureargus/issues/31)) ([ea94f42](https://github.com/Visorian/azureargus/commit/ea94f4224ed5729714c90888346a64d19f8528ba))
+* **release:** recover template synchronization ([#33](https://github.com/Visorian/azureargus/issues/33)) ([4f28094](https://github.com/Visorian/azureargus/commit/4f28094e92a4f77afc8ae23ad43cfe5bf9404c28))
+* **release:** request template review ([#38](https://github.com/Visorian/azureargus/issues/38)) ([ecc2548](https://github.com/Visorian/azureargus/commit/ecc2548e9fa62c5f53bd34d4726826ac83541e4f))
+* **release:** send complete GraphQL request ([#35](https://github.com/Visorian/azureargus/issues/35)) ([1fe64e7](https://github.com/Visorian/azureargus/commit/1fe64e72e6c4d93445d2faa5c40c3902fd849204))
+* **release:** target template branch by name ([#36](https://github.com/Visorian/azureargus/issues/36)) ([3e2bb2e](https://github.com/Visorian/azureargus/commit/3e2bb2e962b01bedc002c127ff0cac6ef311625c))
+
 ## [0.2.0](https://github.com/Visorian/azureargus/compare/v0.1.1...v0.2.0) (2026-08-14)
 
 
