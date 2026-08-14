@@ -239,8 +239,8 @@ jobs:
               revision_resource="$(az rest --method get \
                 --url "https://management.azure.com${app_id}/revisions/${latest}?api-version=2026-01-01" \
                 --output json)"
-              image="$(jq -r '.properties.template.containers[] \
-                | select(.name == "azureargus") | .image' <<<"$revision_resource")"
+              image="$(jq -r '.properties.template.containers[] | select(.name == "azureargus") | .image' \
+                <<<"$revision_resource")"
               if [ "$(jq -r .name <<<"$revision_resource")" = "$latest" ] && \
                 [ "$image" = "$expected_image" ]; then
                 revision="$latest"
