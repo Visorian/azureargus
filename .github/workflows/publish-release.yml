@@ -820,7 +820,6 @@ jobs:
             url="$(gh pr create \
               --base main \
               --head "$BRANCH" \
-              --reviewer @copilot \
               --title "chore(release): update public template to ${VERSION}" \
               --body "Updates public deployment template default to released Azure Argus ${VERSION}. Hosted deployment parameter already targets this exact release.")"
             number="$(gh pr view "$url" --json number --jq .number)"
@@ -838,6 +837,9 @@ jobs:
             printf 'template pull request changes unexpected files: %s\n' "$files" >&2
             exit 1
           }
+          reviewed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}/reviews" --jq \
+            "any(.[]; .user.login == \"copilot-pull-request-reviewer[bot]\" and .commit_id == \"${EXPECTED_COMMIT}\")")"
+          [ "$reviewed" = 'true' ] || gh pr edit "$number" --add-reviewer @copilot
           printf 'number=%s\nurl=%s\n' "$number" "$url" >>"$GITHUB_OUTPUT"
 
       - name: Wait for template checks and Copilot review
