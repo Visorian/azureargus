@@ -26,18 +26,14 @@ Browser workspace for receiving, inspecting, and querying Azure Firewall logs.
 
 ## Getting started
 
-Requires [Bun](https://bun.sh/). Configuration keys and placeholders are in
-[`.env.example`](./.env.example).
+### Use public hosted instance
 
-```bash
-bun install
-cp .env.example .env
-bun run dev
-```
+Open the public hosted instance at [azureargus.vsrn.cc](https://azureargus.vsrn.cc). It runs in
+temporary mode, so you can connect an Event Hub or use delegated Log Analytics access without
+deploying Azure Argus yourself. Follow [Temporary setup](#temporary-setup) before connecting a data
+source.
 
-Open `http://localhost:3000`.
-
-### Deploy Azure Argus application
+### Deploy your own instance
 
 [![Deploy Azure Argus to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fapplication%2Fazuredeploy.json)
 
@@ -68,6 +64,19 @@ az containerapp show --resource-group <resource-group> --name <applicationName> 
 After external CNAME/TXT and any required DigiCert CAA policy are ready, configure the managed
 certificate in the Container Apps portal. Subsequent deployments can set the custom domain with
 automatic binding. The template creates no Azure DNS or certificate resources.
+
+### Develop locally
+
+Requires [Bun](https://bun.sh/). Configuration keys and placeholders are in
+[`.env.example`](./.env.example).
+
+```bash
+bun install
+cp .env.example .env
+bun run dev
+```
+
+Open `http://localhost:3000`.
 
 ### Choose setup mode
 

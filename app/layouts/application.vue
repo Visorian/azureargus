@@ -54,7 +54,7 @@ async function leave() {
           <div>
             <p class="text-sm font-semibold">{{ runtimeConfig.public.siteName }}</p>
             <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-              Azure Firewall Analysis
+              Azure Firewall Analytics
             </p>
           </div>
         </div>
