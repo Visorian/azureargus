@@ -42,7 +42,7 @@ Open `http://localhost:3000`.
 [![Deploy Azure Argus to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fapplication%2Fazuredeploy.json)
 
 This deploys public anonymous-mode Azure Argus to Azure Container Apps using stable version image
-`ghcr.io/visorian/azureargus:0.1.1`. Published release metadata records image digest as immutable
+`ghcr.io/visorian/azureargus:0.2.0`. Published release metadata records image digest as immutable
 release identity.
 The app uses HTTPS ingress, scales from zero to one replica, and stores no Event Hub credential or
 Azure token server-side. Anyone with the generated URL can open the application. Leave **Delegated
