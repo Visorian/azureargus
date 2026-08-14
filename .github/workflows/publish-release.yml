@@ -820,6 +820,7 @@ jobs:
             url="$(gh pr create \
               --base main \
               --head "$BRANCH" \
+              --reviewer @copilot \
               --title "chore(release): update public template to ${VERSION}" \
               --body "Updates public deployment template default to released Azure Argus ${VERSION}. Hosted deployment parameter already targets this exact release.")"
             number="$(gh pr view "$url" --json number --jq .number)"
