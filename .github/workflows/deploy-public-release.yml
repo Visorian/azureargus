@@ -1,0 +1,266 @@
+name: Deploy public release
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag to redeploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azureargus-public-gwc
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      digest: ${{ steps.candidate.outputs.digest }}
+      recovery: ${{ steps.release.outputs.recovery }}
+      release_url: ${{ steps.release.outputs.release_url }}
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+
+    steps:
+      - name: Resolve published release
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RELEASE_ID: ${{ github.event.release.id }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          EVENT_TARGET: ${{ github.event.release.target_commitish }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
+            [ "$GITHUB_REF" = 'refs/heads/main' ] || {
+              printf 'manual recovery must run from main, got %s\n' "$GITHUB_REF" >&2
+              exit 1
+            }
+            tag="$INPUT_TAG"
+            recovery=true
+          else
+            [ "$EVENT_NAME" = 'release' ] || exit 1
+            tag="$EVENT_TAG"
+            recovery=false
+          fi
+          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            printf 'release tag is not stable: %s\n' "$tag" >&2
+            exit 1
+          }
+          [ "$tag" != 'v0.1.1' ] || {
+            printf 'historical backfill %s is not deployable\n' "$tag" >&2
+            exit 1
+          }
+
+          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+          [ "$(jq -r '.tag_name' <<<"$release")" = "$tag" ] &&
+            [ "$(jq -r '.draft' <<<"$release")" = 'false' ] &&
+            [ "$(jq -r '.prerelease' <<<"$release")" = 'false' ] &&
+            [ "$(jq -r '.published_at // empty' <<<"$release")" != '' ] || {
+              printf 'release %s is not published and stable\n' "$tag" >&2
+              exit 1
+          }
+          sha="$(jq -r '.target_commitish' <<<"$release")"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            printf 'release %s does not target an exact commit: %s\n' "$tag" "$sha" >&2
+            exit 1
+          }
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}")"
+          [ "$(jq -r '.object.type' <<<"$ref")" = 'commit' ] &&
+            [ "$(jq -r '.object.sha' <<<"$ref")" = "$sha" ] || {
+              printf 'release %s and lightweight tag target disagree\n' "$tag" >&2
+              exit 1
+          }
+          if [ "$EVENT_NAME" = 'release' ]; then
+            [ "$(jq -r '.id | tostring' <<<"$release")" = "$EVENT_RELEASE_ID" ] &&
+              [ "$tag" = "$EVENT_TAG" ] && [ "$sha" = "$EVENT_TARGET" ] || {
+                printf 'release event does not identify the resolved release\n' >&2
+                exit 1
+            }
+          fi
+          {
+            printf 'recovery=%s\n' "$recovery"
+            printf 'release_url=%s\n' "$(jq -r '.html_url' <<<"$release")"
+            printf 'sha=%s\n' "$sha"
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "${tag#v}"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Check out release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.release.outputs.sha }}
+
+      - name: Validate release and public image
+        id: candidate
+        env:
+          SHA: ${{ steps.release.outputs.sha }}
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [ "$(git rev-parse HEAD)" = "$SHA" ]
+          [ "$(jq -r .version package.json)" = "$VERSION" ]
+          [ "$(jq -r '.["."]' .release-please-manifest.json)" = "$VERSION" ]
+          hosted_version="$(sed -n "s/^param targetVersion = '\([^']*\)'.*$/\1/p" \
+            infrastructure/application/public-gwc.bicepparam)"
+          [ "$hosted_version" = "$VERSION" ] || {
+            printf 'hosted targetVersion %s does not match %s\n' "$hosted_version" "$VERSION" >&2
+            exit 1
+          }
+
+          image="ghcr.io/visorian/azureargus:${VERSION}"
+          docker buildx imagetools inspect "$image" --raw >/dev/null
+          digest="$(docker buildx imagetools inspect "$image" \
+            --format '{{json .Manifest.Digest}}' | jq -r '.')"
+          labels="$(docker buildx imagetools inspect "$image" \
+            --format '{{json .Image.Config.Labels}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] &&
+            [ "$(jq -r '.["org.opencontainers.image.version"] // empty' <<<"$labels")" = "$VERSION" ] &&
+            [ "$(jq -r '.["org.opencontainers.image.revision"] // empty' <<<"$labels")" = "$SHA" ] || {
+              printf 'public image identity does not match %s at %s\n' "$VERSION" "$SHA" >&2
+              exit 1
+          }
+          printf 'digest=%s\n' "$digest" >>"$GITHUB_OUTPUT"
+
+  deploy:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CORE_OUTPUT: none
+      AZUREARGUS_DELEGATED_CLIENT_ID: ${{ vars.AZUREARGUS_DELEGATED_CLIENT_ID }}
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Validate production contract
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          uuid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          for value in "$AZURE_CLIENT_ID" "$AZURE_SUBSCRIPTION_ID" "$AZURE_TENANT_ID" \
+            "$AZUREARGUS_DELEGATED_CLIENT_ID"; do
+            [[ "$value" =~ $uuid ]] || {
+              printf 'production environment contains an invalid client, tenant, or subscription ID\n' >&2
+              exit 1
+            }
+          done
+          [ "$(git rev-parse HEAD)" = "$SHA" ]
+          hosted_version="$(sed -n "s/^param targetVersion = '\([^']*\)'.*$/\1/p" \
+            infrastructure/application/public-gwc.bicepparam)"
+          [ "$hosted_version" = "$VERSION" ]
+
+      - name: Log in to Azure with OIDC
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+
+      - name: Deploy published release
+        id: deploy
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          DIGEST: ${{ needs.resolve.outputs.digest }}
+          RECOVERY: ${{ needs.resolve.outputs.recovery }}
+          RELEASE_URL: ${{ needs.resolve.outputs.release_url }}
+          RESOURCE_GROUP: rg-azureargus-public-gwc
+          SHA: ${{ needs.resolve.outputs.sha }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          subscription="$(az account show --query id --output tsv)"
+          [ "${subscription,,}" = "${AZURE_SUBSCRIPTION_ID,,}" ] || {
+            printf 'Azure login selected unexpected subscription\n' >&2
+            exit 1
+          }
+          location="$(az group show --name "$RESOURCE_GROUP" --query location --output tsv)"
+          [ "$location" = 'germanywestcentral' ] || {
+            printf 'resource group %s is in %s\n' "$RESOURCE_GROUP" "$location" >&2
+            exit 1
+          }
+
+          deployment="azureargus-${VERSION//./-}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          result="$RUNNER_TEMP/deployment.json"
+          az deployment group create \
+            --name "$deployment" \
+            --only-show-errors \
+            --parameters infrastructure/application/public-gwc.bicepparam \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json >"$result"
+
+          app_id="$(jq -er '.properties.outputs.applicationResourceId.value' "$result")"
+          app_url="$(jq -er '.properties.outputs.applicationUrl.value' "$result")"
+          environment_id="$(jq -er '.properties.outputs.environmentResourceId.value' "$result")"
+          expected_image="ghcr.io/visorian/azureargus:${VERSION}"
+          revision=''
+          for attempt in $(seq 1 18); do
+            app="$(az resource show --ids "$app_id" --api-version 2026-01-01 --output json)"
+            image="$(jq -r '.properties.template.containers[] | select(.name == "azureargus") | .image' \
+              <<<"$app")"
+            revision="$(jq -r '.properties.latestReadyRevisionName // empty' <<<"$app")"
+            [ "$image" = "$expected_image" ] && [ -n "$revision" ] && break
+            [ "$attempt" -eq 18 ] || sleep 10
+          done
+          [ "$image" = "$expected_image" ] && [ -n "$revision" ] || {
+            printf 'Container App did not expose expected image and ready revision\n' >&2
+            exit 1
+          }
+          [[ "$app_url" =~ ^https://[^[:space:]]+$ ]]
+          {
+            printf 'deployment=%s\n' "$deployment"
+            printf 'revision=%s\n' "$revision"
+            printf 'url=%s\n' "$app_url"
+          } >>"$GITHUB_OUTPUT"
+          {
+            echo '## Public Azure Argus deployment'
+            printf -- "- Mode: \`%s\`\n" "$([ "$RECOVERY" = 'true' ] && echo recovery || echo release)"
+            printf -- "- Release: [%s](%s)\n" "$TAG" "$RELEASE_URL"
+            printf -- "- Commit: \`%s\`\n" "$SHA"
+            printf -- "- Image: \`%s\`\n" "$expected_image"
+            printf -- "- Image digest: \`%s\`\n" "$DIGEST"
+            printf -- "- Deployment: \`%s\`\n" "$deployment"
+            printf -- "- Container App revision: \`%s\`\n" "$revision"
+            printf -- "- Application resource: \`%s\`\n" "$app_id"
+            printf -- "- Environment resource: \`%s\`\n" "$environment_id"
+            printf -- "- URL: [%s](%s)\n" "$app_url" "$app_url"
+            if [ "$RECOVERY" = 'true' ]; then
+              printf -- "- Recovery target: \`%s\` at \`%s\`\n" "$TAG" "$DIGEST"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
