@@ -459,8 +459,17 @@ jobs:
 
           if docker buildx imagetools inspect "$IMAGE" --raw >/dev/null 2>inspect-error; then
             digest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | jq -r '.')"
-            revision="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image.Config.Labels."org.opencontainers.image.revision"}}' | jq -r '.')"
-            image_version="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image.Config.Labels."org.opencontainers.image.version"}}' | jq -r '.')"
+            labels="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image.Config.Labels}}')"
+            revision="$(jq -er '."org.opencontainers.image.revision" | strings | select(length > 0)' \
+              <<<"$labels")" || {
+              printf 'existing %s lacks revision identity\n' "$IMAGE" >&2
+              exit 1
+            }
+            image_version="$(jq -er '."org.opencontainers.image.version" | strings | select(length > 0)' \
+              <<<"$labels")" || {
+              printf 'existing %s lacks version identity\n' "$IMAGE" >&2
+              exit 1
+            }
             [ "$revision" = "$SHA" ] && [ "$image_version" = "$VERSION" ] || {
               printf 'existing %s identifies version %s revision %s\n' "$IMAGE" "$image_version" "$revision" >&2
               exit 1
