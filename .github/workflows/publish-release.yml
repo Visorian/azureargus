@@ -771,24 +771,25 @@ jobs:
               -f ref="refs/heads/${branch}" -f sha="$MAIN_SHA" >/dev/null
           fi
 
-          variables="$(jq -n \
+          request="$(jq -n \
             --rawfile readme README.md \
             --rawfile bicep infrastructure/application/main.bicep \
             --rawfile arm infrastructure/application/azuredeploy.json \
             --arg branch "$branch" --arg head "$MAIN_SHA" --arg repo "$GITHUB_REPOSITORY" \
-            '{input: {
-              branch: {repositoryNameWithOwner: $repo, refName: $branch},
-              expectedHeadOid: $head,
-              message: {headline: "chore(release): update public template"},
-              fileChanges: {additions: [
-                {path: "README.md", contents: ($readme | @base64)},
-                {path: "infrastructure/application/main.bicep", contents: ($bicep | @base64)},
-                {path: "infrastructure/application/azuredeploy.json", contents: ($arm | @base64)}
-              ]}
-            }}')"
-          result="$(gh api graphql \
-            -f query="mutation(\$input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: \$input) { commit { oid } } }" \
-            --input - <<<"$variables")"
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, refName: $branch},
+                expectedHeadOid: $head,
+                message: {headline: "chore(release): update public template"},
+                fileChanges: {additions: [
+                  {path: "README.md", contents: ($readme | @base64)},
+                  {path: "infrastructure/application/main.bicep", contents: ($bicep | @base64)},
+                  {path: "infrastructure/application/azuredeploy.json", contents: ($arm | @base64)}
+                ]}
+              }}
+            }')"
+          result="$(gh api graphql --input - <<<"$request")"
           commit="$(jq -r '.data.createCommitOnBranch.commit.oid' <<<"$result")"
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || exit 1
           verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq .commit.verification.verified)"
