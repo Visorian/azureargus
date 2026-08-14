@@ -801,9 +801,9 @@ jobs:
             [ "$(jq -r '.headRefOid' <<<"$pull")" = "$EXPECTED_COMMIT" ] || {
               printf 'template pull request does not match expected branch and commit\n' >&2
               exit 1
-            }
+          }
           files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}/files" --jq '[.[].filename] | sort')"
-          expected='["infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
+          expected='["README.md","infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
           [ "$files" = "$expected" ] || {
             printf 'template pull request changes unexpected files: %s\n' "$files" >&2
             exit 1
@@ -893,8 +893,14 @@ jobs:
             gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=main" \
               --jq .content | base64 --decode
           )"
+          readme="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/README.md?ref=main" \
+              --jq .content | base64 --decode
+          )"
           [ "$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" <<<"$bicep")" = "$VERSION" ]
           [ "$(jq -r '.parameters.targetVersion.defaultValue' <<<"$arm")" = "$VERSION" ]
+          [ "$(grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' <<<"$readme")" = \
+            "ghcr.io/visorian/azureargus:${VERSION}" ]
           {
             printf '## Azure Argus %s\n\n' "$TAG"
             printf -- "- Commit: \`%s\`\n" "$SHA"
