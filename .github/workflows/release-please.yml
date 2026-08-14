@@ -32,6 +32,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          emit_candidate() {
+            {
+              echo 'pending=true'
+              printf 'sha=%s\n' "$sha"
+              printf 'tag=%s\n' "$tag"
+              printf 'version=%s\n' "$version"
+            } >>"$GITHUB_OUTPUT"
+          }
+
           candidates="$(
             gh api --paginate --slurp \
               "repos/${GITHUB_REPOSITORY}/pulls?state=closed&base=main&per_page=100" |
@@ -45,7 +54,46 @@ jobs:
           )"
           count="$(jq 'length' <<<"$candidates")"
           if [ "$count" -eq 0 ]; then
-            echo 'pending=false' >>"$GITHUB_OUTPUT"
+            latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null || true)"
+            if [ -z "$latest" ]; then
+              echo 'pending=false' >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            tag="$(jq -r '.tag_name' <<<"$latest")"
+            [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+              printf 'latest release tag is not stable: %s\n' "$tag" >&2
+              exit 1
+            }
+            version="${tag#v}"
+            sha="$(jq -r '.target_commitish' <<<"$latest")"
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+              printf 'latest release target is not exact lowercase hex: %s\n' "$sha" >&2
+              exit 1
+            }
+            bicep="$(
+              gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/main.bicep?ref=main" \
+                --jq .content | base64 --decode
+            )"
+            arm="$(
+              gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=main" \
+                --jq .content | base64 --decode
+            )"
+            readme="$(
+              gh api "repos/${GITHUB_REPOSITORY}/contents/README.md?ref=main" \
+                --jq .content | base64 --decode
+            )"
+            bicep_version="$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" <<<"$bicep")"
+            arm_version="$(jq -r '.parameters.targetVersion.defaultValue' <<<"$arm")"
+            mapfile -t readme_images < <(
+              grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' <<<"$readme" || true
+            )
+            if [ "$bicep_version" = "$version" ] && [ "$arm_version" = "$version" ] &&
+              [ "${#readme_images[@]}" -eq 1 ] &&
+              [ "${readme_images[0]}" = "ghcr.io/visorian/azureargus:${version}" ]; then
+              echo 'pending=false' >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            emit_candidate
             exit 0
           fi
           [ "$count" -eq 1 ] || {
@@ -73,12 +121,8 @@ jobs:
             printf 'release pull request title %s does not identify %s\n' "$title" "$version" >&2
             exit 1
           }
-          {
-            echo 'pending=true'
-            printf 'sha=%s\n' "$sha"
-            printf 'tag=v%s\n' "$version"
-            printf 'version=%s\n' "$version"
-          } >>"$GITHUB_OUTPUT"
+          tag="v${version}"
+          emit_candidate
 
   prepare:
     needs: candidate

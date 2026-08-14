@@ -653,15 +653,35 @@ jobs:
 
           source_version="$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" infrastructure/application/main.bicep)"
           arm_version="$(jq -r '.parameters.targetVersion.defaultValue' infrastructure/application/azuredeploy.json)"
-          if [ "$source_version" = "$VERSION" ] && [ "$arm_version" = "$VERSION" ]; then
+          mapfile -t readme_images < <(
+            grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' README.md || true
+          )
+          [ "${#readme_images[@]}" -eq 1 ] || {
+            printf 'README must contain one stable Azure Argus image, found %s\n' \
+              "${#readme_images[@]}" >&2
+            exit 1
+          }
+          readme_image="${readme_images[0]}"
+          readme_version="${readme_image##*:}"
+          if [ "$source_version" = "$VERSION" ] && [ "$arm_version" = "$VERSION" ] &&
+            [ "$readme_version" = "$VERSION" ]; then
             echo 'current=true' >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          [ "$source_version" = "$arm_version" ] || {
-            printf 'public template versions disagree: %s %s\n' "$source_version" "$arm_version" >&2
+          [ "$source_version" = "$arm_version" ] && [ "$source_version" = "$readme_version" ] || {
+            printf 'public template versions disagree: %s %s %s\n' \
+              "$source_version" "$arm_version" "$readme_version" >&2
             exit 1
           }
 
+          old_image="ghcr.io/visorian/azureargus:${source_version}"
+          [ "$readme_image" = "$old_image" ] || {
+            printf 'README image %s does not match public template %s\n' \
+              "$readme_image" "$old_image" >&2
+            exit 1
+          }
+          old_image_pattern="${old_image//./\\.}"
+          sed -i "s|${old_image_pattern}|ghcr.io/visorian/azureargus:${VERSION}|" README.md
           sed -i "s/^param targetVersion string = '[^']*'$/param targetVersion string = '${VERSION}'/" \
             infrastructure/application/main.bicep
           bicep="$RUNNER_TEMP/bicep"
@@ -702,51 +722,60 @@ jobs:
           if existing="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" 2>/dev/null)"; then
             branch_sha="$(jq -r '.object.sha' <<<"$existing")"
             if [ "$branch_sha" != "$MAIN_SHA" ]; then
-              gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/main.bicep?ref=${branch}" \
-                --jq .content | base64 --decode >"$RUNNER_TEMP/branch-main.bicep"
-              gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=${branch}" \
-                --jq .content | base64 --decode >"$RUNNER_TEMP/branch-azuredeploy.json"
-              if ! cmp infrastructure/application/main.bicep "$RUNNER_TEMP/branch-main.bicep" ||
-                ! cmp infrastructure/application/azuredeploy.json "$RUNNER_TEMP/branch-azuredeploy.json"; then
-                printf 'template branch %s contains different content\n' "$branch" >&2
-                exit 1
+              relation="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${branch_sha}...${MAIN_SHA}")"
+              if [ "$(jq -r '.status' <<<"$relation")" = 'ahead' ] &&
+                [ "$(jq -r '.merge_base_commit.sha' <<<"$relation")" = "$branch_sha" ]; then
+                gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
+                  -f sha="$MAIN_SHA" -F force=false >/dev/null
+              else
+                gh api "repos/${GITHUB_REPOSITORY}/contents/README.md?ref=${branch}" \
+                  --jq .content | base64 --decode >"$RUNNER_TEMP/branch-README.md"
+                gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/main.bicep?ref=${branch}" \
+                  --jq .content | base64 --decode >"$RUNNER_TEMP/branch-main.bicep"
+                gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=${branch}" \
+                  --jq .content | base64 --decode >"$RUNNER_TEMP/branch-azuredeploy.json"
+                if ! cmp README.md "$RUNNER_TEMP/branch-README.md" ||
+                  ! cmp infrastructure/application/main.bicep "$RUNNER_TEMP/branch-main.bicep" ||
+                  ! cmp infrastructure/application/azuredeploy.json "$RUNNER_TEMP/branch-azuredeploy.json"; then
+                  printf 'template branch %s contains different content\n' "$branch" >&2
+                  exit 1
+                fi
+                verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch_sha}" --jq .commit.verification.verified)"
+                author="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch_sha}" --jq .author.login)"
+                [ "$verified" = 'true' ] && [ "$author" = 'azureargus-release[bot]' ] || {
+                  printf 'template branch %s is not a verified release-app commit\n' "$branch" >&2
+                  exit 1
+                }
+                files="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${MAIN_SHA}...${branch}" \
+                  --jq '[.files[].filename] | sort')"
+                expected='["README.md","infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
+                [ "$files" = "$expected" ] || {
+                  printf 'template branch %s changes unexpected files: %s\n' "$branch" "$files" >&2
+                  exit 1
+                }
+                printf 'branch=%s\ncommit=%s\n' "$branch" "$branch_sha" >>"$GITHUB_OUTPUT"
+                exit 0
               fi
-              verified="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch_sha}" --jq .commit.verification.verified)"
-              author="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${branch_sha}" --jq .author.login)"
-              [ "$verified" = 'true' ] && [ "$author" = 'azureargus-release[bot]' ] || {
-                printf 'template branch %s is not a verified release-app commit\n' "$branch" >&2
-                exit 1
-              }
-              files="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${MAIN_SHA}...${branch}" \
-                --jq '[.files[].filename] | sort')"
-              expected='["infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
-              [ "$files" = "$expected" ] || {
-                printf 'template branch %s changes unexpected files: %s\n' "$branch" "$files" >&2
-                exit 1
-              }
-              printf 'branch=%s\ncommit=%s\n' "$branch" "$branch_sha" >>"$GITHUB_OUTPUT"
-              exit 0
             fi
           else
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
               -f ref="refs/heads/${branch}" -f sha="$MAIN_SHA" >/dev/null
           fi
 
-          additions="$(jq -n \
-            --arg bicep "$(base64 -w0 infrastructure/application/main.bicep)" \
-            --arg arm "$(base64 -w0 infrastructure/application/azuredeploy.json)" \
-            '[
-              {path: "infrastructure/application/main.bicep", contents: $bicep},
-              {path: "infrastructure/application/azuredeploy.json", contents: $arm}
-            ]')"
           variables="$(jq -n \
+            --rawfile readme README.md \
+            --rawfile bicep infrastructure/application/main.bicep \
+            --rawfile arm infrastructure/application/azuredeploy.json \
             --arg branch "$branch" --arg head "$MAIN_SHA" --arg repo "$GITHUB_REPOSITORY" \
-            --argjson additions "$additions" \
             '{input: {
               branch: {repositoryNameWithOwner: $repo, refName: $branch},
               expectedHeadOid: $head,
               message: {headline: "chore(release): update public template"},
-              fileChanges: {additions: $additions}
+              fileChanges: {additions: [
+                {path: "README.md", contents: ($readme | @base64)},
+                {path: "infrastructure/application/main.bicep", contents: ($bicep | @base64)},
+                {path: "infrastructure/application/azuredeploy.json", contents: ($arm | @base64)}
+              ]}
             }}')"
           result="$(gh api graphql \
             -f query="mutation(\$input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: \$input) { commit { oid } } }" \
@@ -791,9 +820,9 @@ jobs:
             [ "$(jq -r '.headRefOid' <<<"$pull")" = "$EXPECTED_COMMIT" ] || {
               printf 'template pull request does not match expected branch and commit\n' >&2
               exit 1
-            }
+          }
           files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${number}/files" --jq '[.[].filename] | sort')"
-          expected='["infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
+          expected='["README.md","infrastructure/application/azuredeploy.json","infrastructure/application/main.bicep"]'
           [ "$files" = "$expected" ] || {
             printf 'template pull request changes unexpected files: %s\n' "$files" >&2
             exit 1
@@ -883,8 +912,20 @@ jobs:
             gh api "repos/${GITHUB_REPOSITORY}/contents/infrastructure/application/azuredeploy.json?ref=main" \
               --jq .content | base64 --decode
           )"
+          readme="$(
+            gh api "repos/${GITHUB_REPOSITORY}/contents/README.md?ref=main" \
+              --jq .content | base64 --decode
+          )"
           [ "$(sed -n "s/^param targetVersion string = '\([^']*\)'$/\1/p" <<<"$bicep")" = "$VERSION" ]
           [ "$(jq -r '.parameters.targetVersion.defaultValue' <<<"$arm")" = "$VERSION" ]
+          mapfile -t readme_images < <(
+            grep -Eo 'ghcr.io/visorian/azureargus:[0-9]+\.[0-9]+\.[0-9]+' <<<"$readme" || true
+          )
+          [ "${#readme_images[@]}" -eq 1 ] &&
+            [ "${readme_images[0]}" = "ghcr.io/visorian/azureargus:${VERSION}" ] || {
+              printf 'README does not contain exact released image %s\n' "$VERSION" >&2
+              exit 1
+            }
           {
             printf '## Azure Argus %s\n\n' "$TAG"
             printf -- "- Commit: \`%s\`\n" "$SHA"
