@@ -165,7 +165,7 @@ jobs:
           }
           reviews="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${candidate_number}/reviews")"
           jq -e --arg head "$candidate_head" \
-            'any(.[]; .user.login == "copilot-pull-request-reviewer" and .commit_id == $head)' \
+            'any(.[]; .user.login == "copilot-pull-request-reviewer[bot]" and .commit_id == $head)' \
             <<<"$reviews" >/dev/null || {
               printf 'release pull request lacks Copilot review for %s\n' "$candidate_head" >&2
               exit 1
@@ -801,7 +801,7 @@ jobs:
 
           for attempt in $(seq 1 36); do
             reviewed="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --jq \
-              "any(.[]; .user.login == \"copilot-pull-request-reviewer\" and .commit_id == \"${HEAD_SHA}\")")"
+              "any(.[]; .user.login == \"copilot-pull-request-reviewer[bot]\" and .commit_id == \"${HEAD_SHA}\")")"
             [ "$reviewed" = 'true' ] && exit 0
             [ "$attempt" -eq 36 ] || sleep 10
           done
