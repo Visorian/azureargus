@@ -229,13 +229,24 @@ jobs:
           app_url="$(jq -er '.properties.outputs.applicationUrl.value' "$result")"
           environment_id="$(jq -er '.properties.outputs.environmentResourceId.value' "$result")"
           expected_image="ghcr.io/visorian/azureargus:${VERSION}"
+          image=''
           revision=''
           for attempt in $(seq 1 18); do
             app="$(az resource show --ids "$app_id" --api-version 2026-01-01 --output json)"
-            image="$(jq -r '.properties.template.containers[] | select(.name == "azureargus") | .image' \
-              <<<"$app")"
-            revision="$(jq -r '.properties.latestReadyRevisionName // empty' <<<"$app")"
-            [ "$image" = "$expected_image" ] && [ -n "$revision" ] && break
+            latest="$(jq -r '.properties.latestRevisionName // empty' <<<"$app")"
+            ready="$(jq -r '.properties.latestReadyRevisionName // empty' <<<"$app")"
+            if [ -n "$latest" ] && [ "$ready" = "$latest" ]; then
+              revision_resource="$(az rest --method get \
+                --url "https://management.azure.com${app_id}/revisions/${latest}?api-version=2026-01-01" \
+                --output json)"
+              image="$(jq -r '.properties.template.containers[] \
+                | select(.name == "azureargus") | .image' <<<"$revision_resource")"
+              if [ "$(jq -r .name <<<"$revision_resource")" = "$latest" ] && \
+                [ "$image" = "$expected_image" ]; then
+                revision="$latest"
+                break
+              fi
+            fi
             [ "$attempt" -eq 18 ] || sleep 10
           done
           [ "$image" = "$expected_image" ] && [ -n "$revision" ] || {
