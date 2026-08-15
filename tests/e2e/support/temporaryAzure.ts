@@ -188,8 +188,11 @@ export async function mockTemporaryAzure(page: Page) {
       const scope = body.get("scope") ?? "";
       const code = body.get("code");
       const now = Math.floor(Date.now() / 1_000);
+      const scopes = new Set(scope.split(" "));
       const response: Record<string, unknown> = {
-        access_token: scope.includes("api.loganalytics.io") ? logAnalyticsToken : managementToken,
+        access_token: scopes.has("https://api.loganalytics.io/Data.Read")
+          ? logAnalyticsToken
+          : managementToken,
         client_info: encode({ uid: "temporary-user", utid: temporaryAzureTenantId }),
         expires_in: 3_600,
         ext_expires_in: 3_600,
