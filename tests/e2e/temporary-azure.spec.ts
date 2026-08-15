@@ -64,15 +64,33 @@ test("temporary Azure flows stay browser-direct", async ({ page }) => {
       (request) => request.authorization === `Bearer ${temporaryAzureTokens.management}`,
     ),
   ).toBe(true);
-  expect(logAnalyticsRequests.length).toBeGreaterThanOrEqual(20);
+  expect(new Set(logAnalyticsRequests.map((request) => request.pathname))).toEqual(
+    new Set([`/v1/workspaces/${temporaryAzureWorkspaceId}/query`]),
+  );
   expect(
     logAnalyticsRequests.every(
       (request) => request.authorization === `Bearer ${temporaryAzureTokens.logAnalytics}`,
     ),
   ).toBe(true);
+  expect(new Set(traffic.externalRequests.map((request) => request.origin))).toEqual(
+    new Set([
+      "https://api.iconify.design",
+      "https://api.loganalytics.azure.com",
+      "https://login.microsoftonline.com",
+      "https://management.azure.com",
+    ]),
+  );
+  expect(
+    traffic.externalRequests
+      .filter((request) => request.origin === "https://api.iconify.design")
+      .every(
+        (request) =>
+          request.authorization === null && request.body === null && request.method === "GET",
+      ),
+  ).toBe(true);
   expect(
     traffic.sameOriginRequests.filter((request) =>
-      request.pathname.startsWith("/api/log-analytics/delegated-"),
+      request.pathname.startsWith("/api/log-analytics/"),
     ),
   ).toEqual([]);
   expect(traffic.sameOriginRequests.every((request) => request.authorization === null)).toBe(true);

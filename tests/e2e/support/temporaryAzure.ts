@@ -133,6 +133,7 @@ function record(request: Request): TemporaryAzureRequest {
 
 export async function mockTemporaryAzure(page: Page) {
   const azureRequests: TemporaryAzureRequest[] = [];
+  const externalRequests: TemporaryAzureRequest[] = [];
   const sameOriginRequests: TemporaryAzureRequest[] = [];
   const nonces = new Map<string, string>();
   let authorizationCode = 0;
@@ -142,6 +143,8 @@ export async function mockTemporaryAzure(page: Page) {
     const url = new URL(request.url());
     if (url.hostname === "127.0.0.1" || url.hostname === "localhost") {
       sameOriginRequests.push(record(request));
+    } else {
+      externalRequests.push(record(request));
     }
   });
 
@@ -349,7 +352,7 @@ export async function mockTemporaryAzure(page: Page) {
     await route.fulfill({ headers: { "access-control-allow-origin": "*" }, json: response });
   });
 
-  return { azureRequests, sameOriginRequests };
+  return { azureRequests, externalRequests, sameOriginRequests };
 }
 
 export const temporaryAzureTokens = {
