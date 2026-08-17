@@ -4,12 +4,7 @@ import { Socket } from "node:net";
 import { createEvent, type H3Event } from "h3";
 import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.js";
 
-import type {
-  DelegatedDnsDetailQueryRequest,
-  DelegatedDnsListQueryRequest,
-  DnsDetailQueryRequest,
-  DnsListQueryRequest,
-} from "../../shared/types/dns";
+import type { DnsDetailQueryRequest, DnsListQueryRequest } from "../../shared/types/dns";
 import {
   executeDnsDetailQuery,
   executeDnsListQuery,
@@ -48,13 +43,6 @@ const oidc = {
     },
   },
 };
-const delegatedConfig = {
-  public: {
-    logAnalyticsDelegated: {
-      clientId: "55555555-5555-4555-8555-555555555555",
-    },
-  },
-};
 const resourceId =
   "/subscriptions/77777777-7777-4777-8777-777777777777/resourceGroups/network/providers/Microsoft.Network/azureFirewalls/hub";
 
@@ -62,9 +50,6 @@ let runtimeConfig: Record<string, unknown>;
 let managedDetailHandler: (event: H3Event) => Promise<unknown>;
 let managedListHandler: (event: H3Event) => Promise<unknown>;
 let managedReadinessHandler: (event: H3Event) => Promise<unknown>;
-let delegatedDetailHandler: (event: H3Event) => Promise<unknown>;
-let delegatedListHandler: (event: H3Event) => Promise<unknown>;
-let delegatedReadinessHandler: (event: H3Event) => Promise<unknown>;
 
 function createListRequest(): DnsListQueryRequest {
   return {
@@ -83,9 +68,8 @@ function createListRequest(): DnsListQueryRequest {
   };
 }
 
-function createDelegatedDetailRequest(): DelegatedDnsDetailQueryRequest {
+function createManagedDetailRequest(): DnsDetailQueryRequest {
   return {
-    workspaceId: "88888888-8888-4888-8888-888888888888",
     selector: {
       source: "proxy-structured",
       resourceId,
@@ -98,15 +82,9 @@ function createDelegatedDetailRequest(): DelegatedDnsDetailQueryRequest {
   };
 }
 
-function createManagedDetailRequest(): DnsDetailQueryRequest {
-  const { workspaceId: _workspaceId, ...request } = createDelegatedDetailRequest();
-  return request;
-}
-
-function createTestEvent(body?: unknown, authorization?: string) {
+function createTestEvent(body?: unknown) {
   const request = new IncomingMessage(new Socket());
   const response = new ServerResponse(request);
-  if (authorization !== undefined) request.headers.authorization = authorization;
   if (body !== undefined) {
     const payload = JSON.stringify(body);
     request.method = "POST";
@@ -128,14 +106,6 @@ beforeAll(async () => {
   managedListHandler = (await import("../../server/api/log-analytics/dns/list.post")).default;
   managedReadinessHandler = (await import("../../server/api/log-analytics/dns/readiness.get"))
     .default;
-  delegatedDetailHandler = (
-    await import("../../server/api/log-analytics/delegated-dns/detail.post")
-  ).default;
-  delegatedListHandler = (await import("../../server/api/log-analytics/delegated-dns/list.post"))
-    .default;
-  delegatedReadinessHandler = (
-    await import("../../server/api/log-analytics/delegated-dns/readiness.post")
-  ).default;
 });
 
 afterAll(() => {
@@ -267,132 +237,6 @@ describe("managed DNS detail route", () => {
 
     await expect(
       managedDetailHandler(createTestEvent({ ...request, workspaceId: "caller-controlled" })),
-    ).rejects.toMatchObject({ statusCode: 400 });
-  });
-});
-
-describe("delegated DNS list route", () => {
-  it("uses bearer token and strips validated caller workspace from query body", async () => {
-    runtimeConfig = delegatedConfig;
-    const request: DelegatedDnsListQueryRequest = {
-      ...createListRequest(),
-      workspaceId: "88888888-8888-4888-8888-888888888888",
-    };
-
-    await expect(
-      delegatedListHandler(createTestEvent(request, "Bearer delegated-token")),
-    ).resolves.toMatchObject({ queriedEntries: [] });
-
-    const { workspaceId, ...queryRequest } = request;
-    expect(executeDnsListQuery).toHaveBeenCalledWith(
-      { workspaceId },
-      queryRequest,
-      "delegated-token",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled();
-  });
-
-  it("rejects missing bearer token and invalid workspace", async () => {
-    runtimeConfig = delegatedConfig;
-    const request = {
-      ...createListRequest(),
-      workspaceId: "88888888-8888-4888-8888-888888888888",
-    };
-
-    await expect(delegatedListHandler(createTestEvent(request))).rejects.toMatchObject({
-      statusCode: 401,
-    });
-    await expect(
-      delegatedListHandler(
-        createTestEvent({ ...request, workspaceId: "not-a-workspace" }, "Bearer delegated-token"),
-      ),
-    ).rejects.toMatchObject({ statusCode: 400 });
-    await expect(
-      delegatedListHandler(
-        createTestEvent({ ...request, storage: "both" }, "Bearer delegated-token"),
-      ),
-    ).rejects.toMatchObject({ statusCode: 400 });
-    expect(executeDnsListQuery).not.toHaveBeenCalled();
-  });
-});
-
-describe("delegated DNS detail route", () => {
-  it("uses bearer token and validated caller workspace without forwarding workspace in body", async () => {
-    runtimeConfig = delegatedConfig;
-    const request = createDelegatedDetailRequest();
-
-    await expect(
-      delegatedDetailHandler(createTestEvent(request, "Bearer delegated-token")),
-    ).resolves.toMatchObject({ observations: [] });
-
-    const { workspaceId, ...detailRequest } = request;
-    expect(executeDnsDetailQuery).toHaveBeenCalledWith(
-      { workspaceId },
-      detailRequest,
-      "delegated-token",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled();
-  });
-
-  it("rejects missing bearer token and invalid delegated contracts", async () => {
-    runtimeConfig = delegatedConfig;
-
-    await expect(
-      delegatedDetailHandler(createTestEvent(createDelegatedDetailRequest())),
-    ).rejects.toMatchObject({ statusCode: 401 });
-    await expect(
-      delegatedDetailHandler(
-        createTestEvent(
-          { ...createDelegatedDetailRequest(), workspaceId: "not-a-workspace" },
-          "Bearer delegated-token",
-        ),
-      ),
-    ).rejects.toMatchObject({ statusCode: 400 });
-    expect(executeDnsDetailQuery).not.toHaveBeenCalled();
-  });
-
-  it("rejects delegated detail outside anonymous delegated capability", async () => {
-    runtimeConfig = { logAnalytics: managedConfig, oidc };
-
-    await expect(
-      delegatedDetailHandler(
-        createTestEvent(createDelegatedDetailRequest(), "Bearer delegated-token"),
-      ),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    expect(executeDnsDetailQuery).not.toHaveBeenCalled();
-  });
-});
-
-describe("delegated DNS readiness route", () => {
-  it("uses bearer token and exact caller workspace", async () => {
-    runtimeConfig = delegatedConfig;
-    const request = { workspaceId: "88888888-8888-4888-8888-888888888888" };
-
-    await expect(
-      delegatedReadinessHandler(createTestEvent(request, "Bearer delegated-token")),
-    ).resolves.toEqual({ readiness: [] });
-
-    expect(executeDnsReadinessQuery).toHaveBeenCalledWith(
-      request,
-      "delegated-token",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-  });
-
-  it("rejects missing bearer token and invalid workspace", async () => {
-    runtimeConfig = delegatedConfig;
-
-    await expect(
-      delegatedReadinessHandler(
-        createTestEvent({ workspaceId: "88888888-8888-4888-8888-888888888888" }),
-      ),
-    ).rejects.toMatchObject({ statusCode: 401 });
-    await expect(
-      delegatedReadinessHandler(
-        createTestEvent({ workspaceId: "not-a-workspace" }, "Bearer delegated-token"),
-      ),
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 });

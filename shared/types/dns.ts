@@ -168,20 +168,8 @@ export interface DnsListQueryRequest {
   storage: LogAnalyticsStorageKind;
 }
 
-export interface DelegatedDnsListQueryRequest extends DnsListQueryRequest {
-  workspaceId: string;
-}
-
-export interface DelegatedDnsReadinessRequest {
-  workspaceId: string;
-}
-
 export interface DnsDetailQueryRequest {
   selector: DnsDetailSelector;
-}
-
-export interface DelegatedDnsDetailQueryRequest extends DnsDetailQueryRequest {
-  workspaceId: string;
 }
 
 export interface DnsSourceStatus {

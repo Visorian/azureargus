@@ -9,6 +9,20 @@ import {
 
 const readinessSummary = /Dedicated tables 7\/7 available/;
 const temporaryFirewallRow = /AZFWNetworkRule.*10\.0\.0\.4.*10\.0\.0\.53/;
+const removedDelegatedRoutes = [
+  { method: "GET", path: "/api/log-analytics/delegated-access" },
+  { method: "POST", path: "/api/log-analytics/delegated-query" },
+  { method: "POST", path: "/api/log-analytics/delegated-dns/readiness" },
+  { method: "POST", path: "/api/log-analytics/delegated-dns/list" },
+  { method: "POST", path: "/api/log-analytics/delegated-dns/detail" },
+] as const;
+
+test("removed delegated Log Analytics routes return 404", async ({ request }) => {
+  for (const route of removedDelegatedRoutes) {
+    const response = await request.fetch(route.path, { method: route.method });
+    expect(response.status(), route.path).toBe(404);
+  }
+});
 
 test("temporary Azure flows stay browser-direct", async ({ page }) => {
   const traffic = await mockTemporaryAzure(page);

@@ -12,9 +12,6 @@ import {
   executeDnsDetailQuery,
   executeDnsListQuery,
   executeDnsReadinessQuery,
-  validateDelegatedDnsDetailQueryRequest,
-  validateDelegatedDnsListQueryRequest,
-  validateDelegatedDnsReadinessRequest,
   validateDnsDetailQueryRequest,
   validateDnsListQueryRequest,
 } from "../../shared/utils/dnsLogAnalyticsQuery";
@@ -119,19 +116,6 @@ describe("DNS Log Analytics request contracts", () => {
     ).toBe(false);
   });
 
-  it("allows only a strict UUID workspace on delegated list requests", () => {
-    const request = createListRequest();
-
-    expect(validateDelegatedDnsListQueryRequest({ ...request, workspaceId })).toBe(true);
-    expect(validateDelegatedDnsListQueryRequest(request)).toBe(false);
-    expect(
-      validateDelegatedDnsListQueryRequest({ ...request, workspaceId: "caller-workspace" }),
-    ).toBe(false);
-    expect(
-      validateDelegatedDnsListQueryRequest({ ...request, workspaceId, query: "take 100" }),
-    ).toBe(false);
-  });
-
   it.each([99, 5_001, 1_000.5, Number.NaN])("rejects invalid list limit %s", (limit) => {
     expect(validateDnsListQueryRequest({ ...createListRequest(), limit })).toBe(false);
   });
@@ -200,22 +184,6 @@ describe("DNS Log Analytics request contracts", () => {
         },
       }),
     ).toBe(false);
-  });
-
-  it("requires workspace only on delegated detail requests", () => {
-    const request = createDetailRequest();
-
-    expect(validateDelegatedDnsDetailQueryRequest({ ...request, workspaceId })).toBe(true);
-    expect(validateDelegatedDnsDetailQueryRequest(request)).toBe(false);
-    expect(validateDelegatedDnsDetailQueryRequest({ ...request, workspaceId, limit: 10_000 })).toBe(
-      false,
-    );
-  });
-
-  it("accepts only an exact delegated readiness workspace", () => {
-    expect(validateDelegatedDnsReadinessRequest({ workspaceId })).toBe(true);
-    expect(validateDelegatedDnsReadinessRequest({ workspaceId, query: "take 100" })).toBe(false);
-    expect(validateDelegatedDnsReadinessRequest({ workspaceId: "not-a-workspace" })).toBe(false);
   });
 });
 

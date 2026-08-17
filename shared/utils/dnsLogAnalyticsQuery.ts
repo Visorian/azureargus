@@ -1,7 +1,4 @@
 import type {
-  DelegatedDnsDetailQueryRequest,
-  DelegatedDnsListQueryRequest,
-  DelegatedDnsReadinessRequest,
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
   DnsDetailSelector,
@@ -27,7 +24,6 @@ import { isLogAnalyticsQueryLimit } from "./logAnalytics";
 import {
   encodeKqlStringLiteral,
   executeLogAnalyticsRawQuery,
-  isLogAnalyticsWorkspaceId,
   LogAnalyticsQueryError,
   type ExecuteLogAnalyticsQueryOptions,
   type LogAnalyticsQueryTarget,
@@ -136,29 +132,6 @@ export function validateDnsListQueryRequest(value: unknown): value is DnsListQue
   );
 }
 
-export function validateDelegatedDnsListQueryRequest(
-  value: unknown,
-): value is DelegatedDnsListQueryRequest {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit", "storage"])
-  ) {
-    return false;
-  }
-  const { workspaceId, ...request } = value;
-  return isLogAnalyticsWorkspaceId(workspaceId) && validateDnsListQueryRequest(request);
-}
-
-export function validateDelegatedDnsReadinessRequest(
-  value: unknown,
-): value is DelegatedDnsReadinessRequest {
-  return (
-    isRecord(value) &&
-    hasExactKeys(value, ["workspaceId"]) &&
-    isLogAnalyticsWorkspaceId(value.workspaceId)
-  );
-}
-
 function isDetailSelector(value: unknown): value is DnsDetailSelector {
   if (
     !isRecord(value) ||
@@ -252,17 +225,6 @@ function isDetailSelector(value: unknown): value is DnsDetailSelector {
 
 export function validateDnsDetailQueryRequest(value: unknown): value is DnsDetailQueryRequest {
   return isRecord(value) && hasExactKeys(value, ["selector"]) && isDetailSelector(value.selector);
-}
-
-export function validateDelegatedDnsDetailQueryRequest(
-  value: unknown,
-): value is DelegatedDnsDetailQueryRequest {
-  return (
-    isRecord(value) &&
-    hasExactKeys(value, ["workspaceId", "selector"]) &&
-    isLogAnalyticsWorkspaceId(value.workspaceId) &&
-    isDetailSelector(value.selector)
-  );
 }
 
 function filterClauses(
