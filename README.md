@@ -214,6 +214,13 @@ delegated Log Analytics access. No environment variables are required for Event 
 Public hosted instance already runs in temporary mode. Self-hosters can use same Event Hub flow and
 optionally [enable delegated Log Analytics](#enable-delegated-log-analytics-for-self-hosted-instance).
 
+In temporary mode, browser sends Azure discovery directly to `management.azure.com` and Log
+Analytics queries directly to `api.loganalytics.azure.com`. Azure Argus server has no temporary Log
+Analytics proxy and does not receive delegated tokens, workspace metadata, generated queries, or
+complete query responses. Two same-origin boundaries remain: Entra admin-consent responses can put
+tenant ID, consent status, or error metadata in hosting access logs, and destination IPs are submitted
+individually to `/api/ip-country` for country lookup.
+
 #### Use delegated Log Analytics as an operator
 
 Before connecting:
@@ -249,7 +256,9 @@ opener context. Users still need [tenant consent and workspace access](#use-dele
 ### Managed mode
 
 Managed mode fixes data sources at deployment, requires Azure Argus login, and removes user-provided
-source credentials. Configure at least one complete fixed-source group plus all login values.
+source credentials. Log Analytics requests use authenticated server routes with fixed workspace and
+service-principal credentials. Configure at least one complete fixed-source group plus all login
+values.
 
 #### Configure application login
 

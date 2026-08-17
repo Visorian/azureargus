@@ -1,8 +1,7 @@
-import { createError, getHeader, setResponseHeader, type H3Event } from "h3";
+import { createError, setResponseHeader, type H3Event } from "h3";
 
 import { LogAnalyticsConfigurationError, LogAnalyticsTokenError } from "./logAnalyticsAuth";
 
-const BEARER_AUTHORIZATION_PATTERN = /^Bearer ([^\s]+)$/;
 import { LogAnalyticsQueryError } from "../../shared/utils/logAnalyticsQuery";
 
 export function createIncomingRequestSignal(event: H3Event) {
@@ -31,23 +30,6 @@ export function createIncomingRequestSignal(event: H3Event) {
       event.node.res.off("close", abortOnClosedResponse);
     },
   };
-}
-
-export function readBearerToken(event: H3Event, missingMessage: string) {
-  const authorization = getHeader(event, "authorization");
-  const match = authorization?.match(BEARER_AUTHORIZATION_PATTERN);
-  const token = match?.[1];
-  if (!token) {
-    throw createError({
-      statusCode: 401,
-      message: missingMessage,
-    });
-  }
-  return token;
-}
-
-export function readDelegatedLogAnalyticsBearerToken(event: H3Event) {
-  return readBearerToken(event, "Delegated Log Analytics access token is required");
 }
 
 function throwThrottledError(event: H3Event, retryAfterSeconds?: number): never {

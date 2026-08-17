@@ -1,7 +1,6 @@
 import type { FirewallLogRecord } from "../types/firewall";
 
 import type {
-  DelegatedLogAnalyticsQueryRequest,
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
   LogAnalyticsSort,
@@ -377,20 +376,6 @@ export function validateLogAnalyticsQueryRequest(
   const from = Date.parse(value.from);
   const to = Date.parse(value.to);
   return from < to && to - from <= MAX_RANGE_MS;
-}
-
-export function validateDelegatedLogAnalyticsQueryRequest(
-  value: unknown,
-): value is DelegatedLogAnalyticsQueryRequest {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, ["workspaceId", "from", "to", "filters", "limit", "storage", "sort"])
-  ) {
-    return false;
-  }
-
-  const { workspaceId, ...request } = value;
-  return isLogAnalyticsWorkspaceId(workspaceId) && validateLogAnalyticsQueryRequest(request);
 }
 
 export function encodeKqlStringLiteral(value: string) {
