@@ -9,7 +9,7 @@ param delegatedClientId string = ''
 @minLength(5)
 @maxLength(70)
 @description('Optional. Stable Azure Argus container version in X.Y.Z form.')
-param targetVersion string = '0.3.1'
+param targetVersion string = '0.3.2'
 
 @description('Optional. Managed Environment name. A deployment-specific name is generated when empty.')
 param managedEnvironmentName string = ''
