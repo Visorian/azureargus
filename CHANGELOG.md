@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.3.2](https://github.com/Visorian/azureargus/compare/v0.3.1...v0.3.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **frontend:** isolate authentication redirect title ([#50](https://github.com/Visorian/azureargus/issues/50)) ([c2e181d](https://github.com/Visorian/azureargus/commit/c2e181d9eb01e464475d181f49d134cfd3c76584))
+
 ## [0.3.1](https://github.com/Visorian/azureargus/compare/v0.3.0...v0.3.1) (2026-08-17)
 
 
