@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [0.3.1](https://github.com/Visorian/azureargus/compare/v0.3.0...v0.3.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **ci:** parse deployed revision image ([#43](https://github.com/Visorian/azureargus/issues/43)) ([a334fe2](https://github.com/Visorian/azureargus/commit/a334fe27f887995dab92d7e485cacd1c0d8d060b))
+* **frontend:** remove delegated server routes ([9d8ffe6](https://github.com/Visorian/azureargus/commit/9d8ffe69581c5481c76d4e646865c41c7306f98c))
+
 ## [0.3.0](https://github.com/Visorian/azureargus/compare/v0.2.0...v0.3.0) (2026-08-14)
 
 
