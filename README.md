@@ -312,7 +312,7 @@ Hub authentication. Connection-string-free managed Event Hub setup is unavailabl
 ### Application deployment
 
 Application template deploys public temporary-mode Azure Argus to Azure Container Apps using stable
-version image `ghcr.io/visorian/azureargus:0.3.0` by default. `targetVersion` can select another stable
+version image `ghcr.io/visorian/azureargus:0.3.1` by default. `targetVersion` can select another stable
 release. Published release metadata records image digest as immutable release identity.
 
 Application uses HTTPS ingress, scales from zero to one replica, and stores no Event Hub credential or
