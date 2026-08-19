@@ -33,6 +33,22 @@ function createMsalRedirectBridgePlugin(): Plugin {
         fileName: "_nuxt/log-analytics-redirect.js",
       });
     },
+    generateBundle(_options, bundle) {
+      const bridgeChunk = bundle[MSAL_REDIRECT_ASSET_PATH.slice(1)];
+      if (bridgeChunk?.type !== "chunk") {
+        this.error("MSAL redirect bridge chunk was not generated");
+      }
+      // Nuxt injects emitted entry chunks into every SPA page, so retain the
+      // bundled file while removing its application-entry semantics.
+      delete bundle[bridgeChunk.fileName];
+      this.emitFile({
+        type: "prebuilt-chunk",
+        fileName: bridgeChunk.fileName,
+        code: bridgeChunk.code,
+        map: bridgeChunk.map ?? undefined,
+        isEntry: false,
+      });
+    },
     resolveId(id) {
       return id === MSAL_REDIRECT_MODULE_ID ? RESOLVED_MSAL_REDIRECT_MODULE_ID : null;
     },
@@ -69,6 +85,11 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: false },
   css: ["~/assets/css/main.css"],
+  app: {
+    head: {
+      title: "Azure Argus",
+    },
+  },
   compatibilityDate: "2026-07-09",
   appConfig: {
     versionNumber: process.env.VERSION_NUMBER || process.env.npm_package_version || "dev",
