@@ -36,7 +36,7 @@ function createMsalRedirectBridgePlugin(): Plugin {
     generateBundle(_options, bundle) {
       const bridgeChunk = bundle[MSAL_REDIRECT_ASSET_PATH.slice(1)];
       if (bridgeChunk?.type !== "chunk") {
-        return;
+        this.error("MSAL redirect bridge chunk was not generated");
       }
       // Nuxt injects emitted entry chunks into every SPA page, so retain the
       // bundled file while removing its application-entry semantics.
