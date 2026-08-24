@@ -97,6 +97,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
   <UModal
     v-model:open="open"
     :title="modalTitle"
+    :description="`Times shown in ${timeZone}`"
     :ui="{
       content:
         'h-[min(46rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-5xl select-none sm:h-[min(46rem,calc(100dvh-4rem))]',

@@ -295,7 +295,7 @@ function completeness(value: DnsEntry["completeness"]) {
             :class="dnsEntryGridClass"
             data-testid="dns-entry-header"
           >
-            <span>Time</span>
+            <span>Time ({{ timeZone }})</span>
             <span>DNS name or message</span>
             <span>Type</span>
             <span>Protocol</span>

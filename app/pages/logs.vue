@@ -455,11 +455,11 @@ const logAppliedRangeLabel = computed(() => {
     return "";
   }
 
-  return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)}`;
+  return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)} (${logTimeZone.value})`;
 });
 const dnsAppliedRangeLabel = computed(() => {
   if (dns.appliedRange.value === null) return "";
-  return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)}`;
+  return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)} (${logTimeZone.value})`;
 });
 const activeAppliedRangeLabel = computed(() =>
   activeLens.value === "dns-troubleshooting"
@@ -1793,6 +1793,7 @@ function statusColor(status: string) {
       v-if="activeLens === 'all-logs'"
       v-model:open="detailOpen"
       title="Log detail"
+      :description="`Times shown in ${logTimeZone}`"
       :ui="{ content: 'select-none', body: 'select-none' }"
       @after:leave="clearClosedDetail"
     >

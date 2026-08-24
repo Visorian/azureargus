@@ -625,6 +625,7 @@ test.describe("time display preferences", () => {
 
     await page.getByRole("button", { name: "DNS troubleshooting" }).click();
     const dnsEntry = page.getByRole("button", { name: "Open DNS details for midnight.example." });
+    await expect(page.getByTestId("dns-entry-header").getByText("Time (UTC)")).toBeVisible();
     await expect(dnsEntry.locator("time")).toHaveText("00:09:24");
     await page.getByRole("button", { name: "All logs" }).click();
 
@@ -645,6 +646,9 @@ test.describe("time display preferences", () => {
     await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 05:09:24");
     await expect(midnightRow.locator("time")).toHaveText("Jul 20, 2026, 17:09:24");
     await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+    await expect(
+      page.getByTestId("dns-entry-header").getByText("Time (America/Los_Angeles)"),
+    ).toBeVisible();
     await expect(dnsEntry.locator("time")).toHaveText("17:09:24");
 
     const localSettings = await openSettings(page);
@@ -656,6 +660,7 @@ test.describe("time display preferences", () => {
     await expect(dnsEntry.locator("time")).toHaveText("05:09:24 PM");
     await dnsEntry.click();
     const dnsDialog = page.getByRole("dialog", { name: "DNS resolution detail" });
+    await expect(dnsDialog.getByText("Times shown in America/Los_Angeles")).toBeVisible();
     await expect(dnsDialog.locator("time").first()).toHaveText("Jul 20, 2026, 5:09:24 PM");
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "All logs" }).click();
@@ -667,6 +672,7 @@ test.describe("time display preferences", () => {
     );
     await noonRow.getByRole("cell").first().click();
     const logDialog = page.getByRole("dialog", { name: "Log detail" });
+    await expect(logDialog.getByText("Times shown in America/Los_Angeles")).toBeVisible();
     await expect(logDialog.getByText("Jul 21, 2026, 05:09:24 AM", { exact: true })).toBeVisible();
     await expect(logDialog.getByText("Jul 21, 2026, 05:09:25 AM", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
