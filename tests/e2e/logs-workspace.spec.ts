@@ -625,7 +625,12 @@ test.describe("time display preferences", () => {
 
     await page.getByRole("button", { name: "DNS troubleshooting" }).click();
     const dnsEntry = page.getByRole("button", { name: "Open DNS details for midnight.example." });
-    await expect(page.getByTestId("dns-entry-header").getByText("Time (UTC)")).toBeVisible();
+    const dnsTimeHeader = page.getByTestId("dns-entry-header").getByText("Time", { exact: true });
+    await expect(dnsTimeHeader).toBeVisible();
+    await expect(page.getByText("Times shown in UTC", { exact: true })).toBeVisible();
+    await expect
+      .poll(() => dnsTimeHeader.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .toBe(true);
     await expect(dnsEntry.locator("time")).toHaveText("00:09:24");
     await page.getByRole("button", { name: "All logs" }).click();
 
@@ -647,8 +652,9 @@ test.describe("time display preferences", () => {
     await expect(midnightRow.locator("time")).toHaveText("Jul 20, 2026, 17:09:24");
     await page.getByRole("button", { name: "DNS troubleshooting" }).click();
     await expect(
-      page.getByTestId("dns-entry-header").getByText("Time (America/Los_Angeles)"),
+      page.getByText("Times shown in America/Los_Angeles", { exact: true }),
     ).toBeVisible();
+    await expect(dnsTimeHeader).toBeVisible();
     await expect(dnsEntry.locator("time")).toHaveText("17:09:24");
 
     const localSettings = await openSettings(page);

@@ -279,7 +279,12 @@ function completeness(value: DnsEntry["completeness"]) {
           id="dns-entry-heading"
           class="flex shrink-0 items-center justify-between border-b border-brand-gray-200 px-3 py-2 text-sm font-semibold dark:border-brand-gray-700"
         >
-          <span>DNS activity</span>
+          <span class="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span>DNS activity</span>
+            <span class="text-xs font-normal text-brand-gray-600 dark:text-brand-gray-300">
+              Times shown in {{ timeZone }}
+            </span>
+          </span>
           <span class="flex items-center gap-2">
             <UBadge v-if="entriesTruncated" color="warning" variant="subtle">
               Entries truncated
@@ -295,7 +300,7 @@ function completeness(value: DnsEntry["completeness"]) {
             :class="dnsEntryGridClass"
             data-testid="dns-entry-header"
           >
-            <span>Time ({{ timeZone }})</span>
+            <span>Time</span>
             <span>DNS name or message</span>
             <span>Type</span>
             <span>Protocol</span>
