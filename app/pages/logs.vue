@@ -68,8 +68,17 @@ interface LogsEmptyState {
 type QuickFilterKey = "category" | "action" | "protocol" | "source" | "destination";
 type LogsLens = "all-logs" | "dns-troubleshooting";
 
-const logTableColumns: LogTableColumn[] = [
-  { key: "timestamp", label: "Date (UTC)" },
+const {
+  browserTimeZone: logBrowserTimeZone,
+  formatTimestamp: formatLogTimestamp,
+  hourCycle: logHourCycle,
+  lastError: logTimeFormatError,
+  timeZone: logTimeZone,
+  use12Hour: use12HourTime,
+  useLocalTime,
+} = useLogTimeFormat();
+const logTableColumns = computed<LogTableColumn[]>(() => [
+  { key: "timestamp", label: `Date (${logTimeZone.value})` },
   { key: "category", label: "Category" },
   { key: "action", label: "Action" },
   { key: "protocol", label: "Protocol" },
@@ -78,7 +87,7 @@ const logTableColumns: LogTableColumn[] = [
   { key: "destinationIp", label: "Destination" },
   { key: "destinationPort", label: "Dst port" },
   { key: "rule", label: "Rule" },
-];
+]);
 const quickFilterButtonClass =
   "inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100";
 
@@ -99,11 +108,6 @@ const versionNumber = appConfig.versionNumber as string;
 const activeLens = ref<LogsLens>("all-logs");
 const allLogsLensActive = computed(() => activeLens.value === "all-logs");
 const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive });
-const {
-  hourCycle: logHourCycle,
-  lastError: logTimeFormatError,
-  use12Hour: use12HourTime,
-} = useLogTimeFormat();
 const logTableGridClass = computed(() =>
   use12HourTime.value
     ? "grid-cols-[14rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]"
@@ -1008,12 +1012,7 @@ function closeSettingsFromEscape(event: KeyboardEvent) {
 }
 
 function formatTime(timestamp: string) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return timestamp;
-  }
-
-  return date.toISOString().replace("T", " ").replace(".000Z", "Z");
+  return formatLogTimestamp(timestamp);
 }
 
 function statusColor(status: string) {
@@ -1226,9 +1225,13 @@ function statusColor(status: string) {
             </div>
             <div class="mt-4 border-t border-brand-gray-200 pt-4 dark:border-brand-gray-800">
               <h2 class="text-sm font-semibold">Display settings</h2>
-              <USwitch v-model="use12HourTime" label="12-hour time" class="mt-3" />
+              <div class="mt-3 flex flex-wrap gap-x-6 gap-y-3">
+                <USwitch v-model="use12HourTime" label="12-hour time" />
+                <USwitch v-model="useLocalTime" label="Local time" />
+              </div>
               <p class="mt-1 text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                Off uses 24-hour time. Preference is stored in this browser.
+                Time format and zone are independent. Local time uses {{ logBrowserTimeZone }}; off
+                uses UTC. Preferences are stored in this browser.
               </p>
               <p
                 v-if="logTimeFormatError"
@@ -1316,6 +1319,7 @@ function statusColor(status: string) {
                   relative
                   relative-style="narrow"
                   numeric="always"
+                  :time-zone="logTimeZone"
                   :title="true"
                 />
               </UBadge>
@@ -1492,7 +1496,7 @@ function statusColor(status: string) {
                       hour="2-digit"
                       minute="2-digit"
                       second="2-digit"
-                      time-zone="UTC"
+                      :time-zone="logTimeZone"
                       :hour-cycle="logHourCycle"
                     />
                   </span>
@@ -1715,6 +1719,7 @@ function statusColor(status: string) {
                 relative
                 relative-style="narrow"
                 numeric="always"
+                :time-zone="logTimeZone"
                 :title="true"
               />
             </UBadge>
@@ -1747,6 +1752,7 @@ function statusColor(status: string) {
         </div>
         <LogsDnsTroubleshootingView
           :hour-cycle="logHourCycle"
+          :time-zone="logTimeZone"
           :filters="dns.filters.value"
           :sort="dns.sort.value"
           :entries="dns.entries.value"
@@ -1873,6 +1879,7 @@ function statusColor(status: string) {
     <LogsDnsDetailModal
       v-model:open="dnsDetailOpen"
       :hour-cycle="logHourCycle"
+      :time-zone="logTimeZone"
       :entry="dns.selectedEntry.value"
       :detail="dns.detail.value"
       :error="dns.detailError.value"

@@ -8,8 +8,6 @@ import {
   mockManagedEventHubStream,
 } from "./support/managedEventHub";
 
-const MERIDIEM_PATTERN = /AM|PM/;
-
 async function expectLeftInSameRow(left: Locator, right: Locator) {
   await expect(async () => {
     const [leftBox, rightBox] = await Promise.all([left.boundingBox(), right.boundingBox()]);
@@ -573,86 +571,132 @@ test("renders application-rule FQDN destinations and full category names", async
   }
 });
 
-test("time format setting controls rendered log and DNS timestamps", async ({ page }) => {
-  await startManagedEventHub(page);
-  const timeFormatEvents: ManagedEventHubStreamEnvelope = {
-    type: "events",
-    events: [
-      {
-        body: {
-          category: "AZFWNetworkRule",
-          properties: {
-            Action: "Allow",
-            DestinationIp: "20.30.40.50",
-            DestinationPort: 443,
-            msg: "noon-format-record",
-            Protocol: "TCP",
-            SourceIp: "10.140.16.133",
-            SourcePort: 15_213,
+test.describe("time display preferences", () => {
+  test.use({ timezoneId: "America/Los_Angeles" });
+
+  test("controls and persists rendered log and DNS timestamps", async ({ page }) => {
+    await startManagedEventHub(page);
+    const timeFormatEvents: ManagedEventHubStreamEnvelope = {
+      type: "events",
+      events: [
+        {
+          body: {
+            category: "AZFWNetworkRule",
+            properties: {
+              Action: "Allow",
+              DestinationIp: "20.30.40.50",
+              DestinationPort: 443,
+              msg: "noon-format-record",
+              Protocol: "TCP",
+              SourceIp: "10.140.16.133",
+              SourcePort: 15_213,
+            },
+            time: "2026-07-21T12:09:24.536Z",
           },
-          time: "2026-07-21T12:09:24.536Z",
+          enqueuedTimeUtc: "2026-07-21T12:09:25.000Z",
+          partitionId: "0",
+          sequenceNumber: 1,
         },
-        enqueuedTimeUtc: "2026-07-21T12:09:25.000Z",
-        partitionId: "0",
-        sequenceNumber: 1,
-      },
-      {
-        body: {
-          category: "AzureFirewallDnsProxy",
-          operationName: "AzureFirewallDnsProxyLog",
-          properties: {
-            msg: "DNS Request: 10.140.16.133:29135 - 50772 A IN midnight.example. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s",
+        {
+          body: {
+            category: "AzureFirewallDnsProxy",
+            operationName: "AzureFirewallDnsProxyLog",
+            properties: {
+              msg: "DNS Request: 10.140.16.133:29135 - 50772 A IN midnight.example. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s",
+            },
+            time: "2026-07-21T00:09:24.536Z",
           },
-          time: "2026-07-21T00:09:24.536Z",
+          enqueuedTimeUtc: "2026-07-21T00:09:25.000Z",
+          partitionId: "0",
+          sequenceNumber: 2,
         },
-        enqueuedTimeUtc: "2026-07-21T00:09:25.000Z",
-        partitionId: "0",
-        sequenceNumber: 2,
-      },
-    ],
-  };
+      ],
+    };
 
-  await enqueueManagedEventHubEnvelope(page, timeFormatEvents);
-  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+    await enqueueManagedEventHubEnvelope(page, timeFormatEvents);
+    await expect(page.getByText("2 visible / 2 received")).toBeVisible();
 
-  const logsTable = page.getByRole("table", { name: "Firewall logs" });
-  const noonRow = logsTable.getByRole("row").filter({ hasText: "20.30.40.50" });
-  const midnightRow = logsTable.getByRole("row").filter({ hasText: "AzureFirewallDnsProxy" });
-  await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 12:09:24");
-  await expect(midnightRow.locator("time")).toHaveText("Jul 21, 2026, 00:09:24");
+    const logsTable = page.getByRole("table", { name: "Firewall logs" });
+    const noonRow = logsTable.getByRole("row").filter({ hasText: "20.30.40.50" });
+    const midnightRow = logsTable.getByRole("row").filter({ hasText: "AzureFirewallDnsProxy" });
+    await expect(logsTable.getByRole("columnheader", { name: "Date (UTC)" })).toBeVisible();
+    await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 12:09:24");
+    await expect(midnightRow.locator("time")).toHaveText("Jul 21, 2026, 00:09:24");
 
-  await page.getByRole("button", { name: "DNS troubleshooting" }).click();
-  const dnsEntry = page.getByRole("button", { name: "Open DNS details for midnight.example." });
-  await expect(dnsEntry.locator("time")).not.toContainText(MERIDIEM_PATTERN);
-  await page.getByRole("button", { name: "All logs" }).click();
+    await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+    const dnsEntry = page.getByRole("button", { name: "Open DNS details for midnight.example." });
+    await expect(dnsEntry.locator("time")).toHaveText("00:09:24");
+    await page.getByRole("button", { name: "All logs" }).click();
 
-  const settingsDrawer = await openSettings(page);
-  const timeFormatSwitch = page.getByRole("switch", { name: "12-hour time" });
-  await expect(timeFormatSwitch).not.toBeChecked();
-  await timeFormatSwitch.click();
-  await expect(timeFormatSwitch).toBeChecked();
-  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
+    const settingsDrawer = await openSettings(page);
+    const timeFormatSwitch = page.getByRole("switch", { name: "12-hour time" });
+    const localTimeSwitch = page.getByRole("switch", { name: "Local time" });
+    await expect(timeFormatSwitch).not.toBeChecked();
+    await expect(localTimeSwitch).not.toBeChecked();
+    await expectLeftInSameRow(timeFormatSwitch, localTimeSwitch);
+    await localTimeSwitch.click();
+    await expect(localTimeSwitch).toBeChecked();
+    await expect(timeFormatSwitch).not.toBeChecked();
+    await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
 
-  await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 12:09:24 PM");
-  await expect(midnightRow.locator("time")).toHaveText("Jul 21, 2026, 12:09:24 AM");
-  await page.getByRole("button", { name: "DNS troubleshooting" }).click();
-  await expect(dnsEntry.locator("time")).toContainText(MERIDIEM_PATTERN);
-  await dnsEntry.click();
-  await expect(
-    page.getByRole("dialog", { name: "DNS resolution detail" }).locator("time").first(),
-  ).toContainText(MERIDIEM_PATTERN);
+    await expect(
+      logsTable.getByRole("columnheader", { name: "Date (America/Los_Angeles)" }),
+    ).toBeVisible();
+    await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 05:09:24");
+    await expect(midnightRow.locator("time")).toHaveText("Jul 20, 2026, 17:09:24");
+    await page.getByRole("button", { name: "DNS troubleshooting" }).click();
+    await expect(dnsEntry.locator("time")).toHaveText("17:09:24");
 
-  await page.reload();
-  const reloadedSettings = await openSettings(page);
-  await expect(timeFormatSwitch).toBeChecked();
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await reloadedSettings.getByRole("button", { name: "Close settings" }).click();
-  await enqueueManagedEventHubEnvelope(page, timeFormatEvents);
-  await expect(
-    page
-      .getByRole("table", { name: "Firewall logs" })
-      .getByRole("row")
-      .filter({ hasText: "20.30.40.50" })
-      .locator("time"),
-  ).toHaveText("Jul 21, 2026, 12:09:24 PM");
+    const localSettings = await openSettings(page);
+    await timeFormatSwitch.click();
+    await expect(timeFormatSwitch).toBeChecked();
+    await expect(localTimeSwitch).toBeChecked();
+    await localSettings.getByRole("button", { name: "Close settings" }).click();
+
+    await expect(dnsEntry.locator("time")).toHaveText("05:09:24 PM");
+    await dnsEntry.click();
+    const dnsDialog = page.getByRole("dialog", { name: "DNS resolution detail" });
+    await expect(dnsDialog.locator("time").first()).toHaveText("Jul 20, 2026, 5:09:24 PM");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "All logs" }).click();
+
+    await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 05:09:24 AM");
+    await expect(noonRow.getByRole("cell").first()).toHaveAttribute(
+      "title",
+      "Jul 21, 2026, 05:09:24 AM",
+    );
+    await noonRow.getByRole("cell").first().click();
+    const logDialog = page.getByRole("dialog", { name: "Log detail" });
+    await expect(logDialog.getByText("Jul 21, 2026, 05:09:24 AM", { exact: true })).toBeVisible();
+    await expect(logDialog.getByText("Jul 21, 2026, 05:09:25 AM", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    const utcSettings = await openSettings(page);
+    await localTimeSwitch.click();
+    await expect(localTimeSwitch).not.toBeChecked();
+    await expect(timeFormatSwitch).toBeChecked();
+    await utcSettings.getByRole("button", { name: "Close settings" }).click();
+    await expect(logsTable.getByRole("columnheader", { name: "Date (UTC)" })).toBeVisible();
+    await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 12:09:24 PM");
+    await expect(midnightRow.locator("time")).toHaveText("Jul 21, 2026, 12:09:24 AM");
+
+    const persistedSettings = await openSettings(page);
+    await localTimeSwitch.click();
+    await persistedSettings.getByRole("button", { name: "Close settings" }).click();
+
+    await page.reload();
+    const reloadedSettings = await openSettings(page);
+    await expect(timeFormatSwitch).toBeChecked();
+    await expect(localTimeSwitch).toBeChecked();
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
+    await reloadedSettings.getByRole("button", { name: "Close settings" }).click();
+    await enqueueManagedEventHubEnvelope(page, timeFormatEvents);
+    const reloadedTable = page.getByRole("table", { name: "Firewall logs" });
+    await expect(
+      reloadedTable.getByRole("columnheader", { name: "Date (America/Los_Angeles)" }),
+    ).toBeVisible();
+    await expect(
+      reloadedTable.getByRole("row").filter({ hasText: "20.30.40.50" }).locator("time"),
+    ).toHaveText("Jul 21, 2026, 05:09:24 AM");
+  });
 });

@@ -16,6 +16,7 @@ import type { LogHourCycle } from "~/composables/useLogTimeFormat";
 const props = withDefaults(
   defineProps<{
     hourCycle?: LogHourCycle;
+    timeZone?: string;
     entries: DnsEntry[];
     sources: DnsSourceStatus[];
     status: "idle" | "loading" | "success" | "error";
@@ -27,7 +28,7 @@ const props = withDefaults(
     filterOptions: DnsFilterOptions;
     selectedEntryId: string | null;
   }>(),
-  { hourCycle: "h23" },
+  { hourCycle: "h23", timeZone: "UTC" },
 );
 const emit = defineEmits<{
   apply: [];
@@ -333,6 +334,7 @@ function completeness(value: DnsEntry["completeness"]) {
                     minute="2-digit"
                     second="2-digit"
                     :hour-cycle="hourCycle"
+                    :time-zone="timeZone"
                   />
                   <span class="truncate font-mono">{{
                     item.displayText ?? item.queryName ?? "Not observed"
