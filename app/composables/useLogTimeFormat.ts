@@ -93,6 +93,7 @@ export function useLogTimeFormat() {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
+      fractionalSecondDigits: date.getMilliseconds() === 0 ? undefined : 3,
       hourCycle: hourCycle.value,
       timeZone: timeZone.value,
     }).format(date);

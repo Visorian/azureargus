@@ -66,7 +66,7 @@ describe("useLogTimeFormat", () => {
 
     expect(wrapper.get('[aria-label="Toggle hour cycle"]').text()).toBe("h23");
     expect(wrapper.get('[aria-label="Toggle time zone"]').text()).toBe("UTC");
-    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 12:09:24");
+    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 12:09:24.536");
   });
 
   it("loads stored hour-cycle and local-time preferences", async () => {
@@ -78,7 +78,7 @@ describe("useLogTimeFormat", () => {
 
     expect(wrapper.get('[aria-label="Toggle hour cycle"]').text()).toBe("h12");
     expect(wrapper.get('[aria-label="Toggle time zone"]').text()).toBe("America/Los_Angeles");
-    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 05:09:24 AM");
+    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 05:09:24.536 AM");
   });
 
   it("toggles and persists hour cycle and time zone independently", async () => {
@@ -97,14 +97,14 @@ describe("useLogTimeFormat", () => {
     expect(wrapper.get('[aria-label="Toggle hour cycle"]').text()).toBe("h12");
     expect(wrapper.get('[aria-label="Toggle time zone"]').text()).toBe("America/Los_Angeles");
     expect(window.localStorage.getItem(LOG_TIME_FORMAT_STORAGE_KEY)).toBe("12-hour");
-    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 05:09:24 AM");
+    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 05:09:24.536 AM");
 
     await wrapper.get('[aria-label="Toggle time zone"]').trigger("click");
 
     expect(wrapper.get('[aria-label="Toggle time zone"]').text()).toBe("UTC");
     expect(wrapper.get('[aria-label="Toggle hour cycle"]').text()).toBe("h12");
     expect(window.localStorage.getItem(LOG_TIME_ZONE_STORAGE_KEY)).toBe("utc");
-    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 12:09:24 PM");
+    expect(wrapper.get("output").text()).toBe("Jul 21, 2026, 12:09:24.536 PM");
   });
 
   it("reports browser-storage read failures through the shared display error", async () => {

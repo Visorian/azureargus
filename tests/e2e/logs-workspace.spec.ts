@@ -668,12 +668,14 @@ test.describe("time display preferences", () => {
     await expect(noonRow.locator("time")).toHaveText("Jul 21, 2026, 05:09:24 AM");
     await expect(noonRow.getByRole("cell").first()).toHaveAttribute(
       "title",
-      "Jul 21, 2026, 05:09:24 AM",
+      "Jul 21, 2026, 05:09:24.536 AM",
     );
     await noonRow.getByRole("cell").first().click();
     const logDialog = page.getByRole("dialog", { name: "Log detail" });
     await expect(logDialog.getByText("Times shown in America/Los_Angeles")).toBeVisible();
-    await expect(logDialog.getByText("Jul 21, 2026, 05:09:24 AM", { exact: true })).toBeVisible();
+    await expect(
+      logDialog.getByText("Jul 21, 2026, 05:09:24.536 AM", { exact: true }),
+    ).toBeVisible();
     await expect(logDialog.getByText("Jul 21, 2026, 05:09:25 AM", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
 
@@ -704,5 +706,41 @@ test.describe("time display preferences", () => {
     await expect(
       reloadedTable.getByRole("row").filter({ hasText: "20.30.40.50" }).locator("time"),
     ).toHaveText("Jul 21, 2026, 05:09:24 AM");
+  });
+
+  test("labels applied Log Analytics ranges in the selected time zone", async ({ page }) => {
+    await mockManagedDeployment(page, { eventHub: false, logAnalytics: true });
+    await page.route("**/api/log-analytics/dns/readiness", async (route) => {
+      await route.fulfill({ contentType: "application/json", json: { readiness: [] } });
+    });
+    await page.route("**/api/log-analytics/query", async (route) => {
+      expect(route.request().postDataJSON()).toMatchObject({
+        from: "2026-07-21T19:00:00.000Z",
+        to: "2026-07-21T20:00:00.000Z",
+      });
+      await route.fulfill({
+        contentType: "application/json",
+        json: { limit: 1_000, records: [], truncated: false },
+      });
+    });
+
+    await page.goto("/logs");
+    await page.getByRole("textbox", { name: "Start" }).fill("2026-07-21T12:00");
+    await page.getByRole("textbox", { name: "End" }).fill("2026-07-21T13:00");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByText("0 visible", { exact: true })).toBeVisible();
+
+    await page.getByRole("textbox", { name: "Start" }).fill("2026-07-21T12:30");
+    const appliedRange = page.locator("p").filter({ hasText: "Run query to apply date range." });
+    await expect(appliedRange).toContainText(
+      "Jul 21, 2026, 19:00:00 to Jul 21, 2026, 20:00:00 (UTC)",
+    );
+
+    const settingsDrawer = await openSettings(page);
+    await settingsDrawer.getByRole("switch", { name: "Local time" }).click();
+    await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
+    await expect(appliedRange).toContainText(
+      "Jul 21, 2026, 12:00:00 to Jul 21, 2026, 13:00:00 (America/Los_Angeles)",
+    );
   });
 });
