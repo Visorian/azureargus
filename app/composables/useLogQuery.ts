@@ -227,43 +227,46 @@ export function useLogQuery(
   const filters = providedFilters ?? reactive(createDefaultLogFilters());
   const filterKey = computed(() => getLogFiltersKey(filters));
   const filteredLogs = shallowRef<FirewallLogRecord[]>([]);
-  let previousFilterKey = filterKey.value;
+  let retainedCandidates: FirewallLogRecord[] = [];
   let previousDatasetKey = datasetKey.value;
   const rawSourceVersion = rawSource?.version ?? computed(() => 0);
 
   watch(
-    [active, logs, filterKey, visibleLimit, datasetKey, rawSourceVersion],
-    ([isActive, publishedLogs, nextFilterKey, nextVisibleLimit, nextDatasetKey]) => {
+    [active, logs, visibleLimit, datasetKey, rawSourceVersion, filterKey],
+    ([isActive, publishedLogs, nextVisibleLimit, nextDatasetKey]) => {
       if (!isActive) {
+        if (publishedLogs.length === 0) {
+          filteredLogs.value = [];
+          retainedCandidates = [];
+          previousDatasetKey = nextDatasetKey;
+        }
         return;
       }
-      const nextLogs = hasActiveLogFilters(filters)
-        ? (rawSource?.getRecords() ?? publishedLogs)
-        : publishedLogs;
+      const filtersActive = hasActiveLogFilters(filters);
+      const nextLogs = filtersActive ? (rawSource?.getRecords() ?? publishedLogs) : publishedLogs;
+      if (nextDatasetKey !== previousDatasetKey) {
+        retainedCandidates = [];
+      }
       if (nextLogs.length === 0) {
         filteredLogs.value = [];
-        previousFilterKey = nextFilterKey;
+        retainedCandidates = [];
         previousDatasetKey = nextDatasetKey;
         return;
       }
 
-      if (
-        !hasActiveLogFilters(filters) ||
-        nextFilterKey !== previousFilterKey ||
-        nextDatasetKey !== previousDatasetKey
-      ) {
-        filteredLogs.value = queryFirewallLogs(nextLogs, filters, nextVisibleLimit);
-        previousFilterKey = nextFilterKey;
+      retainedCandidates = trimToBufferSize(retainedCandidates, nextVisibleLimit);
+      if (!filtersActive) {
+        filteredLogs.value = trimToBufferSize(publishedLogs, nextVisibleLimit);
         previousDatasetKey = nextDatasetKey;
         return;
       }
 
-      filteredLogs.value = mergeFilteredLogCache(
+      retainedCandidates = mergeFilteredLogCache(
         filterFirewallLogs(nextLogs, filters, nextVisibleLimit),
-        filteredLogs.value,
+        retainedCandidates,
         nextVisibleLimit,
       );
-      previousFilterKey = nextFilterKey;
+      filteredLogs.value = filterFirewallLogs(retainedCandidates, filters, nextVisibleLimit);
       previousDatasetKey = nextDatasetKey;
     },
     { immediate: true },

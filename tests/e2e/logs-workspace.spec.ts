@@ -414,6 +414,99 @@ test("filters source and destination endpoints exactly", async ({ page }) => {
   await expect(table.getByRole("row").filter({ hasText: "prefix-endpoints" })).toHaveCount(0);
 });
 
+test("keeps surfaced logs eligible when filters change after raw-buffer eviction", async ({
+  page,
+}) => {
+  await mockManagedDeployment(page, { eventHub: true, logAnalytics: false });
+  await mockManagedEventHubStream(page);
+  await page.goto("/logs");
+  const settingsDrawer = await openSettings(page);
+  await settingsDrawer.getByRole("spinbutton", { name: "Visible rows" }).fill("100");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
+
+  const destinationIp = "131.189.255.123";
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: [
+      {
+        body: {
+          category: "AZFWNatRule",
+          properties: { DestinationIp: destinationIp, Rule: "nat-new" },
+          time: "2026-08-24T11:52:16.000Z",
+        },
+        enqueuedTimeUtc: "2026-08-24T11:52:17.000Z",
+        partitionId: "0",
+        sequenceNumber: 1,
+      },
+      {
+        body: {
+          category: "AZFWNetworkRule",
+          properties: { DestinationIp: destinationIp, Rule: "network-new" },
+          time: "2026-08-24T11:52:16.000Z",
+        },
+        enqueuedTimeUtc: "2026-08-24T11:52:17.001Z",
+        partitionId: "0",
+        sequenceNumber: 2,
+      },
+      {
+        body: {
+          category: "AZFWNatRule",
+          properties: { DestinationIp: destinationIp, Rule: "nat-old" },
+          time: "2026-08-24T11:51:41.000Z",
+        },
+        enqueuedTimeUtc: "2026-08-24T11:52:17.002Z",
+        partitionId: "0",
+        sequenceNumber: 3,
+      },
+      {
+        body: {
+          category: "AZFWNetworkRule",
+          properties: { DestinationIp: destinationIp, Rule: "network-old" },
+          time: "2026-08-24T11:51:41.000Z",
+        },
+        enqueuedTimeUtc: "2026-08-24T11:52:17.003Z",
+        partitionId: "0",
+        sequenceNumber: 4,
+      },
+    ],
+  });
+  await expect(page.getByText("4 visible / 4 received")).toBeVisible();
+
+  const search = page.getByPlaceholder("Search logs");
+  await search.fill(destinationIp);
+  await expect(page.getByText("4 visible / 4 received")).toBeVisible();
+
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: Array.from({ length: 1_001 }, (_, index) => ({
+      body: {
+        category: "AZFWApplicationRule",
+        properties: {
+          DestinationIp: "192.0.2.10",
+          Rule: `filler-${index}`,
+        },
+        time: "2026-08-24T11:58:00.000Z",
+      },
+      enqueuedTimeUtc: "2026-08-24T11:58:01.000Z",
+      partitionId: "0",
+      sequenceNumber: index + 5,
+    })),
+  });
+  await expect(page.getByText("4 visible / 1005 received")).toBeVisible();
+
+  await search.fill("");
+  await expect(page.getByText("100 visible / 1005 received")).toBeVisible();
+  await page.getByRole("button", { name: "Category filter" }).click();
+  await page.getByRole("option", { name: "AZFWNatRule", exact: true }).click();
+  await page.keyboard.press("Escape");
+
+  await expect(page.getByText("2 visible / 1005 received")).toBeVisible();
+  const table = page.getByRole("table", { name: "Firewall logs" });
+  await expect(table.getByRole("row").filter({ hasText: "nat-new" })).toBeVisible();
+  await expect(table.getByRole("row").filter({ hasText: "nat-old" })).toBeVisible();
+});
+
 test("renders application-rule FQDN destinations and full category names", async ({ page }) => {
   await startManagedEventHub(page);
   const structuredFqdn = "germanywestcentral-gas.guestconfiguration.azure.com";
