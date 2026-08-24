@@ -260,6 +260,157 @@ describe("log query", () => {
     expect(filteredLogs.value.map((log) => log.id)).toEqual(["raw-tcp"]);
   });
 
+  it("retains surfaced matches across filter changes after raw-buffer eviction", async () => {
+    const destinationIp = "131.189.255.123";
+    const matchingLogs = [
+      createLog({
+        id: "nat-2",
+        category: "AZFWNatRule",
+        destinationIp,
+        searchableText: `azfwnatrule ${destinationIp}`,
+      }),
+      createLog({
+        id: "network-2",
+        destinationIp,
+        searchableText: `azfwnetworkrule ${destinationIp}`,
+      }),
+      createLog({
+        id: "nat-1",
+        category: "AZFWNatRule",
+        destinationIp,
+        searchableText: `azfwnatrule ${destinationIp}`,
+      }),
+      createLog({
+        id: "network-1",
+        destinationIp,
+        searchableText: `azfwnetworkrule ${destinationIp}`,
+      }),
+    ];
+    const latestLog = createLog({
+      id: "latest",
+      category: "AZFWApplicationRule",
+      searchableText: "azfwapplicationrule latest",
+    });
+    const logs = ref([...matchingLogs]);
+    let rawRecords: FirewallLogRecord[] = [...matchingLogs];
+    const rawVersion = ref(0);
+    const { filteredLogs, filters } = useLogQuery(logs, {
+      rawSource: { getRecords: () => rawRecords, version: rawVersion },
+      visibleLimit: ref(10),
+    });
+
+    filters.search = destinationIp;
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual([
+      "nat-2",
+      "network-2",
+      "nat-1",
+      "network-1",
+    ]);
+
+    logs.value = [latestLog];
+    rawRecords = [latestLog];
+    rawVersion.value += 1;
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual([
+      "nat-2",
+      "network-2",
+      "nat-1",
+      "network-1",
+    ]);
+
+    filters.category = ["AZFWNatRule"];
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["nat-2", "nat-1"]);
+
+    filters.category = [];
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual([
+      "nat-2",
+      "network-2",
+      "nat-1",
+      "network-1",
+    ]);
+
+    filters.search = "";
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["latest"]);
+
+    filters.category = ["azfwnatrule"];
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["nat-2", "nat-1"]);
+  });
+
+  it("discards retained matches when the live dataset is cleared", async () => {
+    const oldNat = createLog({
+      id: "old-nat",
+      category: "AZFWNatRule",
+      searchableText: "azfwnatrule 131.189.255.123",
+    });
+    const logs = ref([oldNat]);
+    let rawRecords: FirewallLogRecord[] = [oldNat];
+    const rawVersion = ref(0);
+    const { filteredLogs, filters } = useLogQuery(logs, {
+      rawSource: { getRecords: () => rawRecords, version: rawVersion },
+      visibleLimit: ref(10),
+    });
+
+    filters.search = "131.189.255.123";
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["old-nat"]);
+
+    logs.value = [];
+    rawRecords = [];
+    rawVersion.value += 1;
+    await nextTick();
+
+    filters.search = "";
+    filters.category = ["AZFWNatRule"];
+    await nextTick();
+    expect(filteredLogs.value).toEqual([]);
+  });
+
+  it("discards retained matches when the hidden live dataset is cleared", async () => {
+    const active = ref(true);
+    const oldNat = createLog({
+      id: "old-nat",
+      category: "AZFWNatRule",
+      searchableText: "azfwnatrule 131.189.255.123",
+    });
+    const latestApplication = createLog({
+      id: "latest-application",
+      category: "AZFWApplicationRule",
+      searchableText: "azfwapplicationrule latest",
+    });
+    const logs = ref([oldNat]);
+    let rawRecords: FirewallLogRecord[] = [oldNat];
+    const rawVersion = ref(0);
+    const getRecords = vi.fn<() => FirewallLogRecord[]>(() => rawRecords);
+    const { filteredLogs, filters } = useLogQuery(logs, {
+      active,
+      rawSource: { getRecords, version: rawVersion },
+      visibleLimit: ref(10),
+    });
+
+    filters.category = ["AZFWNatRule"];
+    await nextTick();
+    expect(filteredLogs.value.map((log) => log.id)).toEqual(["old-nat"]);
+
+    active.value = false;
+    logs.value = [];
+    rawRecords = [];
+    rawVersion.value += 1;
+    await nextTick();
+    const callsAfterClear = getRecords.mock.calls.length;
+
+    rawRecords = [latestApplication];
+    active.value = true;
+    await nextTick();
+
+    expect(getRecords).toHaveBeenCalledTimes(callsAfterClear + 1);
+    expect(filteredLogs.value).toEqual([]);
+  });
+
   it("does not scan hidden datasets and catches up when reactivated", async () => {
     const active = ref(false);
     const logs = ref([createLog({ id: "first", protocol: "TCP", searchableText: "tcp" })]);
