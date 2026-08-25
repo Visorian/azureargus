@@ -16,6 +16,7 @@ import type { LogHourCycle } from "~/composables/useLogTimeFormat";
 const props = withDefaults(
   defineProps<{
     hourCycle?: LogHourCycle;
+    timeZone?: string;
     entries: DnsEntry[];
     sources: DnsSourceStatus[];
     status: "idle" | "loading" | "success" | "error";
@@ -27,7 +28,7 @@ const props = withDefaults(
     filterOptions: DnsFilterOptions;
     selectedEntryId: string | null;
   }>(),
-  { hourCycle: "h23" },
+  { hourCycle: "h23", timeZone: "UTC" },
 );
 const emit = defineEmits<{
   apply: [];
@@ -278,7 +279,12 @@ function completeness(value: DnsEntry["completeness"]) {
           id="dns-entry-heading"
           class="flex shrink-0 items-center justify-between border-b border-brand-gray-200 px-3 py-2 text-sm font-semibold dark:border-brand-gray-700"
         >
-          <span>DNS activity</span>
+          <span class="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span>DNS activity</span>
+            <span class="text-xs font-normal text-brand-gray-600 dark:text-brand-gray-300">
+              Times shown in {{ timeZone }}
+            </span>
+          </span>
           <span class="flex items-center gap-2">
             <UBadge v-if="entriesTruncated" color="warning" variant="subtle">
               Entries truncated
@@ -333,6 +339,7 @@ function completeness(value: DnsEntry["completeness"]) {
                     minute="2-digit"
                     second="2-digit"
                     :hour-cycle="hourCycle"
+                    :time-zone="timeZone"
                   />
                   <span class="truncate font-mono">{{
                     item.displayText ?? item.queryName ?? "Not observed"

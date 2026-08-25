@@ -22,8 +22,9 @@ const props = withDefaults(
     error: string | null;
     loading: boolean;
     hourCycle?: LogHourCycle;
+    timeZone?: string;
   }>(),
-  { hourCycle: "h23" },
+  { hourCycle: "h23", timeZone: "UTC" },
 );
 const open = defineModel<boolean>("open", { required: true });
 const toast = useToast();
@@ -96,6 +97,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
   <UModal
     v-model:open="open"
     :title="modalTitle"
+    :description="`Times shown in ${timeZone}`"
     :ui="{
       content:
         'h-[min(46rem,calc(100dvh-2rem))] w-[calc(100vw-2rem)] max-w-5xl select-none sm:h-[min(46rem,calc(100dvh-4rem))]',
@@ -201,6 +203,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                         date-style="medium"
                         time-style="medium"
                         :hour-cycle="hourCycle"
+                        :time-zone="timeZone"
                       />
                       <template v-if="observation.enqueuedTimeUtc">
                         <p class="mt-1 text-xs text-brand-gray-500">Event Hub enqueued</p>
@@ -209,6 +212,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                           date-style="medium"
                           time-style="medium"
                           :hour-cycle="hourCycle"
+                          :time-zone="timeZone"
                         />
                       </template>
                       <p v-if="observation.serverIp" class="truncate font-mono text-xs">
@@ -421,6 +425,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                         date-style="medium"
                         time-style="medium"
                         :hour-cycle="hourCycle"
+                        :time-zone="timeZone"
                       />
                     </dd>
                   </div>
