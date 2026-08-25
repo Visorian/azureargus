@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.4.0](https://github.com/Visorian/azureargus/compare/v0.3.2...v0.4.0) (2026-08-25)
+
+
+### Features
+
+* **frontend:** add local time display preference ([#61](https://github.com/Visorian/azureargus/issues/61)) ([a25fdec](https://github.com/Visorian/azureargus/commit/a25fdecf7e6f45920277d7b1715fab2bc36b65d5)), closes [#55](https://github.com/Visorian/azureargus/issues/55)
+
+
+### Bug Fixes
+
+* **frontend:** retain logs across filter changes ([#59](https://github.com/Visorian/azureargus/issues/59)) ([a678623](https://github.com/Visorian/azureargus/commit/a678623e8f65f0751c70b2482091c9e9f5a00178)), closes [#58](https://github.com/Visorian/azureargus/issues/58)
+
 ## [0.3.2](https://github.com/Visorian/azureargus/compare/v0.3.1...v0.3.2) (2026-08-19)
 
 
