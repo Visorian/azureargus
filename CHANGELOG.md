@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.4.1](https://github.com/Visorian/azureargus/compare/v0.4.0...v0.4.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **frontend:** make Event Hub streaming resilient ([#74](https://github.com/Visorian/azureargus/issues/74)) ([0326e7f](https://github.com/Visorian/azureargus/commit/0326e7fd9c4760ebebb96b3267a9376b539584a7)), closes [#63](https://github.com/Visorian/azureargus/issues/63)
+
 ## [0.4.0](https://github.com/Visorian/azureargus/compare/v0.3.2...v0.4.0) (2026-08-25)
 
 
