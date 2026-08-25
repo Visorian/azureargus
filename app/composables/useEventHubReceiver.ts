@@ -18,6 +18,8 @@ import { computed, watch, type Ref } from "vue";
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
 const LIVE_TAIL_THRESHOLD_MS = 30_000;
 const SEQUENCE_NUMBER_PATTERN = /^\d+$/;
+const MANUAL_EVENT_HUB_MAX_BATCH_SIZE = 50;
+const MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2;
 
 export interface ReceiverSubscription {
   close(): Promise<void>;
@@ -50,7 +52,11 @@ export interface EventHubReceiverClient {
       ): Promise<void>;
       processError(error: unknown): Promise<void>;
     },
-    options: { maxBatchSize: number; startPosition: ReceiverStartPosition },
+    options: {
+      maxBatchSize: number;
+      maxWaitTimeInSeconds: number;
+      startPosition: ReceiverStartPosition;
+    },
   ): ReceiverSubscription;
 }
 
@@ -609,7 +615,8 @@ export function useEventHubReceiver({
           },
         },
         {
-          maxBatchSize: 1,
+          maxBatchSize: MANUAL_EVENT_HUB_MAX_BATCH_SIZE,
+          maxWaitTimeInSeconds: MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS,
           startPosition: getManualEventHubStartPosition(
             form.lookbackMinutes,
             expectedPartitionIds,

@@ -796,7 +796,8 @@ describe("Event Hub receiver helpers", () => {
     await expect(receiver.connect(form)).resolves.toBe(true);
 
     expect(subscribe.mock.calls[0]?.[1]).toMatchObject({
-      maxBatchSize: 1,
+      maxBatchSize: 50,
+      maxWaitTimeInSeconds: 2,
       startPosition: { enqueuedOn: new Date("2026-07-10T11:57:00.000Z") },
     });
 
