@@ -17,6 +17,7 @@ import { computed, watch, type Ref } from "vue";
 
 type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
 const LIVE_TAIL_THRESHOLD_MS = 30_000;
+const SEQUENCE_NUMBER_PATTERN = /^\d+$/;
 
 export interface ReceiverSubscription {
   close(): Promise<void>;
@@ -71,6 +72,24 @@ let managedStreamPromise: Promise<void> | null = null;
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Event Hub receiver error.";
+}
+
+function getSequenceNumber(event: EventHubLogEvent) {
+  if (typeof event.sequenceNumber === "number") {
+    return Number.isSafeInteger(event.sequenceNumber) && event.sequenceNumber >= 0
+      ? event.sequenceNumber
+      : null;
+  }
+
+  if (
+    typeof event.sequenceNumber !== "string" ||
+    !SEQUENCE_NUMBER_PATTERN.test(event.sequenceNumber)
+  ) {
+    return null;
+  }
+
+  const sequenceNumber = Number(event.sequenceNumber);
+  return Number.isSafeInteger(sequenceNumber) ? sequenceNumber : null;
 }
 
 function addFilterOption(options: string[], seen: Set<string>, value: string) {
@@ -181,7 +200,48 @@ export function useEventHubReceiver({
   const logHistoryPersistence = useLogHistoryPersistence();
   const paused = computed(() => status.value === "paused");
   const normalizedBatchSinks = new Set<NormalizedLogBatchSink>();
+  const resumeFrom = new Map<string, number>();
   let nextRecordIndex = sourceRecordCount.value;
+
+  function getResumeFrom() {
+    const snapshot: Record<string, number> = {};
+    for (const [partitionId, sequenceNumber] of resumeFrom) {
+      snapshot[partitionId] = sequenceNumber;
+    }
+    return snapshot;
+  }
+
+  function receiveEvents(events: readonly EventHubLogEvent[], partitionId: string) {
+    const acceptedEvents: EventHubLogEvent[] = [];
+    const previousSequenceNumber = resumeFrom.get(partitionId);
+    let highestSequenceNumber = previousSequenceNumber;
+
+    for (const event of events) {
+      const sequenceNumber = getSequenceNumber(event);
+      if (sequenceNumber !== null) {
+        if (highestSequenceNumber !== undefined && sequenceNumber <= highestSequenceNumber) {
+          continue;
+        }
+        highestSequenceNumber = sequenceNumber;
+      }
+      acceptedEvents.push(event);
+    }
+
+    if (acceptedEvents.length === 0) {
+      return;
+    }
+
+    const result = eventsToFirewallLogs(acceptedEvents, partitionId, nextRecordIndex);
+    nextRecordIndex = result.nextIndex;
+    batcher.pushMany(result.records);
+
+    if (
+      highestSequenceNumber !== undefined &&
+      (previousSequenceNumber === undefined || highestSequenceNumber > previousSequenceNumber)
+    ) {
+      resumeFrom.set(partitionId, highestSequenceNumber);
+    }
+  }
 
   function updateUiFilterOptions(records: readonly FirewallLogRecord[], rebuild = false) {
     if (rebuild) {
@@ -367,6 +427,7 @@ export function useEventHubReceiver({
 
   function disconnect() {
     connectionGeneration += 1;
+    resumeFrom.clear();
     return teardown();
   }
 
@@ -381,6 +442,7 @@ export function useEventHubReceiver({
     }
 
     const generation = ++connectionGeneration;
+    resumeFrom.clear();
 
     try {
       await teardown();
@@ -443,13 +505,10 @@ export function useEventHubReceiver({
             }
 
             for (const event of envelope.events) {
-              const result = eventsToFirewallLogs(
+              receiveEvents(
                 [{ ...event, properties: event.applicationProperties }],
                 event.partitionId,
-                nextRecordIndex,
               );
-              nextRecordIndex = result.nextIndex;
-              batcher.pushMany(result.records);
             }
           },
           controller.signal,
@@ -496,9 +555,7 @@ export function useEventHubReceiver({
               return;
             }
 
-            const result = eventsToFirewallLogs(events, context.partitionId, nextRecordIndex);
-            nextRecordIndex = result.nextIndex;
-            batcher.pushMany(result.records);
+            receiveEvents(events, context.partitionId);
           },
           processError: async (error) => {
             if (generation !== connectionGeneration) {
@@ -597,6 +654,7 @@ export function useEventHubReceiver({
     latestSourceTimestamp,
     caughtUp,
     paused,
+    getResumeFrom,
     connect,
     disconnect,
     reset,

@@ -340,6 +340,71 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
+  it("suppresses managed replays independently per partition", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `${JSON.stringify({
+              type: "events",
+              events: [
+                {
+                  body: { msg: "partition 0" },
+                  enqueuedTimeUtc: "2026-07-12T12:00:00.000Z",
+                  partitionId: "0",
+                  sequenceNumber: 5,
+                },
+                {
+                  body: { msg: "partition 1" },
+                  enqueuedTimeUtc: "2026-07-12T12:00:00.000Z",
+                  partitionId: "1",
+                  sequenceNumber: 2,
+                },
+              ],
+            })}\n${JSON.stringify({
+              type: "events",
+              events: [
+                {
+                  body: { msg: "duplicate" },
+                  enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+                  partitionId: "0",
+                  sequenceNumber: 5,
+                },
+                {
+                  body: { msg: "older" },
+                  enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+                  partitionId: "0",
+                  sequenceNumber: 4,
+                },
+                {
+                  body: { msg: "fresh" },
+                  enqueuedTimeUtc: "2026-07-12T12:00:01.000Z",
+                  partitionId: "1",
+                  sequenceNumber: 3,
+                },
+              ],
+            })}\n`,
+          ),
+        );
+      },
+    });
+    const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ managedFetch });
+
+    await receiver.connect(createInitialEventHubConnectionForm(), "managed");
+    await vi.waitFor(() => expect(receiver.getResumeFrom()).toEqual({ "0": 5, "1": 3 }));
+    vi.advanceTimersByTime(100);
+
+    expect(receiver.receivedCount.value).toBe(3);
+    receiver.clear();
+    expect(receiver.getResumeFrom()).toEqual({ "0": 5, "1": 3 });
+    await receiver.disconnect();
+  });
+
   it("allocates unique record indexes across expanded queued events", () => {
     const result = eventsToFirewallLogs(
       [
@@ -735,6 +800,65 @@ describe("Event Hub receiver helpers", () => {
     });
 
     await receiver.disconnect();
+  });
+
+  it("keeps manual resume state monotonic within a connection generation", async () => {
+    vi.useFakeTimers();
+    installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
+
+    await receiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents(
+      [
+        { body: { msg: "first" }, sequenceNumber: 10 },
+        { body: { msg: "older" }, sequenceNumber: 9 },
+        { body: { msg: "second" }, sequenceNumber: "11" },
+      ],
+      { partitionId: "0" },
+    );
+    await requireHandlers(handlers).processEvents(
+      [{ body: { msg: "other partition" }, sequenceNumber: 1 }],
+      { partitionId: "1" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(receiver.receivedCount.value).toBe(3);
+    expect(receiver.getResumeFrom()).toEqual({ "0": 11, "1": 1 });
+
+    receiver.pause();
+    receiver.resume();
+    receiver.clear();
+    await requireHandlers(handlers).processEvents(
+      [
+        { body: { msg: "duplicate" }, sequenceNumber: 11 },
+        { body: { msg: "fresh" }, sequenceNumber: 12 },
+      ],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.getResumeFrom()).toEqual({ "0": 12, "1": 1 });
+
+    await receiver.connect(createValidForm());
+    expect(receiver.getResumeFrom()).toEqual({});
+    await requireHandlers(handlers).processEvents(
+      [{ body: { msg: "new generation" }, sequenceNumber: 1 }],
+      { partitionId: "0" },
+    );
+    expect(receiver.getResumeFrom()).toEqual({ "0": 1 });
+
+    await receiver.reset();
+    expect(receiver.getResumeFrom()).toEqual({});
   });
 
   it("marks a quiet temporary receiver caught up after reaching the partition head", async () => {
