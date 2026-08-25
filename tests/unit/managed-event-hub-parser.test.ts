@@ -24,7 +24,9 @@ describe("managed Event Hub NDJSON parser", () => {
 
     await consumeManagedEventHubStream(
       stream,
-      (envelope) => envelopes.push(envelope),
+      (envelope) => {
+        envelopes.push(envelope);
+      },
       new AbortController().signal,
     );
 

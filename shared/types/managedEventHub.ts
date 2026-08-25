@@ -5,6 +5,7 @@ export type ManagedEventHubLookbackMinutes = (typeof MANAGED_EVENT_HUB_LOOKBACK_
 export interface ManagedEventHubStreamRequest {
   consumerGroup: string;
   lookbackMinutes: ManagedEventHubLookbackMinutes;
+  resumeFrom?: Record<string, number>;
 }
 
 export interface ManagedEventHubEventEnvelope {

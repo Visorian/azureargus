@@ -67,6 +67,17 @@ export async function enqueueManagedEventHubEnvelope(
   }, envelope);
 }
 
+export async function closeManagedEventHubStream(page: Page) {
+  await page.evaluate(() => {
+    const state = (window as ManagedEventHubTestWindow).__azureArgusManagedEventHubStream;
+    if (!state?.controller) {
+      throw new Error("Managed Event Hub test stream is unavailable");
+    }
+    state.controller.close();
+    state.controller = undefined;
+  });
+}
+
 export function getManagedEventHubRequests(page: Page) {
   return page.evaluate(
     () => (window as ManagedEventHubTestWindow).__azureArgusManagedEventHubStream?.requests ?? [],

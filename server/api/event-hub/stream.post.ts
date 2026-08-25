@@ -1,5 +1,8 @@
 import { EventHubConsumerClient } from "@azure/event-hubs";
-import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.js";
+import {
+  getUserSessionId,
+  requireUserSession,
+} from "nuxt-oidc-auth/runtime/server/utils/session.js";
 import { createError, getHeader, getRequestURL, readValidatedBody, setResponseHeaders } from "h3";
 
 import type { ManagedEventHubStreamRequest } from "../../../shared/types/managedEventHub";
@@ -9,6 +12,7 @@ import {
   pipeManagedEventHubStream,
   validateManagedEventHubStreamRequest,
 } from "../../utils/managedEventHubStream";
+import { registerManagedEventHubStream } from "../../utils/managedEventHubStreamRegistry";
 
 function hasEntityPath(connectionString: string) {
   return connectionString.split(";").some((part) => {
@@ -50,6 +54,11 @@ export default defineEventHandler(async (event) => {
   };
   let client: EventHubConsumerClient | undefined;
   let managedStream: ReturnType<typeof createManagedEventHubStream> | undefined;
+  let unregisterStream: (() => void) | undefined;
+  let resolveCompletion!: () => void;
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve;
+  });
 
   try {
     const session = await requireUserSession(event, { errorBehavior: "throw" });
@@ -66,6 +75,11 @@ export default defineEventHandler(async (event) => {
     const request = await readValidatedBody<ManagedEventHubStreamRequest>(event, (body) =>
       validateManagedEventHubStreamRequest(body) ? body : false,
     );
+    const sessionId = await getUserSessionId(event);
+    unregisterStream = await registerManagedEventHubStream(sessionId, async () => {
+      controller.abort();
+      await completion;
+    });
     const connectionString = runtimeConfig.eventHub.connectionString.trim();
     const eventHubName = runtimeConfig.eventHub.name.trim();
     try {
@@ -131,7 +145,9 @@ export default defineEventHandler(async (event) => {
         await Promise.allSettled([client.close()]);
       }
     } finally {
+      unregisterStream?.();
       removeAbortListeners();
+      resolveCompletion();
     }
   }
 });

@@ -3,7 +3,10 @@ import { Socket } from "node:net";
 
 import { EventHubConsumerClient } from "@azure/event-hubs";
 import { createEvent, type H3Event } from "h3";
-import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.js";
+import {
+  getUserSessionId,
+  requireUserSession,
+} from "nuxt-oidc-auth/runtime/server/utils/session.js";
 
 import {
   createManagedEventHubStream,
@@ -14,6 +17,7 @@ vi.mock("@azure/event-hubs", () => ({
   EventHubConsumerClient: vi.fn(),
 }));
 vi.mock("nuxt-oidc-auth/runtime/server/utils/session.js", () => ({
+  getUserSessionId: vi.fn(),
   requireUserSession: vi.fn(),
 }));
 vi.mock("../../server/utils/managedEventHubStream", async (importOriginal) => ({
@@ -98,6 +102,7 @@ beforeEach(() => {
   currentRuntimeConfig = runtimeConfig;
   useRuntimeConfig.mockClear();
   vi.mocked(requireUserSession).mockReset().mockResolvedValue({ expireAt: 1_800_000_000 });
+  vi.mocked(getUserSessionId).mockReset().mockResolvedValue("default-session");
   vi.mocked(EventHubConsumerClient).mockReset();
   vi.mocked(createManagedEventHubStream).mockReset();
   vi.mocked(pipeManagedEventHubStream).mockReset().mockResolvedValue(undefined);
@@ -109,8 +114,79 @@ describe("managed Event Hub stream route", () => {
 
     await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 401 });
     expect(useRuntimeConfig).not.toHaveBeenCalled();
+    expect(getUserSessionId).not.toHaveBeenCalled();
     expect(EventHubConsumerClient).not.toHaveBeenCalled();
     expect(createManagedEventHubStream).not.toHaveBeenCalled();
+  });
+
+  it("supersedes the previous stream for the same OIDC session", async () => {
+    const cleanups: Array<ReturnType<typeof vi.fn<() => Promise<void>>>> = [];
+    vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
+      let streamController: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+          signal?.addEventListener("abort", () => controller.close(), { once: true });
+        },
+      });
+      const cleanup = vi.fn<() => Promise<void>>(async () => {
+        try {
+          streamController.close();
+        } catch {
+          // The abort listener may have closed it already.
+        }
+      });
+      cleanups.push(cleanup);
+      return { cleanup, stream };
+    });
+    vi.mocked(pipeManagedEventHubStream).mockImplementation(async (response, stream) => {
+      await stream.getReader().read();
+      response.end();
+    });
+    installAzureClientMock(async () => ["0"]);
+    const firstEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+    const secondEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+
+    const first = handler(firstEvent);
+    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledOnce());
+    const second = handler(secondEvent);
+    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledTimes(2));
+    await expect(first).resolves.toBeUndefined();
+    expect(firstEvent.node.res.writableEnded).toBe(true);
+    expect(cleanups[0]).toHaveBeenCalledOnce();
+
+    secondEvent.node.req.emit("aborted");
+    await expect(second).resolves.toBeUndefined();
+  });
+
+  it("keeps streams from different OIDC sessions active", async () => {
+    vi.mocked(getUserSessionId).mockResolvedValueOnce("first-session").mockResolvedValueOnce(
+      "second-session",
+    );
+    vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => controller.close(), { once: true });
+        },
+      });
+      return { cleanup: vi.fn<() => Promise<void>>(async () => undefined), stream };
+    });
+    vi.mocked(pipeManagedEventHubStream).mockImplementation(async (_response, stream) => {
+      await stream.getReader().read();
+    });
+    installAzureClientMock(async () => ["0"]);
+    const firstEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+    const secondEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+
+    const first = handler(firstEvent);
+    const second = handler(secondEvent);
+    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledTimes(2));
+    expect(firstEvent.node.res.writableEnded).toBe(false);
+    expect(secondEvent.node.res.writableEnded).toBe(false);
+
+    firstEvent.node.req.emit("aborted");
+    secondEvent.node.req.emit("aborted");
+    await Promise.all([first, second]);
   });
 
   it("rejects deployments without managed Event Hub capability", async () => {
@@ -131,6 +207,16 @@ describe("managed Event Hub stream route", () => {
       403,
     ],
     ["invalid request DTOs", { consumerGroup: "$Default", lookbackMinutes: 30 }, {}, 400],
+    [
+      "invalid resume positions",
+      {
+        consumerGroup: "$Default",
+        lookbackMinutes: 5,
+        resumeFrom: { "0": -1 },
+      },
+      {},
+      400,
+    ],
     [
       "request DTOs containing credentials",
       { consumerGroup: "$Default", lookbackMinutes: 5, connectionString: "caller-secret" },
@@ -268,7 +354,12 @@ describe("managed Event Hub stream route", () => {
       const cleanup = vi.fn(async () => undefined);
       const client = installAzureClientMock(async () => ["0", "1"]);
       vi.mocked(createManagedEventHubStream).mockReturnValue({ cleanup, stream });
-      const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+      const request = {
+        consumerGroup: "$Default",
+        lookbackMinutes: 5,
+        resumeFrom: { "0": 42 },
+      } as const;
+      const event = createTestEvent(request);
 
       await handler(event);
 
@@ -280,7 +371,7 @@ describe("managed Event Hub stream route", () => {
         expect.objectContaining({
           client,
           expectedPartitionIds: ["0", "1"],
-          request: { consumerGroup: "$Default", lookbackMinutes: 5 },
+          request,
         }),
       );
       expect(client.getPartitionIds).toHaveBeenCalledWith({
