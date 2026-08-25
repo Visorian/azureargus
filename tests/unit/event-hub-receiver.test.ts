@@ -1022,6 +1022,9 @@ describe("Event Hub receiver helpers", () => {
       "0": { sequenceNumber: 43, isInclusive: false },
       "1": { enqueuedOn: new Date("2026-07-10T11:57:00.000Z") },
     });
+    expect(getManualEventHubStartPosition(3, [], new Map([["0", 43]]))).toEqual({
+      enqueuedOn: new Date("2026-07-10T11:57:00.000Z"),
+    });
 
     await receiver.disconnect();
   });

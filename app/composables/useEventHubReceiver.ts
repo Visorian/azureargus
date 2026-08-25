@@ -161,7 +161,7 @@ export function getManualEventHubStartPosition(
   resumeFrom?: ReadonlyMap<string, number>,
 ): ReceiverStartPosition {
   const lookbackPosition = { enqueuedOn: getEventHubLookbackStart(lookbackMinutes) };
-  if (!resumeFrom) {
+  if (!resumeFrom || expectedPartitionIds.length === 0) {
     return lookbackPosition;
   }
 

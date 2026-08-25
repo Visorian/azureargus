@@ -13,7 +13,11 @@ export async function registerManagedEventHubStream(
   const owner = Symbol(sessionId);
   const previousRegistration = registrationQueues.get(sessionId) ?? Promise.resolve();
   const registration = previousRegistration.catch(() => undefined).then(async () => {
-    await activeStreams.get(sessionId)?.close();
+    try {
+      await activeStreams.get(sessionId)?.close();
+    } catch {
+      // Failed cleanup must not prevent the replacement stream from becoming active.
+    }
     activeStreams.set(sessionId, { close, owner });
   });
   registrationQueues.set(sessionId, registration);

@@ -46,4 +46,22 @@ describe("managed Event Hub stream registry", () => {
     unregisterFirst();
     unregisterSecond();
   });
+
+  it("registers a replacement when previous cleanup fails", async () => {
+    const unregisterFirst = await registerManagedEventHubStream("failing", async () => {
+      throw new Error("cleanup failed");
+    });
+    const closeSecond = vi.fn<() => Promise<void>>(async () => undefined);
+
+    const unregisterSecond = await registerManagedEventHubStream("failing", closeSecond);
+    unregisterFirst();
+    const unregisterThird = await registerManagedEventHubStream(
+      "failing",
+      vi.fn<() => Promise<void>>(async () => undefined),
+    );
+    expect(closeSecond).toHaveBeenCalledOnce();
+
+    unregisterSecond();
+    unregisterThird();
+  });
 });
