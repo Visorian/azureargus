@@ -123,7 +123,10 @@ const { enabled: rememberConnectionString, lastError: connectionStringPersistenc
   });
 const connecting = ref(false);
 const eventHubConnectionActive = computed(
-  () => receiver.status.value === "connected" || receiver.status.value === "paused",
+  () =>
+    receiver.status.value === "connected" ||
+    receiver.status.value === "reconnecting" ||
+    receiver.status.value === "paused",
 );
 const settingsOpen = ref(false);
 const detailOpen = ref(false);
@@ -1025,7 +1028,7 @@ function statusColor(status: string) {
   if (status === "error") {
     return "error";
   }
-  if (status === "loading" || status === "connecting") {
+  if (status === "loading" || status === "connecting" || status === "reconnecting") {
     return "info";
   }
   return "neutral";
@@ -1184,6 +1187,7 @@ function statusColor(status: string) {
               :log-history-error="logHistoryError"
               :managed="managedMode"
               :mode-transitioning="modeTransitioning"
+              :reconnecting="receiver.status.value === 'reconnecting'"
               @update:connection-form="updateConnectionForm"
               @connect="connect"
               @disconnect="receiver.disconnect"

@@ -30,6 +30,7 @@ function createProps(connectionForm = createConnectionForm()) {
     logHistoryError: null,
     managed: false,
     modeTransitioning: false,
+    reconnecting: false,
     "onUpdate:connectionForm": (value: EventHubConnectionForm) => {
       Object.assign(connectionForm, value);
     },
@@ -161,5 +162,17 @@ describe("EventHubSettingsPanel", () => {
     expect(wrapper.get('[role="combobox"]').attributes()).toHaveProperty("disabled");
     expect(wrapper.get('[role="checkbox"]').attributes()).not.toHaveProperty("disabled");
     expect(wrapper.get('[role="switch"]').attributes()).not.toHaveProperty("disabled");
+  });
+
+  it("shows reconnect progress and disables connection fields", async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
+      ...mountOptions,
+      props: { ...createProps(), reconnecting: true },
+    });
+
+    expect(wrapper.get('[role="status"]').text()).toContain("Reconnecting to Event Hub");
+    expect(wrapper.get("textarea").attributes()).toHaveProperty("disabled");
+    expect(wrapper.findAll("input").every((input) => "disabled" in input.attributes())).toBe(true);
+    expect(wrapper.get('[role="combobox"]').attributes()).toHaveProperty("disabled");
   });
 });

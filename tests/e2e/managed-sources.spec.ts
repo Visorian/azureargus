@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { mockManagedDeployment } from "./support/deployment";
 import { openSettings } from "./support/logsWorkspace";
 import {
+  closeManagedEventHubStream,
   enqueueManagedEventHubEnvelope,
   getManagedEventHubRequests,
   mockManagedEventHubStream,
@@ -59,22 +60,58 @@ test("managed Event Hub uses configured server stream without exposing credentia
   await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
   await expect(page.getByText("2 visible / 2 received")).toBeVisible();
   await expect(page.getByText("Catching up", { exact: true })).toBeVisible();
+  await closeManagedEventHubStream(page);
+  await expect(
+    page
+      .getByRole("group", { name: "All logs status and actions" })
+      .getByText("reconnecting", { exact: true }),
+  ).toBeVisible();
+  await expect.poll(() => getManagedEventHubRequests(page)).toEqual([
+    { consumerGroup: "$Default", lookbackMinutes: 15 },
+    { consumerGroup: "$Default", lookbackMinutes: 15, resumeFrom: { "0": 42 } },
+  ]);
+  await enqueueManagedEventHubEnvelope(page, { type: "heartbeat" });
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: [
+      {
+        body: {
+          Action: "Allow",
+          Category: "AZFWNetworkRule",
+          msg: "managed-recovered-record",
+          Protocol: "TCP",
+          TimeGenerated: "2026-07-12T14:30:30.000Z",
+        },
+        enqueuedTimeUtc: "2026-07-12T14:30:31.000Z",
+        partitionId: "0",
+        sequenceNumber: 43,
+      },
+    ],
+  });
+  await expect(page.getByText("3 visible / 3 received")).toBeVisible();
+  await expect(
+    page
+      .getByRole("group", { name: "All logs status and actions" })
+      .getByText("connected", { exact: true }),
+  ).toBeVisible();
   await enqueueManagedEventHubEnvelope(page, { type: "caught-up" });
   await expect(page.getByText("Latest", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open Event Hub settings" })).toHaveCount(0);
-  await expect(
-    page.getByRole("row", { name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/ }),
-  ).toBeVisible();
+  const networkRows = page.getByRole("row", {
+    name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/,
+  });
+  await expect(networkRows).toHaveCount(2);
+  await expect(networkRows.first()).toBeVisible();
   const categoryFilter = page.getByRole("button", { name: "Category filter" });
   await categoryFilter.click();
   const networkCategory = page.getByRole("option", { name: "AZFWNetworkRule", exact: true });
   const dnsCategory = page.getByRole("option", { name: "AzureFirewallDnsProxy", exact: true });
   await networkCategory.click();
-  await expect(page.getByText("1 visible / 2 received")).toBeVisible();
+  await expect(page.getByText("2 visible / 3 received")).toBeVisible();
   await dnsCategory.click();
-  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+  await expect(page.getByText("3 visible / 3 received")).toBeVisible();
   await networkCategory.click();
-  await expect(page.getByText("1 visible / 2 received")).toBeVisible();
+  await expect(page.getByText("1 visible / 3 received")).toBeVisible();
   await page.keyboard.press("Escape");
   const firewallTable = page.getByRole("table", { name: "Firewall logs" });
   const tableBox = await firewallTable.boundingBox();
@@ -113,7 +150,7 @@ test("managed Event Hub uses configured server stream without exposing credentia
         },
         enqueuedTimeUtc: "2026-07-12T14:31:01.000Z",
         partitionId: "0",
-        sequenceNumber: 43,
+        sequenceNumber: 44,
       },
     ],
   });

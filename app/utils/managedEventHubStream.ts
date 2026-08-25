@@ -56,7 +56,7 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
 
 export async function consumeManagedEventHubStream(
   stream: ReadableStream<Uint8Array>,
-  onEnvelope: (envelope: ManagedEventHubStreamEnvelope) => void,
+  onEnvelope: (envelope: ManagedEventHubStreamEnvelope) => void | Promise<void>,
   signal: AbortSignal,
 ) {
   const reader = stream.getReader();
@@ -77,7 +77,7 @@ export async function consumeManagedEventHubStream(
         const line = buffered.slice(0, newlineIndex).trim();
         buffered = buffered.slice(newlineIndex + 1);
         if (line) {
-          onEnvelope(parseManagedEventHubEnvelope(line));
+          await onEnvelope(parseManagedEventHubEnvelope(line));
         }
         newlineIndex = buffered.indexOf("\n");
       }
@@ -85,7 +85,7 @@ export async function consumeManagedEventHubStream(
 
     buffered += decoder.decode();
     if (!signal.aborted && buffered.trim()) {
-      onEnvelope(parseManagedEventHubEnvelope(buffered.trim()));
+      await onEnvelope(parseManagedEventHubEnvelope(buffered.trim()));
     }
   } finally {
     signal.removeEventListener("abort", cancel);

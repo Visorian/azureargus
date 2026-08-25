@@ -11,15 +11,25 @@ import {
 import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFirewallLogParser";
 import { createLogBatcher } from "./useLogBatcher";
 import type { FirewallLogRecord } from "#shared/types/firewall";
+import type { ManagedEventHubStreamRequest } from "#shared/types/managedEventHub";
 import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
 import { createNetworkRuleCorrelator } from "~/utils/networkRuleCorrelation";
 import { computed, watch, type Ref } from "vue";
 
-type ReceiverStatus = "idle" | "connecting" | "connected" | "paused" | "error";
+type ReceiverStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "paused"
+  | "error";
 const LIVE_TAIL_THRESHOLD_MS = 30_000;
 const SEQUENCE_NUMBER_PATTERN = /^\d+$/;
 const MANUAL_EVENT_HUB_MAX_BATCH_SIZE = 50;
 const MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 8_000;
 
 export interface ReceiverSubscription {
   close(): Promise<void>;
@@ -65,6 +75,7 @@ export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => Eve
 export interface EventHubReceiverOptions {
   loadClientFactory?: () => Promise<CreateEventHubReceiverClient>;
   managedFetch?: typeof fetch;
+  revalidateManagedSession?: () => Promise<boolean>;
   uiPublishingEnabled?: Readonly<Ref<boolean>>;
 }
 
@@ -209,6 +220,11 @@ export function eventsToFirewallLogs(
 export function useEventHubReceiver({
   loadClientFactory = loadEventHubClientFactory,
   managedFetch = globalThis.fetch,
+  revalidateManagedSession = async () => {
+    const auth = useOidcAuth();
+    await auth.fetch();
+    return auth.loggedIn.value;
+  },
   uiPublishingEnabled,
 }: EventHubReceiverOptions = {}) {
   const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
@@ -238,6 +254,13 @@ export function useEventHubReceiver({
   const normalizedBatchSinks = new Set<NormalizedLogBatchSink>();
   const resumeFrom = new Map<string, number>();
   let nextRecordIndex = sourceRecordCount.value;
+  let reconnectAttempts = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectInFlight = false;
+  let activeConnection: {
+    form: EventHubConnectionForm;
+    mode: EventHubConnectionMode;
+  } | null = null;
 
   function getResumeFrom() {
     const snapshot: Record<string, number> = {};
@@ -372,8 +395,17 @@ export function useEventHubReceiver({
     },
   });
 
-  function teardown() {
-    status.value = "idle";
+  function cancelReconnect() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
+  function teardown(setIdle = true) {
+    if (setIdle) {
+      status.value = "idle";
+    }
 
     if (disconnectPromise) {
       return disconnectPromise;
@@ -466,8 +498,235 @@ export function useEventHubReceiver({
 
   function disconnect() {
     connectionGeneration += 1;
+    activeConnection = null;
+    reconnectAttempts = 0;
+    cancelReconnect();
     resumeFrom.clear();
     return teardown();
+  }
+
+  function markRecovered() {
+    reconnectAttempts = 0;
+  }
+
+  function scheduleReconnect(generation: number) {
+    if (
+      generation !== connectionGeneration ||
+      activeConnection === null ||
+      status.value === "idle" ||
+      status.value === "paused" ||
+      status.value === "error" ||
+      reconnectTimer ||
+      reconnectInFlight
+    ) {
+      return;
+    }
+
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      errors.value = ["Event Hub reconnect attempts exhausted", ...errors.value].slice(0, 5);
+      status.value = "error";
+      return;
+    }
+
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts,
+      RECONNECT_MAX_DELAY_MS,
+    );
+    reconnectAttempts += 1;
+    status.value = "reconnecting";
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void reconnect(generation);
+    }, delay);
+  }
+
+  async function openConnection(
+    form: EventHubConnectionForm,
+    mode: EventHubConnectionMode,
+    generation: number,
+    isRetry: boolean,
+  ) {
+    if (mode === "managed") {
+      const controller = new AbortController();
+      managedStreamController = controller;
+      const request: ManagedEventHubStreamRequest = {
+        consumerGroup: form.consumerGroup.trim(),
+        lookbackMinutes: form.lookbackMinutes,
+      };
+      if (isRetry) {
+        request.resumeFrom = getResumeFrom();
+      }
+      const response = await managedFetch("/api/event-hub/stream", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          accept: "application/x-ndjson",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+      if (!response.ok || response.body === null) {
+        throw new Error(`Managed Event Hub connection failed (${response.status})`);
+      }
+      if (generation !== connectionGeneration) {
+        controller.abort();
+        return false;
+      }
+
+      status.value = "connected";
+      const streamPromise = consumeManagedEventHubStream(
+        response.body,
+        async (envelope) => {
+          if (generation !== connectionGeneration) {
+            return;
+          }
+          if (envelope.type === "heartbeat") {
+            markRecovered();
+            return;
+          }
+          if (envelope.type === "caught-up") {
+            markRecovered();
+            caughtUp.value = true;
+            return;
+          }
+          if (envelope.type === "error") {
+            errors.value = [envelope.message, ...errors.value].slice(0, 5);
+            if (envelope.message === "Session expired") {
+              const sessionRecovered = await revalidateManagedSession().catch(() => false);
+              if (generation !== connectionGeneration) {
+                return;
+              }
+              controller.abort();
+              if (sessionRecovered) {
+                scheduleReconnect(generation);
+              } else {
+                errors.value = [
+                  "Event Hub session expired. Sign in again to reconnect.",
+                  ...errors.value,
+                ].slice(0, 5);
+                status.value = "error";
+              }
+            }
+            return;
+          }
+          if (status.value !== "connected") {
+            return;
+          }
+
+          markRecovered();
+          for (const event of envelope.events) {
+            receiveEvents([{ ...event, properties: event.applicationProperties }], event.partitionId);
+          }
+        },
+        controller.signal,
+      )
+        .then(() => {
+          if (generation === connectionGeneration && !controller.signal.aborted) {
+            errors.value = ["Managed Event Hub stream ended", ...errors.value].slice(0, 5);
+            scheduleReconnect(generation);
+          }
+        })
+        .catch((error: unknown) => {
+          if (generation === connectionGeneration && !controller.signal.aborted) {
+            errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+            scheduleReconnect(generation);
+          }
+        })
+        .finally(() => {
+          if (managedStreamController === controller) {
+            managedStreamController = null;
+            managedStreamPromise = null;
+          }
+        });
+      managedStreamPromise = streamPromise;
+      return true;
+    }
+
+    const createClient = await loadClientFactory();
+    if (generation !== connectionGeneration) {
+      return false;
+    }
+
+    const nextClient = createClient(form);
+    const expectedPartitionIds = (await nextClient.getPartitionIds?.()) ?? [];
+    if (generation !== connectionGeneration) {
+      await nextClient.close();
+      return false;
+    }
+    client = nextClient;
+    subscription = nextClient.subscribe(
+      {
+        processEvents: async (events, context) => {
+          if (generation !== connectionGeneration || status.value !== "connected") {
+            return;
+          }
+
+          markRecovered();
+          if (events.length === 0) {
+            caughtUp.value = true;
+            return;
+          }
+
+          const checkpointEvent = receiveEvents(events, context.partitionId);
+          if (checkpointEvent && context.updateCheckpoint) {
+            await context.updateCheckpoint(checkpointEvent);
+          }
+        },
+        processError: async (error) => {
+          if (generation !== connectionGeneration) {
+            return;
+          }
+          errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+          scheduleReconnect(generation);
+        },
+      },
+      {
+        maxBatchSize: MANUAL_EVENT_HUB_MAX_BATCH_SIZE,
+        maxWaitTimeInSeconds: MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS,
+        startPosition: getManualEventHubStartPosition(
+          form.lookbackMinutes,
+          expectedPartitionIds,
+          isRetry ? resumeFrom : undefined,
+        ),
+      },
+    );
+    status.value = "connected";
+    return true;
+  }
+
+  async function reconnect(generation: number) {
+    if (generation !== connectionGeneration || activeConnection === null) {
+      return;
+    }
+
+    reconnectInFlight = true;
+    let retryFailed = false;
+    try {
+      await teardown(false);
+      if (generation !== connectionGeneration || activeConnection === null) {
+        return;
+      }
+      status.value = "reconnecting";
+      const opened = await openConnection(
+        activeConnection.form,
+        activeConnection.mode,
+        generation,
+        true,
+      );
+      retryFailed = !opened;
+    } catch (error: unknown) {
+      if (generation === connectionGeneration) {
+        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+        retryFailed = true;
+      }
+    } finally {
+      reconnectInFlight = false;
+    }
+
+    if (retryFailed && generation === connectionGeneration) {
+      scheduleReconnect(generation);
+    }
   }
 
   async function connect(form: EventHubConnectionForm, mode: EventHubConnectionMode = "manual") {
@@ -481,11 +740,16 @@ export function useEventHubReceiver({
     }
 
     const generation = ++connectionGeneration;
+    cancelReconnect();
+    reconnectAttempts = 0;
     resumeFrom.clear();
+    activeConnection = { form: { ...form }, mode };
 
     try {
-      await teardown();
+      await teardown(false);
     } catch {
+      activeConnection = null;
+      status.value = "error";
       return false;
     }
 
@@ -500,132 +764,7 @@ export function useEventHubReceiver({
     caughtUp.value = false;
 
     try {
-      if (mode === "managed") {
-        const controller = new AbortController();
-        managedStreamController = controller;
-        const response = await managedFetch("/api/event-hub/stream", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            accept: "application/x-ndjson",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            consumerGroup: form.consumerGroup.trim(),
-            lookbackMinutes: form.lookbackMinutes,
-          }),
-          signal: controller.signal,
-        });
-        if (!response.ok || response.body === null) {
-          throw new Error(`Managed Event Hub connection failed (${response.status})`);
-        }
-        if (generation !== connectionGeneration) {
-          controller.abort();
-          return false;
-        }
-
-        status.value = "connected";
-        const streamPromise = consumeManagedEventHubStream(
-          response.body,
-          (envelope) => {
-            if (generation !== connectionGeneration) {
-              return;
-            }
-            if (envelope.type === "caught-up") {
-              caughtUp.value = true;
-              return;
-            }
-            if (envelope.type === "error") {
-              errors.value = [envelope.message, ...errors.value].slice(0, 5);
-              return;
-            }
-            if (envelope.type !== "events" || status.value !== "connected") {
-              return;
-            }
-
-            for (const event of envelope.events) {
-              receiveEvents(
-                [{ ...event, properties: event.applicationProperties }],
-                event.partitionId,
-              );
-            }
-          },
-          controller.signal,
-        )
-          .then(() => {
-            if (generation === connectionGeneration && !controller.signal.aborted) {
-              errors.value = ["Managed Event Hub stream ended", ...errors.value].slice(0, 5);
-              status.value = "error";
-            }
-          })
-          .catch((error: unknown) => {
-            if (generation === connectionGeneration && !controller.signal.aborted) {
-              errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-              status.value = "error";
-            }
-          })
-          .finally(() => {
-            if (managedStreamController === controller) {
-              managedStreamController = null;
-              managedStreamPromise = null;
-            }
-          });
-        managedStreamPromise = streamPromise;
-        return true;
-      }
-
-      const createClient = await loadClientFactory();
-
-      if (generation !== connectionGeneration) {
-        return false;
-      }
-
-      client = createClient(form);
-      const expectedPartitionIds = (await client.getPartitionIds?.()) ?? [];
-
-      if (generation !== connectionGeneration) {
-        await client.close();
-        client = null;
-        return false;
-      }
-
-      subscription = client.subscribe(
-        {
-          processEvents: async (events, context) => {
-            if (generation !== connectionGeneration || status.value !== "connected") {
-              return;
-            }
-
-            if (events.length === 0) {
-              caughtUp.value = true;
-              return;
-            }
-
-            const checkpointEvent = receiveEvents(events, context.partitionId);
-            if (checkpointEvent && context.updateCheckpoint) {
-              await context.updateCheckpoint(checkpointEvent);
-            }
-          },
-          processError: async (error) => {
-            if (generation !== connectionGeneration) {
-              return;
-            }
-
-            errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-          },
-        },
-        {
-          maxBatchSize: MANUAL_EVENT_HUB_MAX_BATCH_SIZE,
-          maxWaitTimeInSeconds: MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS,
-          startPosition: getManualEventHubStartPosition(
-            form.lookbackMinutes,
-            expectedPartitionIds,
-          ),
-        },
-      );
-
-      status.value = "connected";
-      return true;
+      return await openConnection(form, mode, generation, false);
     } catch (error: unknown) {
       if (generation !== connectionGeneration) {
         return false;
@@ -633,11 +772,12 @@ export function useEventHubReceiver({
 
       const connectionError = getErrorMessage(error);
 
-      await teardown().catch(() => undefined);
+      await teardown(false).catch(() => undefined);
 
       if (generation === connectionGeneration) {
         errors.value = [connectionError, ...errors.value].slice(0, 5);
-        status.value = "error";
+        status.value = "connected";
+        scheduleReconnect(generation);
       }
 
       return false;

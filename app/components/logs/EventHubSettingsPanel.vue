@@ -18,6 +18,7 @@ const props = defineProps<{
   logHistoryError: string | null;
   managed: boolean;
   modeTransitioning: boolean;
+  reconnecting: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -45,7 +46,9 @@ const consumerGroup = createConnectionFieldModel("consumerGroup");
 const eventHubName = createConnectionFieldModel("eventHubName");
 const lookbackMinutes = createConnectionFieldModel("lookbackMinutes");
 const bufferSize = createConnectionFieldModel("bufferSize");
-const connectionFieldsDisabled = computed(() => props.connecting || props.connectionActive);
+const connectionFieldsDisabled = computed(
+  () => props.connecting || props.reconnecting || props.connectionActive,
+);
 </script>
 
 <template>
@@ -60,6 +63,16 @@ const connectionFieldsDisabled = computed(() => props.connecting || props.connec
         }}
       </p>
     </div>
+
+    <UAlert
+      v-if="reconnecting"
+      color="info"
+      variant="subtle"
+      icon="i-lucide-refresh-cw"
+      title="Reconnecting to Event Hub"
+      description="Retrying automatically from the latest received position."
+      role="status"
+    />
 
     <div
       v-if="!managed"
@@ -162,7 +175,7 @@ const connectionFieldsDisabled = computed(() => props.connecting || props.connec
           icon="i-lucide-radio-receiver"
           label="Connect"
           :disabled="modeTransitioning"
-          :loading="connecting"
+          :loading="connecting || reconnecting"
         />
         <UButton
           variant="outline"
