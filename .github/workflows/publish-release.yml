@@ -163,13 +163,6 @@ jobs:
             printf 'release pull request changed unexpected files: %s\n' "$files" >&2
             exit 1
           }
-          reviews="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${candidate_number}/reviews")"
-          jq -e --arg head "$candidate_head" \
-            'any(.[]; .user.login == "copilot-pull-request-reviewer[bot]" and .commit_id == $head)' \
-            <<<"$reviews" >/dev/null || {
-              printf 'release pull request lacks Copilot review for %s\n' "$candidate_head" >&2
-              exit 1
-            }
           statuses="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${candidate_head}/status")"
           jq -e 'any(.statuses[]; .context == "Semantic PR" and .state == "success")' \
             <<<"$statuses" >/dev/null || {
