@@ -132,6 +132,16 @@ describe("managed Event Hub stream route", () => {
     ],
     ["invalid request DTOs", { consumerGroup: "$Default", lookbackMinutes: 30 }, {}, 400],
     [
+      "invalid resume positions",
+      {
+        consumerGroup: "$Default",
+        lookbackMinutes: 5,
+        resumeFrom: { "0": -1 },
+      },
+      {},
+      400,
+    ],
+    [
       "request DTOs containing credentials",
       { consumerGroup: "$Default", lookbackMinutes: 5, connectionString: "caller-secret" },
       {},
@@ -268,7 +278,12 @@ describe("managed Event Hub stream route", () => {
       const cleanup = vi.fn(async () => undefined);
       const client = installAzureClientMock(async () => ["0", "1"]);
       vi.mocked(createManagedEventHubStream).mockReturnValue({ cleanup, stream });
-      const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+      const request = {
+        consumerGroup: "$Default",
+        lookbackMinutes: 5,
+        resumeFrom: { "0": 42 },
+      } as const;
+      const event = createTestEvent(request);
 
       await handler(event);
 
@@ -280,7 +295,7 @@ describe("managed Event Hub stream route", () => {
         expect.objectContaining({
           client,
           expectedPartitionIds: ["0", "1"],
-          request: { consumerGroup: "$Default", lookbackMinutes: 5 },
+          request,
         }),
       );
       expect(client.getPartitionIds).toHaveBeenCalledWith({

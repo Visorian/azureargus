@@ -1,4 +1,4 @@
-import type { ReceivedEventData } from "@azure/event-hubs";
+import type { EventPosition, ReceivedEventData } from "@azure/event-hubs";
 import type { ServerResponse } from "node:http";
 
 import {
@@ -20,14 +20,17 @@ export interface ManagedEventHubClient {
     handlers: {
       processEvents(
         events: readonly ManagedEventHubReceivedEvent[],
-        context: { partitionId: string },
+        context: {
+          partitionId: string;
+          updateCheckpoint(event: ManagedEventHubReceivedEvent): Promise<void>;
+        },
       ): Promise<void>;
       processError(error: unknown): Promise<void>;
     },
     options: {
       maxBatchSize: number;
       maxWaitTimeInSeconds: number;
-      startPosition: { enqueuedOn: Date };
+      startPosition: EventPosition | Record<string, EventPosition>;
     },
   ): ManagedEventHubSubscription;
 }
@@ -50,6 +53,7 @@ interface ManagedEventHubStreamOptions {
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const partitionIdPattern = /^(0|[1-9]\d*)$/;
 
 function normalizeEventBodyForStream(body: unknown) {
   return body instanceof Uint8Array ? textDecoder.decode(body) : body;
@@ -123,22 +127,72 @@ export function validateManagedEventHubStreamRequest(
   }
 
   const keys = Object.keys(value);
-  if (keys.length !== 2 || !keys.includes("consumerGroup") || !keys.includes("lookbackMinutes")) {
+  if (
+    !keys.includes("consumerGroup") ||
+    !keys.includes("lookbackMinutes") ||
+    keys.some((key) => !["consumerGroup", "lookbackMinutes", "resumeFrom"].includes(key))
+  ) {
     return false;
   }
 
   const request = value as Record<string, unknown>;
   const consumerGroup = request.consumerGroup;
-  return (
-    typeof consumerGroup === "string" &&
-    consumerGroup === consumerGroup.trim() &&
-    consumerGroup.length > 0 &&
-    consumerGroup.length <= 256 &&
-    !containsControlCharacter(consumerGroup) &&
-    typeof request.lookbackMinutes === "number" &&
-    MANAGED_EVENT_HUB_LOOKBACK_MINUTES.includes(
-      request.lookbackMinutes as ManagedEventHubLookbackMinutes,
+  if (
+    !(
+      typeof consumerGroup === "string" &&
+      consumerGroup === consumerGroup.trim() &&
+      consumerGroup.length > 0 &&
+      consumerGroup.length <= 256 &&
+      !containsControlCharacter(consumerGroup) &&
+      typeof request.lookbackMinutes === "number" &&
+      MANAGED_EVENT_HUB_LOOKBACK_MINUTES.includes(
+        request.lookbackMinutes as ManagedEventHubLookbackMinutes,
+      )
     )
+  ) {
+    return false;
+  }
+
+  if (request.resumeFrom === undefined) {
+    return true;
+  }
+  if (
+    typeof request.resumeFrom !== "object" ||
+    request.resumeFrom === null ||
+    Array.isArray(request.resumeFrom)
+  ) {
+    return false;
+  }
+
+  return Object.entries(request.resumeFrom).every(
+    ([partitionId, sequenceNumber]) =>
+      partitionIdPattern.test(partitionId) &&
+      typeof sequenceNumber === "number" &&
+      Number.isSafeInteger(sequenceNumber) &&
+      sequenceNumber >= 0,
+  );
+}
+
+function createStartPosition(
+  expectedPartitionIds: readonly string[],
+  request: ManagedEventHubStreamRequest,
+  now: () => number,
+): EventPosition | Record<string, EventPosition> {
+  const lookbackPosition = {
+    enqueuedOn: new Date(now() - request.lookbackMinutes * 60_000),
+  };
+  if (!request.resumeFrom) {
+    return lookbackPosition;
+  }
+
+  return Object.fromEntries(
+    expectedPartitionIds.map((partitionId) => {
+      const sequenceNumber = request.resumeFrom?.[partitionId];
+      return [
+        partitionId,
+        sequenceNumber === undefined ? lookbackPosition : { sequenceNumber, isInclusive: false },
+      ];
+    }),
   );
 }
 
@@ -169,6 +223,7 @@ export function createManagedEventHubStream({
   let heartbeatPending = false;
   let sessionCheckPending = false;
   const pendingCatchUpPartitions = new Set(expectedPartitionIds);
+  const checkpointSequenceNumbers = new Map<string, number>();
   let caughtUpWritten = false;
 
   const releaseDemand = () => {
@@ -282,6 +337,20 @@ export function createManagedEventHubStream({
                     applicationProperties: event.properties,
                   })),
                 });
+                const checkpointEvent = events.reduce((highest, event) =>
+                  event.sequenceNumber > highest.sequenceNumber ? event : highest,
+                );
+                const checkpointSequenceNumber = checkpointSequenceNumbers.get(context.partitionId);
+                if (
+                  checkpointSequenceNumber === undefined ||
+                  checkpointEvent.sequenceNumber > checkpointSequenceNumber
+                ) {
+                  await context.updateCheckpoint(checkpointEvent);
+                  checkpointSequenceNumbers.set(
+                    context.partitionId,
+                    checkpointEvent.sequenceNumber,
+                  );
+                }
               },
               async processError() {
                 if (closed) {
@@ -297,9 +366,7 @@ export function createManagedEventHubStream({
             {
               maxBatchSize: 1,
               maxWaitTimeInSeconds: 5,
-              startPosition: {
-                enqueuedOn: new Date(now() - request.lookbackMinutes * 60_000),
-              },
+              startPosition: createStartPosition(expectedPartitionIds, request, now),
             },
           );
         } catch {

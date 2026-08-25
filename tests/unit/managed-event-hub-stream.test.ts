@@ -10,6 +10,15 @@ import {
 
 type StreamHandlers = Parameters<ManagedEventHubClient["subscribe"]>[0];
 
+function createPartitionContext(partitionId: string) {
+  return {
+    partitionId,
+    updateCheckpoint: vi.fn<(event: { sequenceNumber: number }) => Promise<void>>(
+      async () => undefined,
+    ),
+  };
+}
+
 function createClient() {
   let handlers: StreamHandlers | undefined;
   const subscriptionClose = vi.fn(async () => undefined);
@@ -49,7 +58,10 @@ afterEach(() => {
 describe("managed Event Hub stream", () => {
   it("accepts only the bounded public request DTO", () => {
     expect(
-      validateManagedEventHubStreamRequest({ consumerGroup: "$Default", lookbackMinutes: 5 }),
+      validateManagedEventHubStreamRequest({
+        consumerGroup: "$Default",
+        lookbackMinutes: 5,
+      }),
     ).toBe(true);
     expect(
       validateManagedEventHubStreamRequest({
@@ -59,11 +71,39 @@ describe("managed Event Hub stream", () => {
       }),
     ).toBe(false);
     expect(
-      validateManagedEventHubStreamRequest({ consumerGroup: " padded ", lookbackMinutes: 5 }),
+      validateManagedEventHubStreamRequest({
+        consumerGroup: " padded ",
+        lookbackMinutes: 5,
+      }),
     ).toBe(false);
     expect(
-      validateManagedEventHubStreamRequest({ consumerGroup: "$Default", lookbackMinutes: 30 }),
+      validateManagedEventHubStreamRequest({
+        consumerGroup: "$Default",
+        lookbackMinutes: 30,
+      }),
     ).toBe(false);
+    expect(
+      validateManagedEventHubStreamRequest({
+        consumerGroup: "$Default",
+        lookbackMinutes: 5,
+        resumeFrom: { "0": 42, "1": 0 },
+      }),
+    ).toBe(true);
+    for (const resumeFrom of [
+      { "": 1 },
+      { partition: 1 },
+      { "0": -1 },
+      { "0": 1.5 },
+      { "0": Number.MAX_SAFE_INTEGER + 1 },
+    ]) {
+      expect(
+        validateManagedEventHubStreamRequest({
+          consumerGroup: "$Default",
+          lookbackMinutes: 5,
+          resumeFrom,
+        }),
+      ).toBe(false);
+    }
   });
 
   it("uses stream demand as backpressure and maps received events", async () => {
@@ -99,7 +139,7 @@ describe("managed Event Hub stream", () => {
             properties: { schemaVersion: "1", diagnosticCategory: "network" },
           },
         ],
-        { partitionId: "1" },
+        createPartitionContext("1"),
       )
       .then(() => {
         processed = true;
@@ -128,18 +168,80 @@ describe("managed Event Hub stream", () => {
           partitionId: "1",
           sequenceNumber: 42,
           offset: "123",
-          applicationProperties: { schemaVersion: "1", diagnosticCategory: "network" },
+          applicationProperties: {
+            schemaVersion: "1",
+            diagnosticCategory: "network",
+          },
         },
       ],
     });
     await processing;
-    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition.enqueuedOn).toEqual(
-      new Date(-3 * 60_000),
-    );
+    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toEqual({
+      enqueuedOn: new Date(-3 * 60_000),
+    });
 
     await reader.cancel();
     expect(fixture.subscriptionClose).toHaveBeenCalledOnce();
     expect(fixture.clientClose).toHaveBeenCalledOnce();
+  });
+
+  it("uses resume positions and advances checkpoints without regression", async () => {
+    const fixture = createClient();
+    const managed = createManagedEventHubStream({
+      client: fixture.client,
+      expectedPartitionIds: ["0", "1"],
+      request: {
+        consumerGroup: "$Default",
+        lookbackMinutes: 3,
+        resumeFrom: { "0": 40 },
+      },
+      sessionExpiresAt: 10,
+      revalidateSession: async () => true,
+      now: () => 0,
+    });
+    const reader = managed.stream.getReader();
+    const context = createPartitionContext("0");
+    const event = (sequenceNumber: number) => ({
+      body: { sequenceNumber },
+      enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
+      sequenceNumber,
+    });
+
+    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toEqual({
+      "0": { sequenceNumber: 40, isInclusive: false },
+      "1": { enqueuedOn: new Date(-3 * 60_000) },
+    });
+
+    const firstBatch = fixture
+      .getHandlers()
+      .processEvents([event(41), event(43), event(42)], context);
+    await expect(readEnvelope(reader)).resolves.toMatchObject({
+      type: "events",
+    });
+    await firstBatch;
+    expect(context.updateCheckpoint).toHaveBeenCalledOnce();
+    expect(context.updateCheckpoint).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sequenceNumber: 43 }),
+    );
+
+    const replayedBatch = fixture.getHandlers().processEvents([event(42)], context);
+    await expect(readEnvelope(reader)).resolves.toMatchObject({
+      type: "events",
+    });
+    await replayedBatch;
+    expect(context.updateCheckpoint).toHaveBeenCalledOnce();
+
+    const advancingBatch = fixture.getHandlers().processEvents([event(44)], context);
+    await expect(readEnvelope(reader)).resolves.toMatchObject({
+      type: "events",
+    });
+    await advancingBatch;
+    expect(context.updateCheckpoint).toHaveBeenCalledTimes(2);
+    expect(context.updateCheckpoint).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sequenceNumber: 44 }),
+    );
+
+    await reader.cancel();
   });
 
   it("emits caught-up once after every expected partition returns an empty batch", async () => {
@@ -161,14 +263,16 @@ describe("managed Event Hub stream", () => {
           sequenceNumber: 42,
         },
       ],
-      { partitionId: "0" },
+      createPartitionContext("0"),
     );
 
-    await expect(readEnvelope(reader)).resolves.toMatchObject({ type: "events" });
+    await expect(readEnvelope(reader)).resolves.toMatchObject({
+      type: "events",
+    });
     await eventProcessing;
 
     const caughtUpRead = reader.read();
-    await fixture.getHandlers().processEvents([], { partitionId: "unknown" });
+    await fixture.getHandlers().processEvents([], createPartitionContext("unknown"));
     await expect(
       Promise.race([
         caughtUpRead.then(() => "envelope"),
@@ -176,7 +280,7 @@ describe("managed Event Hub stream", () => {
       ]),
     ).resolves.toBe("pending");
 
-    await fixture.getHandlers().processEvents([], { partitionId: "1" });
+    await fixture.getHandlers().processEvents([], createPartitionContext("1"));
     await expect(
       Promise.race([
         caughtUpRead.then(() => "envelope"),
@@ -184,13 +288,15 @@ describe("managed Event Hub stream", () => {
       ]),
     ).resolves.toBe("pending");
 
-    const finalPartition = fixture.getHandlers().processEvents([], { partitionId: "0" });
-    await expect(caughtUpRead.then(parseEnvelope)).resolves.toEqual({ type: "caught-up" });
+    const finalPartition = fixture.getHandlers().processEvents([], createPartitionContext("0"));
+    await expect(caughtUpRead.then(parseEnvelope)).resolves.toEqual({
+      type: "caught-up",
+    });
     await finalPartition;
 
     const duplicateRead = reader.read();
-    await fixture.getHandlers().processEvents([], { partitionId: "0" });
-    await fixture.getHandlers().processEvents([], { partitionId: "1" });
+    await fixture.getHandlers().processEvents([], createPartitionContext("0"));
+    await fixture.getHandlers().processEvents([], createPartitionContext("1"));
     await expect(
       Promise.race([
         duplicateRead.then(() => "envelope"),
@@ -213,7 +319,7 @@ describe("managed Event Hub stream", () => {
     });
     const reader = managed.stream.getReader();
 
-    const caughtUp = fixture.getHandlers().processEvents([], { partitionId: "0" });
+    const caughtUp = fixture.getHandlers().processEvents([], createPartitionContext("0"));
 
     await expect(readEnvelope(reader)).resolves.toEqual({ type: "caught-up" });
     await caughtUp;
@@ -239,7 +345,7 @@ describe("managed Event Hub stream", () => {
           sequenceNumber: 42,
         },
       ],
-      { partitionId: "1" },
+      createPartitionContext("1"),
     );
     const reader = managed.stream.getReader();
 
@@ -320,7 +426,10 @@ describe("managed Event Hub stream", () => {
       const error = readEnvelope(reader);
 
       await vi.advanceTimersByTimeAsync(1_000);
-      await expect(error).resolves.toEqual({ type: "error", message: "Session expired" });
+      await expect(error).resolves.toEqual({
+        type: "error",
+        message: "Session expired",
+      });
       await vi.waitFor(() => expect(fixture.clientClose).toHaveBeenCalledOnce());
       expect(fixture.subscriptionClose).toHaveBeenCalledOnce();
       await reader.cancel();
@@ -347,7 +456,7 @@ describe("managed Event Hub stream", () => {
           sequenceNumber: 42,
         },
       ],
-      { partitionId: "1" },
+      createPartitionContext("1"),
     );
 
     await vi.advanceTimersByTimeAsync(1_000);
