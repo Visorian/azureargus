@@ -116,7 +116,6 @@ describe("managed Event Hub stream", () => {
       revalidateSession: async () => true,
       now: () => 0,
     });
-    let processed = false;
     const processing = fixture
       .getHandlers()
       .processEvents(
@@ -140,13 +139,7 @@ describe("managed Event Hub stream", () => {
           },
         ],
         createPartitionContext("1"),
-      )
-      .then(() => {
-        processed = true;
-      });
-
-    await Promise.resolve();
-    expect(processed).toBe(false);
+      );
 
     const reader = managed.stream.getReader();
     await expect(readEnvelope(reader)).resolves.toEqual({
@@ -176,6 +169,10 @@ describe("managed Event Hub stream", () => {
       ],
     });
     await processing;
+    expect(fixture.subscribe.mock.calls[0]?.[1]).toMatchObject({
+      maxBatchSize: 50,
+      maxWaitTimeInSeconds: 2,
+    });
     expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toEqual({
       enqueuedOn: new Date(-3 * 60_000),
     });
@@ -183,6 +180,46 @@ describe("managed Event Hub stream", () => {
     await reader.cancel();
     expect(fixture.subscriptionClose).toHaveBeenCalledOnce();
     expect(fixture.clientClose).toHaveBeenCalledOnce();
+  });
+
+  it("bounds queued bytes and resumes producers when the consumer drains", async () => {
+    const fixture = createClient();
+    const managed = createManagedEventHubStream({
+      client: fixture.client,
+      expectedPartitionIds: ["0"],
+      request: { consumerGroup: "$Default", lookbackMinutes: 3 },
+      sessionExpiresAt: 10,
+      revalidateSession: async () => true,
+      now: () => 0,
+    });
+    const context = createPartitionContext("0");
+    const event = (sequenceNumber: number) => ({
+      body: "x".repeat(100_000),
+      enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
+      sequenceNumber,
+    });
+
+    await fixture.getHandlers().processEvents([event(1)], context);
+    await fixture.getHandlers().processEvents([event(2)], context);
+    let thirdProcessed = false;
+    const thirdBatch = fixture
+      .getHandlers()
+      .processEvents([event(3)], context)
+      .then(() => {
+        thirdProcessed = true;
+      });
+    await Promise.resolve();
+    expect(thirdProcessed).toBe(false);
+
+    const reader = managed.stream.getReader();
+    const queuedEnvelopes = [await reader.read(), await reader.read(), await reader.read()];
+    await thirdBatch;
+    expect(thirdProcessed).toBe(true);
+    expect(
+      queuedEnvelopes.reduce((bytes, result) => bytes + (result.value?.byteLength ?? 0), 0),
+    ).toBeLessThanOrEqual(256 * 1024 + (queuedEnvelopes[0]?.value?.byteLength ?? 0));
+
+    await reader.cancel();
   });
 
   it("uses resume positions and advances checkpoints without regression", async () => {

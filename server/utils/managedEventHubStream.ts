@@ -54,6 +54,9 @@ interface ManagedEventHubStreamOptions {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const partitionIdPattern = /^(0|[1-9]\d*)$/;
+const STREAM_BUFFER_HIGH_WATER_MARK = 256 * 1024;
+const EVENT_HUB_MAX_BATCH_SIZE = 50;
+const EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2;
 
 function normalizeEventBodyForStream(body: unknown) {
   return body instanceof Uint8Array ? textDecoder.decode(body) : body;
@@ -364,8 +367,8 @@ export function createManagedEventHubStream({
               },
             },
             {
-              maxBatchSize: 1,
-              maxWaitTimeInSeconds: 5,
+              maxBatchSize: EVENT_HUB_MAX_BATCH_SIZE,
+              maxWaitTimeInSeconds: EVENT_HUB_MAX_WAIT_TIME_SECONDS,
               startPosition: createStartPosition(expectedPartitionIds, request, now),
             },
           );
@@ -411,7 +414,7 @@ export function createManagedEventHubStream({
         await cleanup();
       },
     },
-    { highWaterMark: 1 },
+    new ByteLengthQueuingStrategy({ highWaterMark: STREAM_BUFFER_HIGH_WATER_MARK }),
   );
 
   return { cleanup, stream };
