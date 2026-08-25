@@ -32,10 +32,16 @@ export interface EventHubLogEvent {
 
 interface ReceiverPartitionContext {
   partitionId: string;
+  updateCheckpoint?(event: EventHubLogEvent): Promise<void>;
 }
+
+type ReceiverStartPosition =
+  | { enqueuedOn: Date }
+  | Record<string, { enqueuedOn: Date } | { sequenceNumber: number; isInclusive: false }>;
 
 export interface EventHubReceiverClient {
   close(): Promise<void>;
+  getPartitionIds?(): Promise<string[]>;
   subscribe(
     handlers: {
       processEvents(
@@ -44,7 +50,7 @@ export interface EventHubReceiverClient {
       ): Promise<void>;
       processError(error: unknown): Promise<void>;
     },
-    options: { maxBatchSize: number; startPosition: { enqueuedOn: Date } },
+    options: { maxBatchSize: number; startPosition: ReceiverStartPosition },
   ): ReceiverSubscription;
 }
 
@@ -126,9 +132,33 @@ async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient
 
     return {
       close: () => eventHubClient.close(),
+      getPartitionIds: () => eventHubClient.getPartitionIds(),
       subscribe: (handlers, options) => eventHubClient.subscribe(handlers, options),
     };
   };
+}
+
+export function getManualEventHubStartPosition(
+  lookbackMinutes: number,
+  expectedPartitionIds: readonly string[],
+  resumeFrom?: ReadonlyMap<string, number>,
+): ReceiverStartPosition {
+  const lookbackPosition = { enqueuedOn: getEventHubLookbackStart(lookbackMinutes) };
+  if (!resumeFrom) {
+    return lookbackPosition;
+  }
+
+  return Object.fromEntries(
+    expectedPartitionIds.map((partitionId) => {
+      const sequenceNumber = resumeFrom.get(partitionId);
+      return [
+        partitionId,
+        sequenceNumber === undefined
+          ? lookbackPosition
+          : { sequenceNumber, isInclusive: false as const },
+      ];
+    }),
+  );
 }
 
 function eventToFirewallLogs(
@@ -215,6 +245,7 @@ export function useEventHubReceiver({
     const acceptedEvents: EventHubLogEvent[] = [];
     const previousSequenceNumber = resumeFrom.get(partitionId);
     let highestSequenceNumber = previousSequenceNumber;
+    let checkpointEvent: EventHubLogEvent | null = null;
 
     for (const event of events) {
       const sequenceNumber = getSequenceNumber(event);
@@ -223,12 +254,13 @@ export function useEventHubReceiver({
           continue;
         }
         highestSequenceNumber = sequenceNumber;
+        checkpointEvent = event;
       }
       acceptedEvents.push(event);
     }
 
     if (acceptedEvents.length === 0) {
-      return;
+      return null;
     }
 
     const result = eventsToFirewallLogs(acceptedEvents, partitionId, nextRecordIndex);
@@ -241,6 +273,7 @@ export function useEventHubReceiver({
     ) {
       resumeFrom.set(partitionId, highestSequenceNumber);
     }
+    return checkpointEvent;
   }
 
   function updateUiFilterOptions(records: readonly FirewallLogRecord[], rebuild = false) {
@@ -542,6 +575,13 @@ export function useEventHubReceiver({
       }
 
       client = createClient(form);
+      const expectedPartitionIds = (await client.getPartitionIds?.()) ?? [];
+
+      if (generation !== connectionGeneration) {
+        await client.close();
+        client = null;
+        return false;
+      }
 
       subscription = client.subscribe(
         {
@@ -555,7 +595,10 @@ export function useEventHubReceiver({
               return;
             }
 
-            receiveEvents(events, context.partitionId);
+            const checkpointEvent = receiveEvents(events, context.partitionId);
+            if (checkpointEvent && context.updateCheckpoint) {
+              await context.updateCheckpoint(checkpointEvent);
+            }
           },
           processError: async (error) => {
             if (generation !== connectionGeneration) {
@@ -567,9 +610,10 @@ export function useEventHubReceiver({
         },
         {
           maxBatchSize: 1,
-          startPosition: {
-            enqueuedOn: getEventHubLookbackStart(form.lookbackMinutes),
-          },
+          startPosition: getManualEventHubStartPosition(
+            form.lookbackMinutes,
+            expectedPartitionIds,
+          ),
         },
       );
 

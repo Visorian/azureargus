@@ -7,6 +7,7 @@ import {
 import {
   eventsToFirewallLogs,
   type CreateEventHubReceiverClient,
+  type EventHubLogEvent,
   type EventHubReceiverClient,
 } from "../../app/composables/useEventHubReceiver";
 import type { FirewallLogRecord } from "../../shared/types/firewall";
@@ -797,6 +798,55 @@ describe("Event Hub receiver helpers", () => {
     expect(subscribe.mock.calls[0]?.[1]).toMatchObject({
       maxBatchSize: 1,
       startPosition: { enqueuedOn: new Date("2026-07-10T11:57:00.000Z") },
+    });
+
+    await receiver.disconnect();
+  });
+
+  it("checkpoints advancing manual batches and builds complete resume positions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const updateCheckpoint = vi.fn<(event: EventHubLogEvent) => Promise<void>>(
+      async () => undefined,
+    );
+    const client: EventHubReceiverClient = {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      getPartitionIds: vi.fn<() => Promise<string[]>>(async () => ["0", "1"]),
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+      },
+    };
+    const { getManualEventHubStartPosition, useEventHubReceiver } = await import(
+      "../../app/composables/useEventHubReceiver"
+    );
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
+
+    await receiver.connect(createValidForm());
+    const context = { partitionId: "0", updateCheckpoint };
+    await requireHandlers(handlers).processEvents(
+      [
+        { body: { msg: "first" }, sequenceNumber: 41 },
+        { body: { msg: "highest" }, sequenceNumber: 43 },
+        { body: { msg: "middle" }, sequenceNumber: 42 },
+      ],
+      context,
+    );
+    expect(updateCheckpoint).toHaveBeenCalledOnce();
+    expect(updateCheckpoint).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sequenceNumber: 43 }),
+    );
+
+    await requireHandlers(handlers).processEvents(
+      [{ body: { msg: "replayed" }, sequenceNumber: 42 }],
+      context,
+    );
+    expect(updateCheckpoint).toHaveBeenCalledOnce();
+    expect(getManualEventHubStartPosition(3, ["0", "1"], new Map([["0", 43]]))).toEqual({
+      "0": { sequenceNumber: 43, isInclusive: false },
+      "1": { enqueuedOn: new Date("2026-07-10T11:57:00.000Z") },
     });
 
     await receiver.disconnect();
