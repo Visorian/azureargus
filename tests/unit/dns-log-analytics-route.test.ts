@@ -119,6 +119,8 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({
       provider: "entra",
+      canRefresh: false,
+      expireAt: 1_800_000_000,
       claims: { sub: "user" },
     });
   vi.mocked(getLogAnalyticsAccessToken).mockReset().mockResolvedValue("managed-token");

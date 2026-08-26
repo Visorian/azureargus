@@ -101,7 +101,11 @@ afterAll(() => {
 beforeEach(() => {
   currentRuntimeConfig = runtimeConfig;
   useRuntimeConfig.mockClear();
-  vi.mocked(requireUserSession).mockReset().mockResolvedValue({ expireAt: 1_800_000_000 });
+  vi.mocked(requireUserSession).mockReset().mockResolvedValue({
+    provider: "entra",
+    canRefresh: false,
+    expireAt: 1_800_000_000,
+  });
   vi.mocked(getUserSessionId).mockReset().mockResolvedValue("default-session");
   vi.mocked(EventHubConsumerClient).mockReset();
   vi.mocked(createManagedEventHubStream).mockReset();
