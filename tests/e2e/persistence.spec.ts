@@ -37,6 +37,7 @@ function getStoredLogCount(page: Page) {
 }
 
 test("local log retention is opt-in and clearing is persistent", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-07-21T12:00:00.000Z"));
   await mockManagedDeployment(page, { eventHub: true, logAnalytics: false });
   await mockManagedEventHubStream(page);
 

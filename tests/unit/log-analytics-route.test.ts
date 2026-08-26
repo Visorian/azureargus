@@ -96,6 +96,8 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({
       provider: "entra",
+      canRefresh: false,
+      expireAt: 1_800_000_000,
       claims: { tid: "independent-login-tenant", roles: ["Unrelated.Login.Role"] },
     });
   vi.mocked(getLogAnalyticsAccessToken).mockReset().mockResolvedValue("access-token");
