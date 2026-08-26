@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.4.2](https://github.com/Visorian/azureargus/compare/v0.4.1...v0.4.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **release:** drop Copilot review gate ([#76](https://github.com/Visorian/azureargus/issues/76)) ([9966484](https://github.com/Visorian/azureargus/commit/99664840bd8bd0747285e9a80bc55723b839a7da))
+
 ## [0.4.1](https://github.com/Visorian/azureargus/compare/v0.4.0...v0.4.1) (2026-08-25)
 
 
