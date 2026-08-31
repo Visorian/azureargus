@@ -711,7 +711,7 @@ async function resetEventHub() {
     await receiver.reset();
   } finally {
     if (temporarySession) {
-      clearTemporaryEventHubViewState();
+      realTimeQuery.resetFilters();
     }
   }
 }
