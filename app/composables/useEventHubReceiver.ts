@@ -872,11 +872,15 @@ export function useEventHubReceiver({
 
   async function reset() {
     const clearTemporarySession = activeConnection?.mode === "manual";
-    await disconnect();
-    if (!clearTemporarySession) {
-      clear();
-      errors.value = [];
+    if (clearTemporarySession) {
+      await disconnect();
+      return;
     }
+
+    const disconnecting = disconnect();
+    clear();
+    errors.value = [];
+    await disconnecting;
   }
 
   function addNormalizedBatchSink(sink: NormalizedLogBatchSink) {

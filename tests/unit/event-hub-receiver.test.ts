@@ -182,6 +182,45 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
+  it("clears managed state even when reset teardown fails", async () => {
+    const mocks = installNuxtMocks();
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    const managedFetch = vi.fn<typeof fetch>(async () => new Response(body, { status: 200 }));
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ managedFetch });
+    const onClear = vi.fn<() => void>();
+    receiver.addNormalizedBatchSink({
+      onClear,
+      onRecords: vi.fn<(records: readonly FirewallLogRecord[]) => void>(),
+    });
+
+    await receiver.connect(createInitialEventHubConnectionForm(), "managed");
+    streamController.enqueue(
+      encoder.encode(
+        '{"type":"events","events":[{"body":{"msg":"managed"},"enqueuedTimeUtc":"2026-07-12T12:00:00.000Z","partitionId":"0","sequenceNumber":1}]}\n',
+      ),
+    );
+    await vi.waitFor(() => expect(receiver.receivedCount.value).toBe(1));
+    mocks.historyFlush.mockRejectedValueOnce(new Error("history flush failed"));
+
+    await expect(receiver.reset()).rejects.toThrow("history flush failed");
+
+    expect(mocks.logs.value).toEqual([]);
+    expect(receiver.receivedCount.value).toBe(0);
+    expect(receiver.categoryOptions.value).toEqual([]);
+    expect(receiver.actionOptions.value).toEqual([]);
+    expect(receiver.protocolOptions.value).toEqual([]);
+    expect(onClear).toHaveBeenCalledOnce();
+    expect(receiver.status.value).toBe("idle");
+    expect(receiver.errors.value).toEqual(["history flush failed"]);
+  });
+
   it("reconnects managed streams with resume positions and resets backoff on recovery", async () => {
     vi.useFakeTimers();
     installNuxtMocks();
