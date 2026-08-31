@@ -162,8 +162,10 @@ export function useLogHistoryPersistence() {
 
     try {
       await clearStoredHistory();
+      return true;
     } catch (error: unknown) {
       lastError.value = getErrorMessage(error);
+      return false;
     }
   }
 

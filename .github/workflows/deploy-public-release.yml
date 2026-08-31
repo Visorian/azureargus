@@ -183,6 +183,12 @@ jobs:
             infrastructure/application/public-gwc.bicepparam)"
           [ "$hosted_version" = "$VERSION" ]
 
+      - name: Check out deployment contract
+        uses: actions/checkout@3d3c42e5aac5ba805825a76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+
       - name: Log in to Azure with OIDC
         uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
         with:
@@ -215,6 +221,11 @@ jobs:
             printf 'resource group %s is in %s\n' "$RESOURCE_GROUP" "$location" >&2
             exit 1
           }
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'resolved public image digest is invalid\n' >&2
+            exit 1
+          }
+          expected_image="ghcr.io/visorian/azureargus@${DIGEST}"
 
           deployment="azureargus-${VERSION//./-}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           result="$RUNNER_TEMP/deployment.json"
@@ -222,13 +233,13 @@ jobs:
             --name "$deployment" \
             --only-show-errors \
             --parameters infrastructure/application/public-gwc.bicepparam \
+            --parameters targetImage="$expected_image" \
             --resource-group "$RESOURCE_GROUP" \
             --output json >"$result"
 
           app_id="$(jq -er '.properties.outputs.applicationResourceId.value' "$result")"
           app_url="$(jq -er '.properties.outputs.applicationUrl.value' "$result")"
           environment_id="$(jq -er '.properties.outputs.environmentResourceId.value' "$result")"
-          expected_image="ghcr.io/visorian/azureargus:${VERSION}"
           image=''
           revision=''
           for attempt in $(seq 1 18); do

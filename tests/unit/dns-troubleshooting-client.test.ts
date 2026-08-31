@@ -168,6 +168,24 @@ describe("DNS troubleshooting client", () => {
     harness.dns.resetFilters();
     expect(harness.dns.showUnidentifiedTransports.value).toBe(false);
 
+    harness.mode.value = "real-time-analysis";
+    await nextTick();
+    harness.dns.filters.value.search = "source A";
+    harness.dns.showUnidentifiedTransports.value = true;
+    harness.mode.value = "log-analysis";
+    await nextTick();
+    harness.dns.filters.value.search = "source B";
+    harness.dns.showUnidentifiedTransports.value = true;
+
+    harness.dns.resetRealtimeFilters();
+
+    expect(harness.dns.filters.value.search).toBe("source B");
+    expect(harness.dns.showUnidentifiedTransports.value).toBe(true);
+    harness.mode.value = "real-time-analysis";
+    await nextTick();
+    expect(harness.dns.filters.value.search).toBe("");
+    expect(harness.dns.showUnidentifiedTransports.value).toBe(false);
+
     harness.scope.stop();
     expect(harness.removeSink).toHaveBeenCalledOnce();
   });

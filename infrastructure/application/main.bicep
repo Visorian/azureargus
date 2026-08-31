@@ -11,6 +11,9 @@ param delegatedClientId string = ''
 @description('Optional. Stable Azure Argus container version in X.Y.Z form.')
 param targetVersion string = '0.4.2'
 
+@description('Optional. Immutable Azure Argus image reference for the hosted deployment.')
+param targetImage string = ''
+
 @description('Optional. Managed Environment name. A deployment-specific name is generated when empty.')
 param managedEnvironmentName string = ''
 
@@ -20,7 +23,9 @@ param applicationName string = ''
 @description('Optional. Custom hostname. Leave empty during initial DNS bootstrap.')
 param customDomainName string = ''
 
-var containerImage = 'ghcr.io/visorian/azureargus:${targetVersion}'
+var containerImage = empty(targetImage)
+  ? 'ghcr.io/visorian/azureargus:${targetVersion}'
+  : targetImage
 var resourceSuffix = uniqueString(subscription().id, resourceGroup().id)
 var resolvedEnvironmentName = empty(managedEnvironmentName)
   ? 'azureargus-env-${resourceSuffix}'
