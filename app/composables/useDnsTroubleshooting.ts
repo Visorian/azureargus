@@ -469,6 +469,11 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     showUnidentifiedTransports.value = false;
   }
 
+  function resetRealtimeFilters() {
+    Object.assign(realtimeFilters, defaultFilters());
+    realtimeShowUnidentifiedTransports.value = false;
+  }
+
   function clearActiveDataset() {
     closeDetail();
     if (options.mode.value === "log-analysis") {
@@ -533,6 +538,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     rangeDirty,
     rangeError,
     resetFilters,
+    resetRealtimeFilters,
     run,
     selectEntry,
     selectedEntry,

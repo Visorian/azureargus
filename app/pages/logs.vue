@@ -692,6 +692,7 @@ function closeDetail() {
 function clearTemporaryEventHubViewState() {
   closeDetail();
   realTimeQuery.resetFilters();
+  dns.resetRealtimeFilters();
 }
 
 async function disconnectEventHub() {
@@ -712,6 +713,7 @@ async function resetEventHub() {
   } finally {
     if (temporarySession) {
       realTimeQuery.resetFilters();
+      dns.resetRealtimeFilters();
     }
   }
 }
