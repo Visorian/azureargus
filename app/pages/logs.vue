@@ -3,7 +3,10 @@ import { RecycleScroller } from "vue-virtual-scroller";
 
 import visorianNegative from "~/assets/img/visorian-negative.svg";
 import visorianPositive from "~/assets/img/visorian-positive.svg";
-import type { EventHubConnectionForm } from "~/composables/useEventHubConnection";
+import {
+  validateEventHubConnectionForm,
+  type EventHubConnectionForm,
+} from "~/composables/useEventHubConnection";
 import type { AnalysisMode } from "~/composables/useAnalysisMode";
 import {
   createDefaultLogFilters,
@@ -374,10 +377,10 @@ const modeState = useAnalysisMode({
   canUseLogAnalysis,
   canUseRealTime: eventHubSourceAvailable,
   closeDetail,
-  disconnectRealTime: receiver.disconnect,
+  disconnectRealTime: disconnectEventHub,
   mode: analysisMode,
   pauseRealTime: receiver.pause,
-  resetRealTime: receiver.reset,
+  resetRealTime: resetEventHub,
 });
 const modeTransitioning = modeState.transitioning;
 const actionLabels: Record<string, string> = {
@@ -618,6 +621,9 @@ async function connect() {
 
   connecting.value = true;
   try {
+    if (!managedMode.value && validateEventHubConnectionForm(connectionForm).length === 0) {
+      clearTemporaryEventHubViewState();
+    }
     await receiver.connect(connectionForm, managedMode.value ? "managed" : "manual");
   } finally {
     connecting.value = false;
@@ -681,6 +687,33 @@ function closeDetail() {
   detailOpen.value = false;
   selectedLog.value = null;
   dns.closeDetail();
+}
+
+function clearTemporaryEventHubViewState() {
+  closeDetail();
+  realTimeQuery.resetFilters();
+}
+
+async function disconnectEventHub() {
+  const temporarySession = !managedMode.value;
+  try {
+    await receiver.disconnect();
+  } finally {
+    if (temporarySession) {
+      clearTemporaryEventHubViewState();
+    }
+  }
+}
+
+async function resetEventHub() {
+  const temporarySession = !managedMode.value;
+  try {
+    await receiver.reset();
+  } finally {
+    if (temporarySession) {
+      clearTemporaryEventHubViewState();
+    }
+  }
 }
 
 function setLens(lens: LogsLens) {
@@ -1190,7 +1223,7 @@ function statusColor(status: string) {
               :reconnecting="receiver.status.value === 'reconnecting'"
               @update:connection-form="updateConnectionForm"
               @connect="connect"
-              @disconnect="receiver.disconnect"
+              @disconnect="disconnectEventHub"
               @update-log-retention="updateLogRetention"
             />
             <div

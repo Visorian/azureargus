@@ -97,6 +97,12 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Event Hub receiver error.";
 }
 
+function getTeardownErrorMessages(error: unknown) {
+  return error instanceof AggregateError
+    ? error.errors.map(getErrorMessage)
+    : [getErrorMessage(error)];
+}
+
 function getSequenceNumber(event: EventHubLogEvent) {
   if (typeof event.sequenceNumber === "number") {
     return Number.isSafeInteger(event.sequenceNumber) && event.sequenceNumber >= 0
@@ -496,13 +502,35 @@ export function useEventHubReceiver({
     return serializedPromise;
   }
 
-  function disconnect() {
+  async function disconnect() {
+    const clearTemporarySession = activeConnection?.mode === "manual";
     connectionGeneration += 1;
     activeConnection = null;
     reconnectAttempts = 0;
     cancelReconnect();
     resumeFrom.clear();
-    return teardown();
+
+    let teardownSucceeded = false;
+    let teardownErrors: string[] = [];
+    try {
+      await teardown();
+      teardownSucceeded = true;
+    } catch (error: unknown) {
+      teardownErrors = getTeardownErrorMessages(error);
+      throw error;
+    } finally {
+      if (clearTemporarySession) {
+        clear();
+        const historyCleared = await logHistoryPersistence.clearHistory();
+        if (teardownSucceeded) {
+          errors.value = historyCleared ? [] : ["Stored Event Hub history could not be cleared."];
+        } else {
+          errors.value = historyCleared
+            ? teardownErrors.slice(0, 5)
+            : ["Stored Event Hub history could not be cleared.", ...teardownErrors].slice(0, 5);
+        }
+      }
+    }
   }
 
   function markRecovered() {
@@ -747,14 +775,37 @@ export function useEventHubReceiver({
 
     try {
       await teardown(false);
-    } catch {
+    } catch (error: unknown) {
       activeConnection = null;
       status.value = "error";
+      if (mode === "manual") {
+        clear();
+        const historyCleared = await logHistoryPersistence.clearHistory();
+        const teardownErrors = getTeardownErrorMessages(error);
+        errors.value = historyCleared
+          ? teardownErrors.slice(0, 5)
+          : ["Stored Event Hub history could not be cleared.", ...teardownErrors].slice(0, 5);
+      }
       return false;
     }
 
     if (generation !== connectionGeneration) {
       return false;
+    }
+
+    if (mode === "manual") {
+      clear();
+      errors.value = [];
+      const historyCleared = await logHistoryPersistence.clearHistory();
+      if (generation !== connectionGeneration) {
+        return false;
+      }
+      if (!historyCleared) {
+        activeConnection = null;
+        status.value = "error";
+        errors.value = ["Stored Event Hub history could not be cleared."];
+        return false;
+      }
     }
 
     status.value = "connecting";
@@ -820,10 +871,12 @@ export function useEventHubReceiver({
   }
 
   async function reset() {
-    const disconnecting = disconnect();
-    clear();
-    errors.value = [];
-    await disconnecting;
+    const clearTemporarySession = activeConnection?.mode === "manual";
+    await disconnect();
+    if (!clearTemporarySession) {
+      clear();
+      errors.value = [];
+    }
   }
 
   function addNormalizedBatchSink(sink: NormalizedLogBatchSink) {

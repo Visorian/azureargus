@@ -1,7 +1,11 @@
 import { expect, type Page, test } from "@playwright/test";
 
 import { EVENT_HUB_CONNECTION_STRING_STORAGE_KEY } from "../../app/utils/eventHubConnectionStorage";
-import { LOG_HISTORY_DB_NAME, LOG_HISTORY_STORE_NAME } from "../../app/utils/logHistoryRecord";
+import {
+  LOG_HISTORY_DB_NAME,
+  LOG_HISTORY_STORE_NAME,
+  type PersistedFirewallLogRecord,
+} from "../../app/utils/logHistoryRecord";
 import { mockManagedDeployment } from "./support/deployment";
 import { enterAnonymousMode, openSettings } from "./support/logsWorkspace";
 import {
@@ -33,6 +37,30 @@ function getStoredLogCount(page: Page) {
         };
       }),
     { databaseName: LOG_HISTORY_DB_NAME, storeName: LOG_HISTORY_STORE_NAME },
+  );
+}
+
+function storeLog(page: Page, record: PersistedFirewallLogRecord) {
+  return page.evaluate(
+    ({ databaseName, log, storeName }) =>
+      new Promise<void>((resolveStore, rejectStore) => {
+        const openRequest = indexedDB.open(databaseName);
+        openRequest.onerror = () => rejectStore(openRequest.error);
+        openRequest.onsuccess = () => {
+          const database = openRequest.result;
+          const transaction = database.transaction(storeName, "readwrite");
+          transaction.objectStore(storeName).put(log);
+          transaction.onerror = () => {
+            database.close();
+            rejectStore(transaction.error);
+          };
+          transaction.oncomplete = () => {
+            database.close();
+            resolveStore();
+          };
+        };
+      }),
+    { databaseName: LOG_HISTORY_DB_NAME, log: record, storeName: LOG_HISTORY_STORE_NAME },
   );
 }
 
@@ -125,6 +153,43 @@ test("local log retention is opt-in and clearing is persistent", async ({ page }
   await openSettings(page);
   await expect(logRetentionSwitch).not.toBeChecked();
   await expect(page.getByText("No logs received")).toBeVisible();
+});
+
+test("starting a temporary Event Hub session removes predecessor history", async ({ page }) => {
+  await enterAnonymousMode(page);
+  await page.waitForLoadState("networkidle");
+  const searchInput = page.getByRole("textbox", { name: "Search logs" });
+  await searchInput.fill("source A");
+  const settingsDrawer = await openSettings(page);
+  const logRetentionSwitch = settingsDrawer.getByRole("switch", {
+    name: "Local log retention",
+  });
+  await logRetentionSwitch.click();
+  await expect(logRetentionSwitch).toBeChecked();
+  await expect.poll(() => getStoredLogCount(page)).toBe(0);
+
+  await storeLog(page, {
+    id: "source-a-record",
+    timestamp: "2026-07-21T10:00:00.000Z",
+    category: "AZFWNetworkRule",
+    action: "Deny",
+    protocol: "TCP",
+    message: "source A must not survive",
+    searchableText: "source A must not survive",
+  });
+  await expect.poll(() => getStoredLogCount(page)).toBe(1);
+
+  await settingsDrawer
+    .getByRole("textbox", { name: "Connection string*" })
+    .fill(
+      "Endpoint=sb://127.0.0.1:1/;SharedAccessKeyName=Listen;SharedAccessKey=temporary;EntityPath=source-b",
+    );
+  await settingsDrawer.getByRole("button", { name: "Connect", exact: true }).click();
+
+  await expect.poll(() => getStoredLogCount(page)).toBe(0);
+  await expect(logRetentionSwitch).toBeChecked();
+  await expect(searchInput).toHaveValue("");
+  await expect(page.getByRole("main")).toBeVisible();
 });
 
 test("invalid Event Hub settings stay idle and show validation errors", async ({ page }) => {

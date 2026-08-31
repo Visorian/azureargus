@@ -77,6 +77,10 @@ function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unk
   const historyFlush = vi.fn(async () => {
     order.push("history-flush");
   });
+  const historyClear = vi.fn<() => Promise<boolean>>(async () => {
+    order.push("history-clear");
+    return true;
+  });
   const queueRecords = vi.fn();
 
   vi.stubGlobal("useState", <T>(key: string, initializer: () => T): Ref<T> => {
@@ -100,12 +104,14 @@ function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unk
     },
   }));
   vi.stubGlobal("useLogHistoryPersistence", () => ({
+    clearHistory: historyClear,
     clearQueueIfDisabled: vi.fn(),
     flush: historyFlush,
     queueRecords,
   }));
 
   return {
+    historyClear,
     historyFlush,
     logs,
     pushMany,
@@ -767,7 +773,7 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
-  it("seeds fallback index from shared physical count after receiver recreation", async () => {
+  it("starts fallback indexes from zero after a temporary receiver session ends", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const stateCache = new Map<string, Ref<unknown>>();
@@ -803,8 +809,8 @@ describe("Event Hub receiver helpers", () => {
     );
     vi.advanceTimersByTime(100);
 
-    expect(onRecords.mock.calls[0]?.[0]?.[0]?.id).toContain("0:index-2:0:");
-    expect(secondReceiver.receivedCount.value).toBe(2);
+    expect(onRecords.mock.calls[0]?.[0]?.[0]?.id).toContain("0:index-0:0:");
+    expect(secondReceiver.receivedCount.value).toBe(1);
     await secondReceiver.disconnect();
   });
 
@@ -854,7 +860,7 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
-  it("does not correlate records across reconnect boundary", async () => {
+  it("does not correlate records across temporary sessions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     installNuxtMocks();
@@ -892,8 +898,156 @@ describe("Event Hub receiver helpers", () => {
 
     expect(onRecords).toHaveBeenCalledOnce();
     expect(onRecords.mock.calls[0]?.[0]?.[0]?.category).toBe("AzureFirewallNetworkRule");
-    expect(receiver.receivedCount.value).toBe(2);
+    expect(receiver.receivedCount.value).toBe(1);
     await receiver.disconnect();
+  });
+
+  it("isolates records, counters, options, errors, resume state, and history on direct switch", async () => {
+    vi.useFakeTimers();
+    const mocks = installNuxtMocks();
+    const handlers: ReceiverHandlers[] = [];
+    const clients: EventHubReceiverClient[] = [];
+    const createClient: CreateEventHubReceiverClient = () => {
+      const client: EventHubReceiverClient = {
+        close: vi.fn<() => Promise<void>>(async () => undefined),
+        getPartitionIds: vi.fn<() => Promise<string[]>>(async () => ["0"]),
+        subscribe: (nextHandlers) => {
+          handlers.push(nextHandlers);
+          return { close: vi.fn<() => Promise<void>>(async () => undefined) };
+        },
+      };
+      clients.push(client);
+      return client;
+    };
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => createClient });
+
+    await receiver.connect(createValidForm());
+    await requireHandlers(handlers[0]).processEvents(
+      [
+        {
+          body: {
+            category: "AZFWNetworkRule",
+            properties: { Action: "Deny", Protocol: "TCP" },
+            time: "2026-07-16T13:25:00.000Z",
+          },
+          sequenceNumber: 7,
+        },
+      ],
+      { partitionId: "0" },
+    );
+    await requireHandlers(handlers[0]).processError(new Error("source A error"));
+    vi.advanceTimersByTime(100);
+
+    expect(mocks.logs.value).toHaveLength(1);
+    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.categoryOptions.value).toEqual(["AZFWNetworkRule"]);
+    expect(receiver.actionOptions.value).toEqual(["Deny"]);
+    expect(receiver.protocolOptions.value).toEqual(["TCP"]);
+    expect(receiver.errors.value).toEqual(["source A error"]);
+    expect(receiver.getResumeFrom()).toEqual({ "0": 7 });
+
+    await receiver.connect(createValidForm());
+
+    expect(clients[0]?.close).toHaveBeenCalledOnce();
+    expect(mocks.logs.value).toEqual([]);
+    expect(receiver.receivedCount.value).toBe(0);
+    expect(receiver.categoryOptions.value).toEqual([]);
+    expect(receiver.actionOptions.value).toEqual([]);
+    expect(receiver.protocolOptions.value).toEqual([]);
+    expect(receiver.errors.value).toEqual([]);
+    expect(receiver.getResumeFrom()).toEqual({});
+    expect(mocks.historyClear).toHaveBeenCalledTimes(2);
+
+    await requireHandlers(handlers[1]).processEvents(
+      [
+        {
+          body: {
+            category: "AZFWApplicationRule",
+            properties: { Action: "Allow", Protocol: "HTTPS" },
+            time: "2026-07-16T13:26:00.000Z",
+          },
+          sequenceNumber: 1,
+        },
+      ],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
+
+    expect(mocks.logs.value).toEqual([
+      expect.objectContaining({
+        category: "AZFWApplicationRule",
+        action: "Allow",
+        protocol: "HTTPS",
+      }),
+    ]);
+    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.getResumeFrom()).toEqual({ "0": 1 });
+    await receiver.disconnect();
+  });
+
+  it("clears the prior temporary session and keeps the replacement closed when teardown fails", async () => {
+    vi.useFakeTimers();
+    const mocks = installNuxtMocks();
+    let handlers: ReceiverHandlers | undefined;
+    const subscriptionClose = vi.fn<() => Promise<void>>(async () => {
+      throw new Error("subscription close failed");
+    });
+    const clientClose = vi.fn<() => Promise<void>>(async () => {
+      throw new Error("client close failed");
+    });
+    const createClient = vi.fn<CreateEventHubReceiverClient>(() => ({
+      close: clientClose,
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return { close: subscriptionClose };
+      },
+    }));
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory: async () => createClient });
+
+    await receiver.connect(createValidForm());
+    await requireHandlers(handlers).processEvents(
+      [
+        {
+          body: {
+            category: "AZFWNetworkRule",
+            properties: { Action: "Deny", Protocol: "TCP" },
+          },
+          sequenceNumber: 9,
+        },
+      ],
+      { partitionId: "0" },
+    );
+    await requireHandlers(handlers).processError(new Error("source A error"));
+    vi.advanceTimersByTime(100);
+
+    await expect(receiver.connect(createValidForm())).resolves.toBe(false);
+
+    expect(createClient).toHaveBeenCalledOnce();
+    expect(mocks.logs.value).toEqual([]);
+    expect(receiver.receivedCount.value).toBe(0);
+    expect(receiver.categoryOptions.value).toEqual([]);
+    expect(receiver.actionOptions.value).toEqual([]);
+    expect(receiver.protocolOptions.value).toEqual([]);
+    expect(receiver.getResumeFrom()).toEqual({});
+    expect(mocks.historyClear).toHaveBeenCalledTimes(2);
+    expect(receiver.errors.value).toEqual(["subscription close failed", "client close failed"]);
+    expect(receiver.status.value).toBe("error");
+  });
+
+  it("does not open a temporary source when predecessor history cannot be cleared", async () => {
+    const mocks = installNuxtMocks();
+    mocks.historyClear.mockResolvedValueOnce(false);
+    const loadClientFactory = vi.fn<() => Promise<CreateEventHubReceiverClient>>();
+    const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
+    const receiver = useEventHubReceiver({ loadClientFactory });
+
+    await expect(receiver.connect(createValidForm())).resolves.toBe(false);
+
+    expect(loadClientFactory).not.toHaveBeenCalled();
+    expect(receiver.status.value).toBe("error");
+    expect(receiver.errors.value).toEqual(["Stored Event Hub history could not be cleared."]);
   });
 
   it("does not create or subscribe a client after connect is invalidated", async () => {
@@ -1213,6 +1367,7 @@ describe("Event Hub receiver helpers", () => {
     const onClear = vi.fn<() => void>();
     receiver.addNormalizedBatchSink({ onClear, onRecords });
     await receiver.connect(createValidForm());
+    onClear.mockClear();
 
     await requireHandlers(handlers).processEvents(
       [
@@ -1315,15 +1470,18 @@ describe("Event Hub receiver helpers", () => {
     await receiver.disconnect();
   });
 
-  it("continues receiving after subscription errors", async () => {
+  it("preserves records and monotonic resume state across automatic reconnect", async () => {
     vi.useFakeTimers();
-    installNuxtMocks();
+    const mocks = installNuxtMocks();
     let handlers: ReceiverHandlers | undefined;
+    const startPositions: unknown[] = [];
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => undefined),
-      subscribe: (nextHandlers) => {
+      close: vi.fn<() => Promise<void>>(async () => undefined),
+      getPartitionIds: vi.fn<() => Promise<string[]>>(async () => ["0"]),
+      subscribe: (nextHandlers, options) => {
         handlers = nextHandlers;
-        return { close: vi.fn(async () => undefined) };
+        startPositions.push(options.startPosition);
+        return { close: vi.fn<() => Promise<void>>(async () => undefined) };
       },
     };
     const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
@@ -1331,6 +1489,12 @@ describe("Event Hub receiver helpers", () => {
       loadClientFactory: async () => () => client,
     });
     await receiver.connect(createValidForm());
+
+    await requireHandlers(handlers).processEvents(
+      [{ body: { msg: "before reconnect" }, sequenceNumber: 4 }],
+      { partitionId: "0" },
+    );
+    vi.advanceTimersByTime(100);
 
     receiver.pause();
     await requireHandlers(handlers).processError(new Error("paused receive failure"));
@@ -1346,12 +1510,17 @@ describe("Event Hub receiver helpers", () => {
     ]);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(receiver.status.value).toBe("connected");
+    expect(startPositions[1]).toEqual({ "0": { sequenceNumber: 4, isInclusive: false } });
+    expect(mocks.historyClear).toHaveBeenCalledOnce();
 
-    await requireHandlers(handlers).processEvents([{ body: { msg: "recovered" } }], {
-      partitionId: "0",
-    });
+    await requireHandlers(handlers).processEvents(
+      [{ body: { msg: "after reconnect" }, sequenceNumber: 5 }],
+      { partitionId: "0" },
+    );
     vi.advanceTimersByTime(100);
-    expect(receiver.receivedCount.value).toBe(1);
+    expect(mocks.logs.value).toHaveLength(2);
+    expect(receiver.receivedCount.value).toBe(2);
+    expect(receiver.getResumeFrom()).toEqual({ "0": 5 });
 
     await receiver.disconnect();
   });
@@ -1393,10 +1562,16 @@ describe("Event Hub receiver helpers", () => {
 
     await receiver.disconnect();
 
-    expect(order).toEqual(["subscription-close", "client-close", "batch-flush", "history-flush"]);
-    expect(mocks.logs.value).toHaveLength(1);
+    expect(order).toEqual([
+      "subscription-close",
+      "client-close",
+      "batch-flush",
+      "history-flush",
+      "history-clear",
+    ]);
+    expect(mocks.logs.value).toEqual([]);
     expect(mocks.queueRecords).toHaveBeenCalledOnce();
-    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.receivedCount.value).toBe(0);
     expect(receiver.errors.value).toEqual([]);
     expect(receiver.status.value).toBe("idle");
   });
@@ -1429,11 +1604,16 @@ describe("Event Hub receiver helpers", () => {
     });
     await receiver.disconnect();
 
-    expect(order).toEqual(["subscription-close", "client-close", "batch-flush", "history-flush"]);
-    expect(mocks.logs.value).toHaveLength(1);
-    expect(mocks.logs.value[0]?.category).toBe("AzureFirewallNetworkRule");
+    expect(order).toEqual([
+      "subscription-close",
+      "client-close",
+      "batch-flush",
+      "history-flush",
+      "history-clear",
+    ]);
+    expect(mocks.logs.value).toEqual([]);
     expect(mocks.queueRecords).toHaveBeenCalledOnce();
-    expect(receiver.receivedCount.value).toBe(1);
+    expect(receiver.receivedCount.value).toBe(0);
   });
 
   it("resets paused receiver resources and buffered state", async () => {
@@ -1459,6 +1639,7 @@ describe("Event Hub receiver helpers", () => {
       onRecords: vi.fn<(records: readonly FirewallLogRecord[]) => void>(),
     });
     await receiver.connect(createValidForm());
+    onClear.mockClear();
     await requireHandlers(handlers).processEvents(
       [
         {
