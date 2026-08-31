@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7368394957189738762"
+      "templateHash": "18113490250452159460"
     }
   },
   "parameters": {
@@ -32,6 +32,13 @@
         "description": "Optional. Stable Azure Argus container version in X.Y.Z form."
       }
     },
+    "targetImage": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional. Immutable Azure Argus image reference for the hosted deployment."
+      }
+    },
     "managedEnvironmentName": {
       "type": "string",
       "defaultValue": "",
@@ -55,7 +62,7 @@
     }
   },
   "variables": {
-    "containerImage": "[format('ghcr.io/visorian/azureargus:{0}', parameters('targetVersion'))]",
+    "containerImage": "[if(empty(parameters('targetImage')), format('ghcr.io/visorian/azureargus:{0}', parameters('targetVersion')), parameters('targetImage'))]",
     "resourceSuffix": "[uniqueString(subscription().id, resourceGroup().id)]",
     "resolvedEnvironmentName": "[if(empty(parameters('managedEnvironmentName')), format('azureargus-env-{0}', variables('resourceSuffix')), parameters('managedEnvironmentName'))]",
     "resolvedApplicationName": "[if(empty(parameters('applicationName')), format('azureargus-{0}', variables('resourceSuffix')), parameters('applicationName'))]"

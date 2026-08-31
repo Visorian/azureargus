@@ -58,12 +58,13 @@ jobs:
 
           jq --exit-status '
             ([.parameters | keys[]]
-              == ["applicationName", "customDomainName", "delegatedClientId", "location", "managedEnvironmentName", "targetVersion"])
+              == ["applicationName", "customDomainName", "delegatedClientId", "location", "managedEnvironmentName", "targetImage", "targetVersion"])
             and .parameters.delegatedClientId.defaultValue == ""
+            and .parameters.targetImage.defaultValue == ""
             and .parameters.targetVersion.minLength == 5
             and .parameters.targetVersion.maxLength == 70
             and .variables.containerImage
-              == "[format(\u0027ghcr.io/visorian/azureargus:{0}\u0027, parameters(\u0027targetVersion\u0027))]"
+              == "[if(empty(parameters(\u0027targetImage\u0027)), format(\u0027ghcr.io/visorian/azureargus:{0}\u0027, parameters(\u0027targetVersion\u0027)), parameters(\u0027targetImage\u0027))]"
             and ([.resources[] | select(.name == "azureargus-environment")]
               | length == 1)
             and ([.resources[] | select(.name == "azureargus-application")]
