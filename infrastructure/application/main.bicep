@@ -9,7 +9,7 @@ param delegatedClientId string = ''
 @minLength(5)
 @maxLength(70)
 @description('Optional. Stable Azure Argus container version in X.Y.Z form.')
-param targetVersion string = '0.4.1'
+param targetVersion string = '0.4.2'
 
 @description('Optional. Immutable Azure Argus image reference for the hosted deployment.')
 param targetImage string = ''
