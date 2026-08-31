@@ -690,7 +690,9 @@ function closeDetail() {
 }
 
 function clearTemporaryEventHubViewState() {
-  closeDetail();
+  if (analysisMode.value === "real-time-analysis") {
+    closeDetail();
+  }
   realTimeQuery.resetFilters();
   dns.resetRealtimeFilters();
 }
