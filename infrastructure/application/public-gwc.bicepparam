@@ -5,4 +5,4 @@ param delegatedClientId = readEnvironmentVariable('AZUREARGUS_DELEGATED_CLIENT_I
 param targetVersion = '0.4.5' // x-release-please-version
 param managedEnvironmentName = 'azureargus-env-gwc'
 param applicationName = 'azureargus-gwc'
-param customDomainName = ''
+param customDomainName = 'azureargus.vsrn.cc'
