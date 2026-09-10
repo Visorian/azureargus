@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.4.4](https://github.com/Visorian/azureargus/compare/v0.4.3...v0.4.4) (2026-09-10)
+
+
+### Bug Fixes
+
+* **release:** refresh unavailable country database pin ([42260d5](https://github.com/Visorian/azureargus/commit/42260d5da94b7a5b18e33bc9ca6bb924d0041d10))
+
 ## [0.4.3](https://github.com/Visorian/azureargus/compare/v0.4.2...v0.4.3) (2026-09-10)
 
 
