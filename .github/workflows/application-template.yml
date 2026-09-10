@@ -121,7 +121,7 @@ jobs:
             and .parameters.delegatedClientId.value == "00000000-0000-0000-0000-000000000000"
             and .parameters.managedEnvironmentName.value == "azureargus-env-gwc"
             and .parameters.applicationName.value == "azureargus-gwc"
-            and .parameters.customDomainName.value == "azureargus.vsrn.cc"
+            and .parameters.customDomainName.value == ""
           ' "$generated_parameters"
 
           template_version="$(jq --raw-output '.parameters.targetVersion.defaultValue' "$generated")"
