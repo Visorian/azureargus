@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.4.6](https://github.com/Visorian/azureargus/compare/v0.4.5...v0.4.6) (2026-09-10)
+
+
+### Bug Fixes
+
+* **config:** restore hosted custom domain ([b87b6b2](https://github.com/Visorian/azureargus/commit/b87b6b2c836027396b66b84a401f19d0317072c7))
+
 ## [0.4.5](https://github.com/Visorian/azureargus/compare/v0.4.4...v0.4.5) (2026-09-10)
 
 
