@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [0.4.3](https://github.com/Visorian/azureargus/compare/v0.4.2...v0.4.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* **ci:** correct checkout action commit ([4c08153](https://github.com/Visorian/azureargus/commit/4c081532cdb9d6b6d4ed38d0f4b12696e5134304))
+* pin hosted image and isolate temporary Event Hub sessions ([#88](https://github.com/Visorian/azureargus/issues/88)) ([c914c0c](https://github.com/Visorian/azureargus/commit/c914c0c4c8331bd50fabed7c6dc980cbe0ce94f4)), closes [#85](https://github.com/Visorian/azureargus/issues/85)
+
 ## [0.4.2](https://github.com/Visorian/azureargus/compare/v0.4.1...v0.4.2) (2026-08-26)
 
 
