@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.4.5](https://github.com/Visorian/azureargus/compare/v0.4.4...v0.4.5) (2026-09-10)
+
+
+### Bug Fixes
+
+* **config:** deploy hosted app before DNS setup ([78a7068](https://github.com/Visorian/azureargus/commit/78a706891a27d0976f9196dfa34e8c1cf0bae603))
+
 ## [0.4.4](https://github.com/Visorian/azureargus/compare/v0.4.3...v0.4.4) (2026-09-10)
 
 
