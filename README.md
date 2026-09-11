@@ -1,3 +1,5 @@
+![Azure Argus — Azure Firewall Analytics](./docs/assets/azure-argus-social-preview.svg)
+
 # Azure Argus
 
 Browser workspace for receiving, inspecting, and querying Azure Firewall logs. Use the
@@ -394,3 +396,12 @@ Published under [AGPL-3.0-only](./LICENSE).
 
 IP geolocation data is provided by [DB-IP](https://db-ip.com) under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## Disclaimer
+
+Azure Argus is an independent open-source project. It is not affiliated with, endorsed by, sponsored
+by, or otherwise associated with Microsoft Corporation or its subsidiaries. It is not an official
+Microsoft product.
+
+Microsoft and Azure are trademarks or registered trademarks of Microsoft Corporation in the United
+States and/or other countries. All other trademarks are the property of their respective owners.
