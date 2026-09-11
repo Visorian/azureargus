@@ -4,6 +4,24 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "app/**"
+      - "server/**"
+      - "shared/**"
+      - "public/**"
+      - "scripts/update-ip-country-database.ts"
+      - "scripts/dbip-country-lite.pin.json"
+      - "package.json"
+      - "bun.lock"
+      - "nuxt.config.ts"
+      - "tsconfig.json"
+      - ".nuxtrc"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "LICENSE"
+      - "THIRD_PARTY_NOTICES.md"
+      # Merging a release PR must still start publication.
+      - ".release-please-manifest.json"
 
 permissions:
   contents: read
