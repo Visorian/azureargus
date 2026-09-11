@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Azure Argus</title>
+  <desc id="description">Azure Firewall Analytics. A blue shield containing three log entries on a deep navy background.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#0C2844"/>
+      <stop offset="1" stop-color="#050C1C"/>
+    </linearGradient>
+    <radialGradient id="light" cx="50%" cy="0%" r="76%">
+      <stop stop-color="#147FC0" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#147FC0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shield" x1="530" y1="90" x2="746" y2="312" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#64D9F5"/>
+      <stop offset="1" stop-color="#2688F5"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#background)" d="M0 0h1280v640H0z"/>
+  <path fill="url(#light)" d="M0 0h1280v640H0z"/>
+  <path d="M640 90 739 132v66c0 56-37 95-99 123-62-28-99-67-99-123v-66Z" fill="#0A2139" stroke="url(#shield)" stroke-width="13" stroke-linejoin="round"/>
+  <g fill="#67D9F4">
+    <rect x="586" y="160" width="12" height="12" rx="3"/>
+    <rect x="586" y="196" width="12" height="12" rx="3"/>
+    <rect x="586" y="232" width="12" height="12" rx="3"/>
+  </g>
+  <g fill="none" stroke-linecap="round" stroke-width="10">
+    <path d="M618 166h70" stroke="#B6EAFF"/>
+    <path d="M618 202h48" stroke="#67C6F8"/>
+    <path d="M618 238h60" stroke="#3798F5"/>
+  </g>
+  <g text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif">
+    <text x="640" y="441" fill="#F4F8FF" font-size="88" font-weight="700" letter-spacing="-3">Azure Argus</text>
+    <text x="640" y="507" fill="#BED2E6" font-size="34" font-weight="400" letter-spacing="-0.5">Azure Firewall Analytics</text>
+  </g>
+</svg>
