@@ -5,6 +5,7 @@
   "skip-github-release": true,
   "packages": {
     ".": {
+      "exclude-paths": ["infrastructure", ".github", "docs", "tests"],
       "extra-files": [
         {
           "type": "generic",
