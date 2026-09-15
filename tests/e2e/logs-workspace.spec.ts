@@ -355,6 +355,76 @@ test("orders realtime logs by source timestamp", async ({ page }) => {
   await expect(rows.nth(3)).toContainText("oldest");
 });
 
+test("keeps recent logs visible when delayed batches exceed the display and raw limits", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-09-15T13:55:31.000Z") });
+  await mockManagedDeployment(page, { eventHub: true, logAnalytics: false });
+  await mockManagedEventHubStream(page);
+  await page.goto("/logs");
+  const settingsDrawer = await openSettings(page);
+  await settingsDrawer.getByRole("spinbutton", { name: "Visible rows" }).fill("100");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
+
+  const sourceIp = "10.140.185.29";
+  function event(sequenceNumber: number, time: string) {
+    return {
+      body: {
+        category: "AZFWNetworkRule",
+        properties: { Action: "Allow", Protocol: "UDP", SourceIp: sourceIp },
+        time,
+      },
+      enqueuedTimeUtc: "2026-09-15T13:55:31.000Z",
+      partitionId: "0",
+      sequenceNumber,
+    };
+  }
+
+  const newestTime = "2026-09-15T13:45:31.000Z";
+  await enqueueManagedEventHubEnvelope(page, {
+    type: "events",
+    events: [event(1, newestTime), event(2, "2026-09-15T13:44:31.000Z")],
+  });
+  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
+  const table = page.getByRole("table", { name: "Firewall logs" });
+  const newestRow = table.getByRole("row").filter({
+    has: page.locator(`time[datetime="${newestTime}"]`),
+  });
+  const status = page.getByRole("group", { name: "All logs status and actions" });
+  await expect(status.locator("time")).toHaveAttribute("datetime", newestTime);
+  await expect(status.locator("time")).toHaveText("10m ago");
+
+  let received = 2;
+  for (const batchSize of [100, 1_000]) {
+    await enqueueManagedEventHubEnvelope(page, {
+      type: "events",
+      events: Array.from({ length: batchSize }, (_, index) =>
+        event(received + index + 1, "2026-09-15T12:49:46.000Z"),
+      ),
+    });
+    received += batchSize;
+
+    await expect(page.getByText(`100 visible / ${received} received`)).toBeVisible();
+    await expect(newestRow).toBeVisible();
+    await expect(status.locator("time")).toHaveAttribute("datetime", newestTime);
+    await page.getByPlaceholder("Source").fill("10.140.185.30");
+    await expect(page.getByText(`0 visible / ${received} received`)).toBeVisible();
+    await page.getByPlaceholder("Source").fill(sourceIp);
+    await expect(page.getByText(`100 visible / ${received} received`)).toBeVisible();
+    await expect(newestRow).toBeVisible();
+    await page.getByPlaceholder("Source").fill("");
+    await expect(newestRow).toBeVisible();
+  }
+
+  await newestRow.locator("time").click();
+  const detail = page.getByRole("dialog", { name: "Log detail" });
+  await expect(detail.getByText("Sep 15, 2026, 13:45:31", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await status.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(page.getByText("0 visible / 0 received")).toBeVisible();
+});
+
 test("filters source and destination endpoints exactly", async ({ page }) => {
   await startManagedEventHub(page);
   await enqueueManagedEventHubEnvelope(page, {

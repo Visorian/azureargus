@@ -2,7 +2,8 @@ import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, watch, type Re
 
 export const DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS = 250;
 
-interface BoundedLogBufferOptions {
+interface BoundedLogBufferOptions<T> {
+  compare?: (left: T, right: T) => number;
   publishIntervalMs?: number;
   publishingEnabled?: Readonly<Ref<boolean>>;
   publishedSize?: Readonly<Ref<number>>;
@@ -56,14 +57,50 @@ export function prependToBoundedBuffer<T>(
   return result;
 }
 
+export function mergeIntoBoundedBuffer<T>(
+  currentItems: readonly T[],
+  nextItems: readonly T[],
+  maxSize: number,
+  compare: (left: T, right: T) => number,
+) {
+  const boundedSize = normalizeBufferSize(maxSize);
+  if (boundedSize === 0) {
+    return [];
+  }
+
+  const sortedNextItems = nextItems.toSorted(compare);
+  const result: T[] = [];
+  let currentIndex = 0;
+  let nextIndex = 0;
+
+  // Current items already have the requested order; only the incoming batch needs sorting.
+  while (
+    result.length < boundedSize &&
+    (currentIndex < currentItems.length || nextIndex < sortedNextItems.length)
+  ) {
+    if (
+      nextIndex < sortedNextItems.length &&
+      (currentIndex >= currentItems.length ||
+        compare(sortedNextItems[nextIndex]!, currentItems[currentIndex]!) <= 0)
+    ) {
+      result.push(sortedNextItems[nextIndex++]!);
+    } else {
+      result.push(currentItems[currentIndex++]!);
+    }
+  }
+
+  return result;
+}
+
 export function useBoundedLogBuffer<T>(
   key: string,
   maxSize: Readonly<Ref<number>>,
   {
+    compare,
     publishIntervalMs = DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS,
     publishingEnabled = ref(true),
     publishedSize = maxSize,
-  }: BoundedLogBufferOptions = {},
+  }: BoundedLogBufferOptions<T> = {},
 ) {
   const items = useState<T[]>(key, () => shallowRef<T[]>([]));
   const rawItems = useState<T[]>(`${key}-raw`, () =>
@@ -110,7 +147,9 @@ export function useBoundedLogBuffer<T>(
       return;
     }
 
-    rawItems.value = prependToBoundedBuffer(rawItems.value, nextItems, maxSize.value);
+    rawItems.value = compare
+      ? mergeIntoBoundedBuffer(rawItems.value, nextItems, maxSize.value, compare)
+      : prependToBoundedBuffer(rawItems.value, nextItems, maxSize.value);
     publishPending = true;
     schedulePublish();
   }

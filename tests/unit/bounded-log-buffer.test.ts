@@ -1,6 +1,7 @@
 import { effectScope, isRef, ref, type Ref } from "vue";
 
 import {
+  mergeIntoBoundedBuffer,
   prependToBoundedBuffer,
   trimToBufferSize,
   useBoundedLogBuffer,
@@ -27,6 +28,46 @@ afterEach(() => {
 });
 
 describe("bounded log buffer helpers", () => {
+  it.each([
+    { current: [9, 7, 3], incoming: [1, 8, 10], limit: 4, expected: [10, 9, 8, 7] },
+    { current: [9, 7], incoming: [1, 5, 3, 4], limit: 3, expected: [9, 7, 5] },
+    { current: [], incoming: [1, 5, 3], limit: 2, expected: [5, 3] },
+    { current: [9, 7, 3], incoming: [], limit: 2, expected: [9, 7] },
+    { current: [9], incoming: [10], limit: 0, expected: [] },
+  ])(
+    "retains the newest values when merging $incoming into $current",
+    ({ current, incoming, limit, expected }) => {
+      const originalCurrent = [...current];
+      const originalIncoming = [...incoming];
+
+      expect(
+        mergeIntoBoundedBuffer(current, incoming, limit, (left, right) => right - left),
+      ).toEqual(expected);
+      expect(current).toEqual(originalCurrent);
+      expect(incoming).toEqual(originalIncoming);
+    },
+  );
+
+  it("keeps newer records visible when a delayed batch exceeds raw capacity", () => {
+    const buffer = useBoundedLogBuffer<number>("ordered", ref(3), {
+      compare: (left, right) => right - left,
+      publishedSize: ref(2),
+    });
+    buffer.pushMany([90, 100]);
+    buffer.flush();
+    expect(buffer.items.value).toEqual([100, 90]);
+
+    buffer.pushMany([1, 5, 3, 4]);
+    buffer.flush();
+    expect(buffer.getRawItems()).toEqual([100, 90, 5]);
+    expect(buffer.items.value).toEqual([100, 90]);
+
+    buffer.pushMany([110, 2]);
+    buffer.flush();
+    expect(buffer.getRawItems()).toEqual([110, 100, 90]);
+    expect(buffer.items.value).toEqual([110, 100]);
+  });
+
   it("keeps newest-first items at the front of the buffer", () => {
     expect(trimToBufferSize(["newest", "middle", "oldest"], 2)).toEqual(["newest", "middle"]);
   });
