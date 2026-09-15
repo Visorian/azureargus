@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [0.4.6](https://github.com/Visorian/azureargus/compare/v0.4.5...v0.4.6) (2026-09-15)
+
+
+### Bug Fixes
+
+* **ci:** limit release triggers to application inputs ([4528fce](https://github.com/Visorian/azureargus/commit/4528fced2dca4cda23d792b42893f370a0f9dd5e))
+* **frontend:** retain newest source timestamps in live buffer ([5a1710d](https://github.com/Visorian/azureargus/commit/5a1710d1489e66e75cd7b5e1ad060643cab78201))
+
 ## [0.4.5](https://github.com/Visorian/azureargus/compare/v0.4.4...v0.4.5) (2026-09-10)
 
 
