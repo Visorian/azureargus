@@ -10,6 +10,7 @@ import {
 } from "./useEventHubConnection";
 import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFirewallLogParser";
 import { createLogBatcher } from "./useLogBatcher";
+import { compareFirewallLogs } from "./useLogSorting";
 import type { FirewallLogRecord } from "#shared/types/firewall";
 import type { ManagedEventHubStreamRequest } from "#shared/types/managedEventHub";
 import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
@@ -246,6 +247,7 @@ export function useEventHubReceiver({
   const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
   const uiActive = uiPublishingEnabled ?? computed(() => true);
   const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize, {
+    compare: (left, right) => compareFirewallLogs(right, left, "timestamp"),
     publishingEnabled: uiActive,
     publishedSize: visibleLimit,
   });
