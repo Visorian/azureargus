@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.4.6](https://github.com/Visorian/azureargus/compare/v0.4.5...v0.4.6) (2026-09-15)
+
+
+### Bug Fixes
+
+* **frontend:** retain newest source timestamps in live buffer ([5a1710d](https://github.com/Visorian/azureargus/commit/5a1710d1489e66e75cd7b5e1ad060643cab78201))
+
 ## [0.4.5](https://github.com/Visorian/azureargus/compare/v0.4.4...v0.4.5) (2026-09-10)
 
 
