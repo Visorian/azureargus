@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.5.0](https://github.com/Visorian/azureargus/compare/v0.4.6...v0.5.0) (2026-09-23)
+
+
+### Features
+
+* **frontend:** add source and destination port filters ([#104](https://github.com/Visorian/azureargus/issues/104)) ([bfb13b3](https://github.com/Visorian/azureargus/commit/bfb13b389abb254a9749f24c7518872af68e506c))
+
 ## [0.4.6](https://github.com/Visorian/azureargus/compare/v0.4.5...v0.4.6) (2026-09-15)
 
 
