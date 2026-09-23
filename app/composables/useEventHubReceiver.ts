@@ -17,13 +17,7 @@ import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
 import { createNetworkRuleCorrelator } from "~/utils/networkRuleCorrelation";
 import { computed, watch, type Ref } from "vue";
 
-type ReceiverStatus =
-  | "idle"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "paused"
-  | "error";
+type ReceiverStatus = "idle" | "connecting" | "connected" | "reconnecting" | "paused" | "error";
 const LIVE_TAIL_THRESHOLD_MS = 30_000;
 const SEQUENCE_NUMBER_PATTERN = /^\d+$/;
 const MANUAL_EVENT_HUB_MAX_BATCH_SIZE = 50;
@@ -646,7 +640,10 @@ export function useEventHubReceiver({
 
           markRecovered();
           for (const event of envelope.events) {
-            receiveEvents([{ ...event, properties: event.applicationProperties }], event.partitionId);
+            receiveEvents(
+              [{ ...event, properties: event.applicationProperties }],
+              event.partitionId,
+            );
           }
         },
         controller.signal,
