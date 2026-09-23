@@ -6,20 +6,19 @@ interface ManagedEventHubStreamRegistration {
 const activeStreams = new Map<string, ManagedEventHubStreamRegistration>();
 const registrationQueues = new Map<string, Promise<void>>();
 
-export async function registerManagedEventHubStream(
-  sessionId: string,
-  close: () => Promise<void>,
-) {
+export async function registerManagedEventHubStream(sessionId: string, close: () => Promise<void>) {
   const owner = Symbol(sessionId);
   const previousRegistration = registrationQueues.get(sessionId) ?? Promise.resolve();
-  const registration = previousRegistration.catch(() => undefined).then(async () => {
-    try {
-      await activeStreams.get(sessionId)?.close();
-    } catch {
-      // Failed cleanup must not prevent the replacement stream from becoming active.
-    }
-    activeStreams.set(sessionId, { close, owner });
-  });
+  const registration = previousRegistration
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        await activeStreams.get(sessionId)?.close();
+      } catch {
+        // Failed cleanup must not prevent the replacement stream from becoming active.
+      }
+      activeStreams.set(sessionId, { close, owner });
+    });
   registrationQueues.set(sessionId, registration);
 
   try {

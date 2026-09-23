@@ -293,9 +293,7 @@ describe("Event Hub receiver helpers", () => {
       const receiver = useEventHubReceiver({ managedFetch, revalidateManagedSession });
       await receiver.connect(createInitialEventHubConnectionForm(), "managed");
 
-      streamController.enqueue(
-        encoder.encode('{"type":"error","message":"Session expired"}\n'),
-      );
+      streamController.enqueue(encoder.encode('{"type":"error","message":"Session expired"}\n'));
       await vi.waitFor(() => expect(receiver.status.value).toBe(expectedStatus));
       expect(revalidateManagedSession).toHaveBeenCalledOnce();
       if (sessionRecovered) {
@@ -320,9 +318,9 @@ describe("Event Hub receiver helpers", () => {
     const { useEventHubReceiver } = await import("../../app/composables/useEventHubReceiver");
     const receiver = useEventHubReceiver({ managedFetch });
 
-    await expect(
-      receiver.connect(createInitialEventHubConnectionForm(), "managed"),
-    ).resolves.toBe(false);
+    await expect(receiver.connect(createInitialEventHubConnectionForm(), "managed")).resolves.toBe(
+      false,
+    );
     expect(receiver.status.value).toBe("reconnecting");
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.waitFor(() => expect(receiver.status.value).toBe("error"));
@@ -1186,9 +1184,8 @@ describe("Event Hub receiver helpers", () => {
         return { close: vi.fn<() => Promise<void>>(async () => undefined) };
       },
     };
-    const { getManualEventHubStartPosition, useEventHubReceiver } = await import(
-      "../../app/composables/useEventHubReceiver"
-    );
+    const { getManualEventHubStartPosition, useEventHubReceiver } =
+      await import("../../app/composables/useEventHubReceiver");
     const receiver = useEventHubReceiver({ loadClientFactory: async () => () => client });
 
     await receiver.connect(createValidForm());
@@ -1543,10 +1540,7 @@ describe("Event Hub receiver helpers", () => {
 
     await requireHandlers(handlers).processError(new Error("transient receive failure"));
     expect(receiver.status.value).toBe("reconnecting");
-    expect(receiver.errors.value).toEqual([
-      "transient receive failure",
-      "paused receive failure",
-    ]);
+    expect(receiver.errors.value).toEqual(["transient receive failure", "paused receive failure"]);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(receiver.status.value).toBe("connected");
     expect(startPositions[1]).toEqual({ "0": { sequenceNumber: 4, isInclusive: false } });

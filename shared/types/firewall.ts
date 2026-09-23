@@ -53,5 +53,7 @@ export interface FirewallLogFilters {
   action: string;
   protocol: string;
   source: string;
+  sourcePort: string;
   destination: string;
+  destinationPort: string;
 }

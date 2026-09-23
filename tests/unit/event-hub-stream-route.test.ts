@@ -164,9 +164,9 @@ describe("managed Event Hub stream route", () => {
   });
 
   it("keeps streams from different OIDC sessions active", async () => {
-    vi.mocked(getUserSessionId).mockResolvedValueOnce("first-session").mockResolvedValueOnce(
-      "second-session",
-    );
+    vi.mocked(getUserSessionId)
+      .mockResolvedValueOnce("first-session")
+      .mockResolvedValueOnce("second-session");
     vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {

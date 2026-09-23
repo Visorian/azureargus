@@ -425,7 +425,7 @@ test("keeps recent logs visible when delayed batches exceed the display and raw 
   await expect(page.getByText("0 visible / 0 received")).toBeVisible();
 });
 
-test("filters source and destination endpoints exactly", async ({ page }) => {
+test("filters source and destination addresses and ports exactly", async ({ page }) => {
   await startManagedEventHub(page);
   await enqueueManagedEventHubEnvelope(page, {
     type: "events",
@@ -480,6 +480,16 @@ test("filters source and destination endpoints exactly", async ({ page }) => {
   await page.getByPlaceholder("Destination").fill("20.30.40.5");
   await expect(table.getByRole("row").filter({ hasText: "exact-endpoints" })).toBeVisible();
   await expect(table.getByRole("row").filter({ hasText: "prefix-endpoints" })).toHaveCount(0);
+
+  await page.getByPlaceholder("Destination").fill("");
+  await page.getByPlaceholder("Src port").fill("52389");
+  await expect(table.getByRole("row").filter({ hasText: "prefix-endpoints" })).toBeVisible();
+  await expect(table.getByRole("row").filter({ hasText: "exact-endpoints" })).toHaveCount(0);
+
+  await page.getByPlaceholder("Src port").fill("");
+  await table.getByRole("button", { name: "Filter by destination port: 443" }).first().click();
+  await expect(page.getByPlaceholder("Dst port")).toHaveValue("443");
+  await expect(page.getByText("2 visible / 2 received")).toBeVisible();
 });
 
 test("keeps surfaced logs eligible when filters change after raw-buffer eviction", async ({

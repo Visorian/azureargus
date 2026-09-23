@@ -90,7 +90,7 @@ describe("log query", () => {
     expect(result.map((log) => log.id)).toEqual(["1"]);
   });
 
-  it("matches source and destination endpoints exactly", () => {
+  it("matches source and destination addresses and ports exactly", () => {
     const logs = [
       createLog({
         id: "exact",
@@ -113,20 +113,25 @@ describe("log query", () => {
     expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
 
     filters.source = "443";
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
-
-    filters.source = "10.141.8.1:443";
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+    expect(filterFirewallLogs(logs, filters)).toEqual([]);
 
     filters.source = "";
+    filters.sourcePort = " 443 ";
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+
+    filters.sourcePort = "";
     filters.destination = "example.com";
     expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
 
-    filters.destination = "8443";
+    filters.destination = "EXAMPLE.COM:8443";
+    expect(filterFirewallLogs(logs, filters)).toEqual([]);
+
+    filters.destination = "";
+    filters.destinationPort = "8443";
     expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
 
-    filters.destination = "EXAMPLE.COM:8443";
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(["exact"]);
+    filters.sourcePort = "4431";
+    expect(filterFirewallLogs(logs, filters)).toEqual([]);
   });
 
   it("matches any selected category exactly and case-insensitively", () => {

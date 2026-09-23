@@ -66,10 +66,12 @@ test("managed Event Hub uses configured server stream without exposing credentia
       .getByRole("group", { name: "All logs status and actions" })
       .getByText("reconnecting", { exact: true }),
   ).toBeVisible();
-  await expect.poll(() => getManagedEventHubRequests(page)).toEqual([
-    { consumerGroup: "$Default", lookbackMinutes: 15 },
-    { consumerGroup: "$Default", lookbackMinutes: 15, resumeFrom: { "0": 42 } },
-  ]);
+  await expect
+    .poll(() => getManagedEventHubRequests(page))
+    .toEqual([
+      { consumerGroup: "$Default", lookbackMinutes: 15 },
+      { consumerGroup: "$Default", lookbackMinutes: 15, resumeFrom: { "0": 42 } },
+    ]);
   await enqueueManagedEventHubEnvelope(page, { type: "heartbeat" });
   await enqueueManagedEventHubEnvelope(page, {
     type: "events",

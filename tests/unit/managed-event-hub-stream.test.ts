@@ -116,30 +116,28 @@ describe("managed Event Hub stream", () => {
       revalidateSession: async () => true,
       now: () => 0,
     });
-    const processing = fixture
-      .getHandlers()
-      .processEvents(
-        [
-          {
-            body: {
-              category: "AZFWNetworkRule",
-              properties: {
-                Action: "Allow",
-                Protocol: "TCP",
-                SourceIp: "10.0.0.4",
-                SourcePort: 53_000,
-                DestinationIp: "168.63.129.16",
-                DestinationPort: 53,
-              },
+    const processing = fixture.getHandlers().processEvents(
+      [
+        {
+          body: {
+            category: "AZFWNetworkRule",
+            properties: {
+              Action: "Allow",
+              Protocol: "TCP",
+              SourceIp: "10.0.0.4",
+              SourcePort: 53_000,
+              DestinationIp: "168.63.129.16",
+              DestinationPort: 53,
             },
-            enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
-            sequenceNumber: 42,
-            offset: "123",
-            properties: { schemaVersion: "1", diagnosticCategory: "network" },
           },
-        ],
-        createPartitionContext("1"),
-      );
+          enqueuedTimeUtc: new Date("2026-07-12T12:00:00.000Z"),
+          sequenceNumber: 42,
+          offset: "123",
+          properties: { schemaVersion: "1", diagnosticCategory: "network" },
+        },
+      ],
+      createPartitionContext("1"),
+    );
 
     const reader = managed.stream.getReader();
     await expect(readEnvelope(reader)).resolves.toEqual({
