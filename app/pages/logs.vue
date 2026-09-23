@@ -68,7 +68,14 @@ interface LogsEmptyState {
   title: string;
 }
 
-type QuickFilterKey = "category" | "action" | "protocol" | "source" | "destination";
+type QuickFilterKey =
+  | "category"
+  | "action"
+  | "protocol"
+  | "source"
+  | "sourcePort"
+  | "destination"
+  | "destinationPort";
 type LogsLens = "all-logs" | "dns-troubleshooting";
 
 const {
@@ -784,7 +791,9 @@ function toggleQuickFilter(key: QuickFilterKey, value: string | undefined) {
 
 function quickFilterLabel(key: QuickFilterKey, value: string | undefined) {
   const action = isQuickFilterActive(key, value) ? "Remove" : "Filter by";
-  return `${action} ${key}: ${displayValue(value)}`;
+  const label =
+    key === "sourcePort" ? "source port" : key === "destinationPort" ? "destination port" : key;
+  return `${action} ${label}: ${displayValue(value)}`;
 }
 
 function clearActiveResults() {
@@ -1442,9 +1451,21 @@ function statusColor(status: string) {
                 @keydown.enter="logAnalysisActive && applyLogFilters()"
               />
               <UInput
+                v-model="activeFilters.sourcePort"
+                placeholder="Src port"
+                class="w-24"
+                @keydown.enter="logAnalysisActive && applyLogFilters()"
+              />
+              <UInput
                 v-model="activeFilters.destination"
                 placeholder="Destination"
                 class="w-40"
+                @keydown.enter="logAnalysisActive && applyLogFilters()"
+              />
+              <UInput
+                v-model="activeFilters.destinationPort"
+                placeholder="Dst port"
+                class="w-24"
                 @keydown.enter="logAnalysisActive && applyLogFilters()"
               />
               <LogsLogFilterActions
@@ -1637,13 +1658,13 @@ function statusColor(status: string) {
                       type="button"
                       :class="[
                         quickFilterButtonClass,
-                        isQuickFilterActive('source', item.sourcePort) &&
+                        isQuickFilterActive('sourcePort', item.sourcePort) &&
                           'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
                       ]"
-                      :aria-label="quickFilterLabel('source', item.sourcePort)"
-                      :aria-pressed="isQuickFilterActive('source', item.sourcePort)"
-                      :title="quickFilterLabel('source', item.sourcePort)"
-                      @click.stop="toggleQuickFilter('source', item.sourcePort)"
+                      :aria-label="quickFilterLabel('sourcePort', item.sourcePort)"
+                      :aria-pressed="isQuickFilterActive('sourcePort', item.sourcePort)"
+                      :title="quickFilterLabel('sourcePort', item.sourcePort)"
+                      @click.stop="toggleQuickFilter('sourcePort', item.sourcePort)"
                     >
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>
@@ -1685,13 +1706,13 @@ function statusColor(status: string) {
                       type="button"
                       :class="[
                         quickFilterButtonClass,
-                        isQuickFilterActive('destination', item.destinationPort) &&
+                        isQuickFilterActive('destinationPort', item.destinationPort) &&
                           'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
                       ]"
-                      :aria-label="quickFilterLabel('destination', item.destinationPort)"
-                      :aria-pressed="isQuickFilterActive('destination', item.destinationPort)"
-                      :title="quickFilterLabel('destination', item.destinationPort)"
-                      @click.stop="toggleQuickFilter('destination', item.destinationPort)"
+                      :aria-label="quickFilterLabel('destinationPort', item.destinationPort)"
+                      :aria-pressed="isQuickFilterActive('destinationPort', item.destinationPort)"
+                      :title="quickFilterLabel('destinationPort', item.destinationPort)"
+                      @click.stop="toggleQuickFilter('destinationPort', item.destinationPort)"
                     >
                       <UIcon name="i-lucide-filter" class="size-3.5" />
                     </button>

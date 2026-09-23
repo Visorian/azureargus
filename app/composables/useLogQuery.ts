@@ -25,7 +25,9 @@ export function createDefaultLogFilters(): FirewallLogFilters {
     action: "",
     protocol: "",
     source: "",
+    sourcePort: "",
     destination: "",
+    destinationPort: "",
   };
 }
 
@@ -60,18 +62,8 @@ function includes(value: string | undefined, query: string) {
   return query.length === 0 || (value ?? "").toLowerCase().includes(query);
 }
 
-function matchesEndpoint(address: string | undefined, port: string | undefined, query: string) {
-  if (query.length === 0) {
-    return true;
-  }
-
-  const normalizedAddress = (address ?? "").trim().toLowerCase();
-  const normalizedPort = (port ?? "").trim().toLowerCase();
-  return (
-    normalizedAddress === query ||
-    normalizedPort === query ||
-    `${normalizedAddress}:${normalizedPort}` === query
-  );
+function equals(value: string | undefined, query: string) {
+  return query.length === 0 || (value ?? "").trim().toLowerCase() === query;
 }
 
 export function filterFirewallLogs(
@@ -86,7 +78,9 @@ export function filterFirewallLogs(
   const action = filters.action.trim().toLowerCase();
   const protocol = filters.protocol.trim().toLowerCase();
   const source = filters.source.trim().toLowerCase();
+  const sourcePort = filters.sourcePort.trim().toLowerCase();
   const destination = filters.destination.trim().toLowerCase();
+  const destinationPort = filters.destinationPort.trim().toLowerCase();
   const maxMatches =
     limit === undefined
       ? Number.POSITIVE_INFINITY
@@ -104,8 +98,10 @@ export function filterFirewallLogs(
       (categories.size === 0 || categories.has(log.category.trim().toLowerCase())) &&
       includes(log.action, action) &&
       includes(log.protocol, protocol) &&
-      matchesEndpoint(log.sourceIp, log.sourcePort, source) &&
-      matchesEndpoint(log.destinationIp, log.destinationPort, destination)
+      equals(log.sourceIp, source) &&
+      equals(log.sourcePort, sourcePort) &&
+      equals(log.destinationIp, destination) &&
+      equals(log.destinationPort, destinationPort)
     ) {
       matches.push(log);
       if (matches.length >= maxMatches) {
@@ -176,7 +172,9 @@ export function getLogFiltersKey(filters: FirewallLogFilters) {
     filters.action,
     filters.protocol,
     filters.source,
+    filters.sourcePort,
     filters.destination,
+    filters.destinationPort,
   ]
     .map((value) => value.trim().toLowerCase())
     .join("\u001F");

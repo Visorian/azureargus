@@ -43,7 +43,9 @@ function createRequest(): LogAnalyticsQueryRequest {
       action: "",
       protocol: "",
       source: "",
+      sourcePort: "",
       destination: "",
+      destinationPort: "",
     },
     limit: 1_000,
     storage: "resource-specific",
@@ -117,8 +119,10 @@ describe("Log Analytics KQL builder", () => {
     request.filters.category = ["AZFWNetworkRule", "AZFWApplicationRule"];
     request.filters.action = "  DeNy  ";
     request.filters.protocol = "Tcp";
-    request.filters.source = "10.0.0.4:443";
-    request.filters.destination = "Example.COM:443";
+    request.filters.source = "10.0.0.4";
+    request.filters.sourcePort = " 51001 ";
+    request.filters.destination = "Example.COM";
+    request.filters.destinationPort = "443";
     request.sort = { key: "rule", direction: "asc" };
     request.limit = 5_000;
 
@@ -131,12 +135,10 @@ describe("Log Analytics KQL builder", () => {
     );
     expect(result.query).toContain('| where Action contains "deny"');
     expect(result.query).toContain('| where Protocol contains "tcp"');
-    expect(result.query).toContain(
-      '| where SourceIp =~ "10.0.0.4:443" or SourcePort =~ "10.0.0.4:443" or strcat(SourceIp, ":", SourcePort) =~ "10.0.0.4:443"',
-    );
-    expect(result.query).toContain(
-      '| where DestinationIp =~ "example.com:443" or DestinationPort =~ "example.com:443" or strcat(DestinationIp, ":", DestinationPort) =~ "example.com:443"',
-    );
+    expect(result.query).toContain('| where SourceIp =~ "10.0.0.4"');
+    expect(result.query).toContain('| where SourcePort =~ "51001"');
+    expect(result.query).toContain('| where DestinationIp =~ "example.com"');
+    expect(result.query).toContain('| where DestinationPort =~ "443"');
     expect(result.query).toContain("| order by tolower(Rule) asc");
     expect(result.query).toContain("| take 5001");
   });
@@ -158,8 +160,10 @@ describe("Log Analytics KQL builder", () => {
     request.filters.category = ["AZFWNetworkRule"];
     request.filters.action = "Allow";
     request.filters.protocol = "UDP";
-    request.filters.source = "10.0.0.5:51001";
-    request.filters.destination = "10.0.0.53:53";
+    request.filters.source = "10.0.0.5";
+    request.filters.sourcePort = "51001";
+    request.filters.destination = "10.0.0.53";
+    request.filters.destinationPort = "53";
 
     const result = buildAzureDiagnosticsLogAnalyticsQuery(request);
 
@@ -185,12 +189,10 @@ describe("Log Analytics KQL builder", () => {
     expect(result.query).toContain('| where SearchableText contains "dns-rule"');
     expect(result.query).toContain('| where Category in~ ("azfwnetworkrule")');
     expect(result.query).toContain('| where Action contains "allow"');
-    expect(result.query).toContain(
-      '| where SourceIp =~ "10.0.0.5:51001" or SourcePort =~ "10.0.0.5:51001" or strcat(SourceIp, ":", SourcePort) =~ "10.0.0.5:51001"',
-    );
-    expect(result.query).toContain(
-      '| where DestinationIp =~ "10.0.0.53:53" or DestinationPort =~ "10.0.0.53:53" or strcat(DestinationIp, ":", DestinationPort) =~ "10.0.0.53:53"',
-    );
+    expect(result.query).toContain('| where SourceIp =~ "10.0.0.5"');
+    expect(result.query).toContain('| where SourcePort =~ "51001"');
+    expect(result.query).toContain('| where DestinationIp =~ "10.0.0.53"');
+    expect(result.query).toContain('| where DestinationPort =~ "53"');
     expect(result.query).toContain("| take 1001");
     expect(result.query).not.toContain("AzureFirewallNetworkRule");
     expect(result.query).not.toContain("AZFWNetworkRuleAggregation");

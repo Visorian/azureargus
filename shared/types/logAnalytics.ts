@@ -6,7 +6,9 @@ export interface LogAnalyticsFilters {
   action: string;
   protocol: string;
   source: string;
+  sourcePort: string;
   destination: string;
+  destinationPort: string;
 }
 
 export interface LogAnalyticsSort {

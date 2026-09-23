@@ -16,8 +16,16 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FILTER_KEYS = ["search", "category", "action", "protocol", "source", "destination"] as const;
-const TEXT_FILTER_KEYS = ["search", "action", "protocol", "source", "destination"] as const;
+const TEXT_FILTER_KEYS = [
+  "search",
+  "action",
+  "protocol",
+  "source",
+  "sourcePort",
+  "destination",
+  "destinationPort",
+] as const;
+const FILTER_KEYS = [...TEXT_FILTER_KEYS, "category"] as const;
 const SORT_COLUMNS: Record<LogAnalyticsSort["key"], string> = {
   timestamp: "TimeGenerated",
   category: "tolower(Category)",
@@ -393,9 +401,11 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
     action: "Action",
     protocol: "Protocol",
   } as const;
-  const endpointFilters = {
-    source: { address: "SourceIp", port: "SourcePort" },
-    destination: { address: "DestinationIp", port: "DestinationPort" },
+  const exactFilters = {
+    source: "SourceIp",
+    sourcePort: "SourcePort",
+    destination: "DestinationIp",
+    destinationPort: "DestinationPort",
   } as const;
 
   const categories = [
@@ -416,17 +426,11 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
     }
   }
 
-  for (const key of ["source", "destination"] as const) {
+  for (const key of ["source", "sourcePort", "destination", "destinationPort"] as const) {
     const value = request.filters[key].trim().toLowerCase();
-    if (value.length === 0) {
-      continue;
+    if (value.length > 0) {
+      clauses.push(`| where ${exactFilters[key]} =~ ${encodeKqlStringLiteral(value)}`);
     }
-
-    const { address, port } = endpointFilters[key];
-    const encodedValue = encodeKqlStringLiteral(value);
-    clauses.push(
-      `| where ${address} =~ ${encodedValue} or ${port} =~ ${encodedValue} or strcat(${address}, ":", ${port}) =~ ${encodedValue}`,
-    );
   }
 
   const limit = getLogAnalyticsResultLimit(request);

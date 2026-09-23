@@ -80,7 +80,9 @@ export function getLogAnalysisCriteriaKey(filters: FirewallLogFilters, sort: Fir
     filters.action,
     filters.protocol,
     filters.source,
+    filters.sourcePort,
     filters.destination,
+    filters.destinationPort,
     sort.key,
     sort.direction,
   ]
