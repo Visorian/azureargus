@@ -3,6 +3,7 @@
 ## Development
 
 ```bash
+bun run fmt:check
 bun run lint
 bun run typecheck
 bun run test:unit

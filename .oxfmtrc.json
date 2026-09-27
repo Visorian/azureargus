@@ -2,7 +2,11 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "singleQuote": true,
   "semi": false,
-  "ignorePatterns": ["CHANGELOG.md", "infrastructure/**/azuredeploy*.json"],
+  "ignorePatterns": [
+    "CHANGELOG.md",
+    "infrastructure/**/azuredeploy*.json",
+    "tools/oxlint/anti-slop/**"
+  ],
   "sortImports": {},
   "sortPackageJson": true,
   "sortTailwindcss": {

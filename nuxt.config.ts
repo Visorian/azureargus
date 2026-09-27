@@ -1,8 +1,24 @@
+import type { ServerResponse } from 'node:http'
+
 import type { Plugin } from 'vite'
 
 const MSAL_REDIRECT_MODULE_ID = 'virtual:azure-argus-msal-redirect'
 const RESOLVED_MSAL_REDIRECT_MODULE_ID = `\0${MSAL_REDIRECT_MODULE_ID}`
 const MSAL_REDIRECT_ASSET_PATH = '/_nuxt/log-analytics-redirect.js'
+
+// Stricter than Nuxt's defaults; applied to every generated tsconfig (app, server, shared, node).
+const strictCompilerOptions = {
+  erasableSyntaxOnly: true,
+  noFallthroughCasesInSwitch: true,
+  noImplicitReturns: true,
+  noPropertyAccessFromIndexSignature: true,
+  noUncheckedSideEffectImports: true,
+}
+
+function nonEmptyEnv(name: string): string | undefined {
+  const value = process.env[name]
+  return value === undefined || value === '' ? undefined : value
+}
 
 function createMsalRedirectBridgePlugin(): Plugin {
   let isBuild = false
@@ -13,14 +29,24 @@ function createMsalRedirectBridgePlugin(): Plugin {
       isBuild = config.command === 'build'
     },
     configureServer(server) {
-      server.middlewares.use(MSAL_REDIRECT_ASSET_PATH, async (_request, response, next) => {
-        const result = await server.transformRequest(MSAL_REDIRECT_MODULE_ID)
-        if (!result) {
-          next()
-          return
+      const serveBridge = async (
+        response: ServerResponse,
+        next: (error?: unknown) => void,
+      ): Promise<void> => {
+        try {
+          const result = await server.transformRequest(MSAL_REDIRECT_MODULE_ID)
+          if (!result) {
+            next()
+            return
+          }
+          response.setHeader('content-type', 'text/javascript; charset=utf-8')
+          response.end(result.code)
+        } catch (error) {
+          next(error)
         }
-        response.setHeader('content-type', 'text/javascript; charset=utf-8')
-        response.end(result.code)
+      }
+      server.middlewares.use(MSAL_REDIRECT_ASSET_PATH, (_request, response, next) => {
+        void serveBridge(response, next)
       })
     },
     buildStart() {
@@ -40,6 +66,7 @@ function createMsalRedirectBridgePlugin(): Plugin {
       }
       // Nuxt injects emitted entry chunks into every SPA page, so retain the
       // bundled file while removing its application-entry semantics.
+      // oxlint-disable-next-line typescript/no-dynamic-delete -- Rollup removes chunks by deleting them from the bundle.
       delete bundle[bridgeChunk.fileName]
       this.emitFile({
         type: 'prebuilt-chunk',
@@ -84,15 +111,14 @@ export default defineNuxtConfig({
   modules: ['@nuxt/ui', 'nuxt-oidc-auth'],
   ssr: false,
   devtools: { enabled: false },
-  css: ['~/assets/css/main.css'],
   app: {
     head: {
       title: 'Azure Argus',
     },
   },
-  compatibilityDate: '2026-07-09',
+  css: ['~/assets/css/main.css'],
   appConfig: {
-    versionNumber: process.env.VERSION_NUMBER || process.env.npm_package_version || 'dev',
+    versionNumber: nonEmptyEnv('VERSION_NUMBER') ?? nonEmptyEnv('npm_package_version') ?? 'dev',
   },
   runtimeConfig: {
     ipCountry: {
@@ -116,8 +142,11 @@ export default defineNuxtConfig({
       siteName: 'Azure Argus',
     },
   },
-  typescript: {
-    typeCheck: true,
+  compatibilityDate: '2026-07-09',
+  nitro: {
+    typescript: {
+      tsConfig: { compilerOptions: strictCompilerOptions },
+    },
   },
   vite: {
     define: {
@@ -159,6 +188,12 @@ export default defineNuxtConfig({
         },
       },
     ],
+  },
+  typescript: {
+    typeCheck: true,
+    tsConfig: { compilerOptions: strictCompilerOptions },
+    sharedTsConfig: { compilerOptions: strictCompilerOptions },
+    nodeTsConfig: { compilerOptions: strictCompilerOptions },
   },
   icon: {
     clientBundle: {
