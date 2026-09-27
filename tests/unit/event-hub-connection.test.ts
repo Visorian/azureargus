@@ -55,8 +55,8 @@ describe('Event Hub connection helpers', () => {
   })
 
   it('accepts only supported lookback values', () => {
-    expect([1, 3, 5, 10, 15].every(isEventHubLookbackMinutes)).toBe(true)
-    expect([0, 2, 30, Number.NaN].some(isEventHubLookbackMinutes)).toBe(false)
+    expect([1, 3, 5, 10, 15].every((value) => isEventHubLookbackMinutes(value))).toBe(true)
+    expect([0, 2, 30, Number.NaN].some((value) => isEventHubLookbackMinutes(value))).toBe(false)
 
     const form = createInitialEventHubConnectionForm()
     form.connectionString =

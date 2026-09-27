@@ -1,7 +1,11 @@
-import { expect, type Locator, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import type { Locator } from '@playwright/test'
 
 import { mockManagedDeployment } from './support/deployment'
 import { openSettings } from './support/logsWorkspace'
+
+const COULD_NOT_BE_QUERIED_PATTERN = /could not be queried/
+const OPEN_DNS_DETAILS_PATTERN = /Open DNS details/
 
 async function expectAlignedColumns(header: Locator, row: Locator) {
   await expect(async () => {
@@ -30,7 +34,7 @@ async function expectAlignedColumns(header: Locator, row: Locator) {
 
 async function expectNoHorizontalOverflow(cell: Locator) {
   await expect
-    .poll(() => cell.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .poll(async () => cell.evaluate((element) => element.scrollWidth - element.clientWidth))
     .toBeLessThanOrEqual(1)
 }
 
@@ -193,7 +197,7 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
   await page.route('**/api/log-analytics/dns/list', async (route) => {
     listRequests += 1
     const partialResult = listRequests === 1
-    const requestBody = route.request().postDataJSON()
+    const requestBody: unknown = route.request().postDataJSON()
     expect(requestBody).not.toHaveProperty('workspaceId')
     expect(requestBody).toMatchObject({
       filters: {
@@ -377,7 +381,7 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
   ).toBeVisible()
   await expect(page.getByText('response-unknown', { exact: true })).toHaveCount(0)
   await expect(page.getByText('DNS results may be incomplete', { exact: true })).toHaveCount(0)
-  await expect(page.getByText(/could not be queried/)).toHaveCount(0)
+  await expect(page.getByText(COULD_NOT_BE_QUERIED_PATTERN)).toHaveCount(0)
   await expect(page.getByText('DNS transport query failed', { exact: true })).toHaveCount(0)
 
   const resultFilter = page.getByLabel('DNS result')
@@ -395,7 +399,7 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
 
   const entryRows = page
     .locator('section[aria-labelledby="dns-entry-heading"]')
-    .getByRole('button', { name: /Open DNS details/ })
+    .getByRole('button', { name: OPEN_DNS_DETAILS_PATTERN })
   await expect(entryRows.first()).toHaveAccessibleName('Open DNS details for example.com.')
   const sortOrder = page.getByRole('combobox', { name: 'DNS sort order' })
   await expect(sortOrder).toContainText('Newest first')
@@ -438,7 +442,7 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
   await expect(resolutionDetail).toBeVisible()
   await expect(resolutionDetail.getByText('Loading DNS observations…')).toBeVisible()
   await resolutionDetail.evaluate(async (element) => {
-    await Promise.all(element.getAnimations().map((animation) => animation.finished))
+    await Promise.all(element.getAnimations().map(async (animation) => animation.finished))
   })
   const loadingBox = await resolutionDetail.boundingBox()
   releaseDetail()

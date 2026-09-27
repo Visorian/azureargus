@@ -1,5 +1,7 @@
-import { expect, type Locator, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
+import { isIpCountryLookupRequest } from '../../shared/types/ipCountry'
 import type { ManagedEventHubStreamEnvelope } from '../../shared/types/managedEventHub'
 import { mockManagedDeployment } from './support/deployment'
 import { enterAnonymousMode, openSettings } from './support/logsWorkspace'
@@ -7,6 +9,13 @@ import {
   enqueueManagedEventHubEnvelope,
   mockManagedEventHubStream,
 } from './support/managedEventHub'
+
+function ipCountryRequestIps(body: unknown) {
+  if (!isIpCountryLookupRequest(body)) {
+    throw new Error('Unexpected IP country request body')
+  }
+  return body.ips
+}
 
 async function expectLeftInSameRow(left: Locator, right: Locator) {
   await expect(async () => {
@@ -131,7 +140,9 @@ test('receiver status indicators follow the active pane actions', async ({ page 
 
   await page.setViewportSize({ height: 812, width: 375 })
   await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .poll(async () =>
+      page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    )
     .toBe(true)
 })
 
@@ -203,7 +214,7 @@ test('data source rail remains bounded at narrow viewport', async ({ page }) => 
     expect(Math.abs(drawerBox!.width - workspaceBox!.width)).toBeLessThanOrEqual(1)
   }).toPass()
   await expect
-    .poll(() =>
+    .poll(async () =>
       page.evaluate(() => ({
         horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
@@ -213,7 +224,7 @@ test('data source rail remains bounded at narrow viewport', async ({ page }) => 
   await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
   await expect(dataSource).toBeVisible()
   await expect
-    .poll(() =>
+    .poll(async () =>
       page.evaluate(() => ({
         horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
@@ -230,13 +241,13 @@ test('main log table scrolls horizontally at a narrow viewport', async ({ page }
   const table = page.getByTestId('log-table-scroll')
   await expect(table).toHaveCSS('overflow-x', 'auto')
   await expect
-    .poll(() => table.evaluate((element) => element.scrollWidth > element.clientWidth))
+    .poll(async () => table.evaluate((element) => element.scrollWidth > element.clientWidth))
     .toBe(true)
 
   await table.evaluate((element) => {
     element.scrollLeft = element.scrollWidth - element.clientWidth
   })
-  await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  await expect.poll(async () => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
 
   const ruleHeader = table.getByRole('columnheader', { name: 'Rule' })
   const ruleCell = table.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('cell').nth(8)
@@ -253,17 +264,19 @@ test('main log table scrolls horizontally at a narrow viewport', async ({ page }
     expect(Math.abs(headerBox!.width - cellBox!.width)).toBeLessThanOrEqual(1)
   }).toPass()
   await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .poll(async () =>
+      page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    )
     .toBe(true)
 })
 
 test('log detail renders destination flag and separates Event Hub metadata', async ({ page }) => {
   await page.route('**/api/ip-country', async (route) => {
-    const body = route.request().postDataJSON() as { ips: string[] }
+    const ips = ipCountryRequestIps(route.request().postDataJSON())
     await route.fulfill({
       contentType: 'application/json',
       json: {
-        results: body.ips.map((ip) => ({ countryCode: 'US', ip })),
+        results: ips.map((ip) => ({ countryCode: 'US', ip })),
       },
     })
   })
@@ -392,10 +405,11 @@ test('keeps recent logs visible when delayed batches exceed the display and raw 
 
   let received = 2
   for (const batchSize of [100, 1_000]) {
+    const receivedBeforeBatch = received
     await enqueueManagedEventHubEnvelope(page, {
       type: 'events',
       events: Array.from({ length: batchSize }, (_, index) =>
-        event(received + index + 1, '2026-09-15T12:49:46.000Z'),
+        event(receivedBeforeBatch + index + 1, '2026-09-15T12:49:46.000Z'),
       ),
     })
     received += batchSize
@@ -641,7 +655,7 @@ test('renders application-rule FQDN destinations and full category names', async
     })
     await expect(label).toBeVisible()
     await expect
-      .poll(() => label.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .poll(async () => label.evaluate((element) => element.scrollWidth <= element.clientWidth))
       .toBe(true)
   }
 })
@@ -704,7 +718,9 @@ test.describe('time display preferences', () => {
     await expect(dnsTimeHeader).toBeVisible()
     await expect(page.getByText('Times shown in UTC', { exact: true })).toBeVisible()
     await expect
-      .poll(() => dnsTimeHeader.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .poll(async () =>
+        dnsTimeHeader.evaluate((element) => element.scrollWidth <= element.clientWidth),
+      )
       .toBe(true)
     await expect(dnsEntry.locator('time')).toHaveText('00:09:24')
     await page.getByRole('button', { name: 'All logs' }).click()

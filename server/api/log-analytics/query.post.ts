@@ -13,7 +13,7 @@ import {
 } from '../../utils/logAnalyticsAuth'
 import {
   createIncomingRequestSignal,
-  throwLogAnalyticsUpstreamError,
+  createLogAnalyticsUpstreamError,
 } from '../../utils/logAnalyticsRoute'
 
 export default defineEventHandler(async (event) => {
@@ -31,7 +31,7 @@ export default defineEventHandler(async (event) => {
   try {
     config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics)
   } catch (error) {
-    throwLogAnalyticsUpstreamError(event, error)
+    throw createLogAnalyticsUpstreamError(event, error)
   }
 
   const request = await readValidatedBody<LogAnalyticsQueryRequest>(event, (body) =>
@@ -45,7 +45,7 @@ export default defineEventHandler(async (event) => {
       signal: incomingRequest.signal,
     })
   } catch (error) {
-    throwLogAnalyticsUpstreamError(event, error)
+    throw createLogAnalyticsUpstreamError(event, error)
   } finally {
     incomingRequest.cleanup()
   }

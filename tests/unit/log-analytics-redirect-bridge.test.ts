@@ -15,7 +15,7 @@ describe('MSAL redirect bridge', () => {
 
   it('builds the bridge asset from the MSAL redirect helper only', async () => {
     const config = await readFile(new URL('nuxt.config.ts', root), 'utf8')
-    const moduleSource = config.match(REDIRECT_BRIDGE_PATTERN)?.[1]
+    const moduleSource = REDIRECT_BRIDGE_PATTERN.exec(config)?.[1]
 
     expect(moduleSource).toBeDefined()
     expect(moduleSource).toContain('import("@azure/msal-browser/redirect-bridge")')

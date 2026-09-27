@@ -22,7 +22,7 @@ describe('useIpCountryLookup', () => {
 
   it('uses same-origin request fetch and aborts it when scope is disposed', async () => {
     let signal: AbortSignal | undefined
-    requestFetch.mockImplementation((_url: string, options: { signal: AbortSignal }) => {
+    requestFetch.mockImplementation(async (_url: string, options: { signal: AbortSignal }) => {
       signal = options.signal
       return new Promise<unknown>(() => {})
     })
@@ -33,10 +33,11 @@ describe('useIpCountryLookup', () => {
     client?.queue('8.8.8.8')
     await vi.advanceTimersByTimeAsync(50)
 
+    expect(signal).toBeInstanceOf(AbortSignal)
     expect(requestFetch).toHaveBeenCalledWith('/api/ip-country', {
       body: { ips: ['8.8.8.8'] },
       method: 'POST',
-      signal: expect.any(AbortSignal),
+      signal,
     })
     scope.stop()
     expect(signal?.aborted).toBe(true)

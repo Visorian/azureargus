@@ -1,8 +1,10 @@
+const IPV4_OCTET_PATTERN = /^(0|[1-9]\d{0,2})$/
+
 export function isRfc1918Ipv4Address(value: string | null | undefined) {
   const parts = value?.trim().split('.')
   if (
     parts?.length !== 4 ||
-    parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part) || Number(part) > 255)
+    parts.some((part) => !IPV4_OCTET_PATTERN.test(part) || Number(part) > 255)
   ) {
     return false
   }

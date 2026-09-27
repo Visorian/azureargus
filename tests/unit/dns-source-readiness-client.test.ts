@@ -1,19 +1,11 @@
 import { effectScope, nextTick, ref } from 'vue'
 
-import {
-  type DnsReadinessTarget,
-  useDnsSourceReadiness,
-} from '../../app/composables/useDnsSourceReadiness'
+import { useDnsSourceReadiness } from '../../app/composables/useDnsSourceReadiness'
+import type { DnsReadinessTarget } from '../../app/composables/useDnsSourceReadiness'
 import type { DnsReadinessResponse } from '../../shared/types/dns'
 
 function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, reject, resolve }
+  return Promise.withResolvers<T>()
 }
 
 function response(sampleCount: 0 | 1 | 2): DnsReadinessResponse {
@@ -62,14 +54,18 @@ describe('DNS source readiness client', () => {
     >(async () => response(2))
     const scope = effectScope()
     const readiness = scope.run(() => useDnsSourceReadiness({ request, target }))
-    if (!readiness) throw new Error('Readiness composable was not created.')
+    if (!readiness) {
+      throw new Error('Readiness composable was not created.')
+    }
 
     expect(request).not.toHaveBeenCalled()
     expect(readiness.status.value).toBe('idle')
 
     target.value = { mode: 'managed' }
     await nextTick()
-    await vi.waitFor(() => expect(readiness.status.value).toBe('success'))
+    await vi.waitFor(() => {
+      expect(readiness.status.value).toBe('success')
+    })
 
     expect(request).toHaveBeenCalledOnce()
     expect(request).toHaveBeenCalledWith({ mode: 'managed' }, expect.any(AbortSignal))
@@ -83,7 +79,7 @@ describe('DNS source readiness client', () => {
     const signals: AbortSignal[] = []
     const request = vi.fn<
       (target: DnsReadinessTarget, signal: AbortSignal) => Promise<DnsReadinessResponse>
-    >((target, signal) => {
+    >(async (target, signal) => {
       signals.push(signal)
       return target.mode === 'delegated' && target.workspaceId.endsWith('1')
         ? first.promise
@@ -96,7 +92,9 @@ describe('DNS source readiness client', () => {
     })
     const scope = effectScope()
     const readiness = scope.run(() => useDnsSourceReadiness({ request, target }))
-    if (!readiness) throw new Error('Readiness composable was not created.')
+    if (!readiness) {
+      throw new Error('Readiness composable was not created.')
+    }
     await nextTick()
 
     target.value = {
@@ -109,7 +107,9 @@ describe('DNS source readiness client', () => {
 
     first.resolve(response(1))
     second.resolve(response(2))
-    await vi.waitFor(() => expect(readiness.status.value).toBe('success'))
+    await vi.waitFor(() => {
+      expect(readiness.status.value).toBe('success')
+    })
     expect(readiness.readiness.value).toEqual(response(2).readiness)
     scope.stop()
   })
@@ -128,7 +128,9 @@ describe('DNS source readiness client', () => {
         target,
       }),
     )
-    if (!readiness) throw new Error('Readiness composable was not created.')
+    if (!readiness) {
+      throw new Error('Readiness composable was not created.')
+    }
     await nextTick()
 
     target.value = null
@@ -149,8 +151,12 @@ describe('DNS source readiness client', () => {
       .mockReturnValueOnce(next.promise)
     const scope = effectScope()
     const readiness = scope.run(() => useDnsSourceReadiness({ request, target }))
-    if (!readiness) throw new Error('Readiness composable was not created.')
-    await vi.waitFor(() => expect(readiness.status.value).toBe('success'))
+    if (!readiness) {
+      throw new Error('Readiness composable was not created.')
+    }
+    await vi.waitFor(() => {
+      expect(readiness.status.value).toBe('success')
+    })
     expect(readiness.readiness.value).toEqual(storageResponse().readiness)
 
     target.value = {
@@ -163,7 +169,9 @@ describe('DNS source readiness client', () => {
     expect(readiness.status.value).toBe('loading')
     expect(readiness.readiness.value).toEqual([])
     next.resolve(response(0))
-    await vi.waitFor(() => expect(readiness.status.value).toBe('success'))
+    await vi.waitFor(() => {
+      expect(readiness.status.value).toBe('success')
+    })
     scope.stop()
   })
 })

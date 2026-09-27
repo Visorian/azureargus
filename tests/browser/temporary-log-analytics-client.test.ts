@@ -22,17 +22,24 @@ const resourceId =
   '/subscriptions/22222222-2222-4222-8222-222222222222/resourceGroups/network/providers/Microsoft.Network/azureFirewalls/hub'
 
 function requestUrl(input: RequestInfo | URL) {
-  if (typeof input === 'string') return input
+  if (typeof input === 'string') {
+    return input
+  }
   return input instanceof URL ? input.href : input.url
 }
 
 function jsonResponse(value: unknown, init?: ResponseInit) {
   const headers = new Headers(init?.headers)
   headers.set('content-type', 'application/json')
-  return new Response(JSON.stringify(value), {
+  return Response.json(value, {
     ...init,
     headers,
   })
+}
+
+function abortReason(signal: AbortSignal | null | undefined): Error {
+  const reason: unknown = signal?.reason
+  return reason instanceof Error ? reason : new Error(String(reason))
 }
 
 function emptyLogAnalyticsResponse() {
@@ -201,7 +208,7 @@ test('temporary discovery enforces one overall timeout including token acquisiti
   vi.useFakeTimers()
   try {
     const tokenProvider = createTokenProvider()
-    tokenProvider.getManagementAccessToken.mockImplementation(() => new Promise(() => {}))
+    tokenProvider.getManagementAccessToken.mockImplementation(async () => new Promise(() => {}))
     const fetchImplementation = vi.fn<typeof fetch>()
     const client = createTemporaryLogAnalyticsClient(tokenProvider, {
       discoveryTimeoutMs: 20,
@@ -232,7 +239,13 @@ test('temporary discovery sanitizes malformed Azure payloads and aborts sibling 
     }
     siblingSignal = init?.signal ?? undefined
     return new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      init?.signal?.addEventListener(
+        'abort',
+        () => {
+          reject(abortReason(init.signal))
+        },
+        { once: true },
+      )
     })
   })
   const client = createTemporaryLogAnalyticsClient(tokenProvider, { fetchImplementation })
@@ -261,9 +274,15 @@ test('temporary discovery sanitizes unexpected management-token failures', async
 
 test('temporary query preserves caller cancellation', async () => {
   const tokenProvider = createTokenProvider()
-  const fetchImplementation = vi.fn<typeof fetch>((_input, init) => {
+  const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
     return new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      init?.signal?.addEventListener(
+        'abort',
+        () => {
+          reject(abortReason(init.signal))
+        },
+        { once: true },
+      )
     })
   })
   const client = createTemporaryLogAnalyticsClient(tokenProvider, { fetchImplementation })
@@ -271,7 +290,9 @@ test('temporary query preserves caller cancellation', async () => {
   const reason = new DOMException('Stopped', 'AbortError')
 
   const result = client.query(tenantId, workspaceId, createQueryRequest(), controller.signal)
-  await vi.waitFor(() => expect(fetchImplementation).toHaveBeenCalledTimes(1))
+  await vi.waitFor(() => {
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
   controller.abort(reason)
 
   await expect(result).rejects.toBe(reason)
@@ -280,12 +301,12 @@ test('temporary query preserves caller cancellation', async () => {
 test.each([
   [
     'DNS readiness',
-    (client: ReturnType<typeof createTemporaryLogAnalyticsClient>, signal: AbortSignal) =>
+    async (client: ReturnType<typeof createTemporaryLogAnalyticsClient>, signal: AbortSignal) =>
       client.dnsReadiness(tenantId, workspaceId, signal),
   ],
   [
     'DNS listing',
-    (client: ReturnType<typeof createTemporaryLogAnalyticsClient>, signal: AbortSignal) =>
+    async (client: ReturnType<typeof createTemporaryLogAnalyticsClient>, signal: AbortSignal) =>
       client.dnsList(
         tenantId,
         workspaceId,
@@ -300,9 +321,15 @@ test.each([
   'temporary %s preserves caller cancellation across source requests',
   async (_name, run) => {
     const tokenProvider = createTokenProvider()
-    const fetchImplementation = vi.fn<typeof fetch>((_input, init) => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
       return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+        init?.signal?.addEventListener(
+          'abort',
+          () => {
+            reject(abortReason(init.signal))
+          },
+          { once: true },
+        )
       })
     })
     const client = createTemporaryLogAnalyticsClient(tokenProvider, { fetchImplementation })
@@ -310,7 +337,9 @@ test.each([
     const reason = new DOMException('Stopped', 'AbortError')
 
     const result = run(client, controller.signal)
-    await vi.waitFor(() => expect(fetchImplementation).toHaveBeenCalled())
+    await vi.waitFor(() => {
+      expect(fetchImplementation).toHaveBeenCalled()
+    })
     controller.abort(reason)
 
     await expect(result).rejects.toBe(reason)

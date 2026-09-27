@@ -70,13 +70,7 @@ function createTransport(): DnsObservation {
 }
 
 function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, reject, resolve }
+  return Promise.withResolvers<T>()
 }
 
 function createHarness(
@@ -116,9 +110,13 @@ function createHarness(
       storage,
     }),
   )
-  if (!dns) throw new Error('DNS composable was not created.')
+  if (!dns) {
+    throw new Error('DNS composable was not created.')
+  }
   function getSink() {
-    if (!sinkHolder.current) throw new Error('DNS sink was not registered.')
+    if (!sinkHolder.current) {
+      throw new Error('DNS sink was not registered.')
+    }
     return sinkHolder.current
   }
   return { active, dns, draftRange, mode, queryLimit, removeSink, scope, storage, getSink }
@@ -194,7 +192,7 @@ describe('DNS troubleshooting client', () => {
     const first = createDeferred<DnsListQueryResponse>()
     const second = createDeferred<DnsListQueryResponse>()
     let index = 0
-    const harness = createHarness(() => [first, second][index++]!.promise)
+    const harness = createHarness(async () => [first, second][index++]!.promise)
 
     const firstRun = harness.dns.run()
     const secondRun = harness.dns.run()
@@ -205,7 +203,7 @@ describe('DNS troubleshooting client', () => {
     expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['latest'])
 
     const inactive = createDeferred<DnsListQueryResponse>()
-    const inactiveHarness = createHarness(() => inactive.promise)
+    const inactiveHarness = createHarness(async () => inactive.promise)
     const inactiveRun = inactiveHarness.dns.run()
     inactiveHarness.active.value = false
     await nextTick()
@@ -220,12 +218,12 @@ describe('DNS troubleshooting client', () => {
   it('aborts active list work when shared draft range changes', async () => {
     let signal: AbortSignal | undefined
     const harness = createHarness(
-      (_body, requestSignal) =>
+      async (_body, requestSignal) =>
         new Promise((_resolve, reject) => {
           signal = requestSignal
-          requestSignal.addEventListener('abort', () =>
-            reject(new DOMException('Aborted', 'AbortError')),
-          )
+          requestSignal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'))
+          })
         }),
     )
 
@@ -283,7 +281,7 @@ describe('DNS troubleshooting client', () => {
     const detailRequest = createDeferred<DnsDetailQueryResponse>()
     const harness = createHarness(
       async () => createResponse(createEntry('remote')),
-      () => detailRequest.promise,
+      async () => detailRequest.promise,
     )
     await harness.dns.run()
 

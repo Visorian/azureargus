@@ -13,6 +13,11 @@ import type {
 import { DNS_OUTCOME_LABELS } from '#shared/utils/dns'
 import type { LogHourCycle } from '~/composables/useLogTimeFormat'
 
+const filters = defineModel<DnsFilters>('filters', { required: true })
+const sort = defineModel<DnsSort>('sort', { required: true })
+const showUnidentifiedTransports = defineModel<boolean>('showUnidentifiedTransports', {
+  required: true,
+})
 const props = withDefaults(
   defineProps<{
     hourCycle?: LogHourCycle
@@ -35,11 +40,9 @@ const emit = defineEmits<{
   reset: []
   select: [entry: DnsEntry]
 }>()
-const filters = defineModel<DnsFilters>('filters', { required: true })
-const sort = defineModel<DnsSort>('sort', { required: true })
-const showUnidentifiedTransports = defineModel<boolean>('showUnidentifiedTransports', {
-  required: true,
-})
+defineSlots<{
+  queryControls?: () => unknown
+}>()
 const dnsEntryGridClass = computed(() =>
   props.hourCycle === 'h12'
     ? 'min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]'
@@ -83,19 +86,23 @@ const sortItems = [
     key: 'observations',
     direction: 'desc',
   },
-] satisfies Array<{
+] satisfies {
   label: string
   value: SortSelection
   key: DnsSort['key']
   direction: DnsSort['direction']
-}>
+}[]
 
 function selectedSortValue(value: DnsSort): SortSelection {
-  if (value.key === 'timestamp')
+  if (value.key === 'timestamp') {
     return value.direction === 'desc' ? 'timestamp-desc' : 'timestamp-asc'
-  if (value.key === 'queryName')
+  }
+  if (value.key === 'queryName') {
     return value.direction === 'asc' ? 'queryName-asc' : 'queryName-desc'
-  if (value.key === 'duration') return value.direction === 'asc' ? 'duration-asc' : 'duration-desc'
+  }
+  if (value.key === 'duration') {
+    return value.direction === 'asc' ? 'duration-asc' : 'duration-desc'
+  }
   return value.direction === 'asc' ? 'observations-asc' : 'observations-desc'
 }
 
@@ -103,7 +110,9 @@ const sortSelection = computed<SortSelection>({
   get: () => selectedSortValue(sort.value),
   set: (value) => {
     const selected = sortItems.find((item) => item.value === value)
-    if (!selected) return
+    if (!selected) {
+      return
+    }
     sort.value = { key: selected.key, direction: selected.direction }
   },
 })
@@ -138,15 +147,25 @@ const outcomeItems = computed(() =>
   })),
 )
 const emptyEntryMessage = computed(() => {
-  if (props.status === 'loading') return 'Loading DNS entries…'
-  if (props.error) return 'DNS query failed.'
-  if (props.status === 'idle' && props.logAnalysis) return 'Run DNS query to load entries.'
+  if (props.status === 'loading') {
+    return 'Loading DNS entries…'
+  }
+  if (props.error) {
+    return 'DNS query failed.'
+  }
+  if (props.status === 'idle' && props.logAnalysis) {
+    return 'Run DNS query to load entries.'
+  }
   const unavailable = props.sources.filter((source) => source.availability !== 'available')
   if (props.sources.length > 0 && unavailable.length === props.sources.length) {
     return 'No DNS sources are available for this query.'
   }
-  if (unavailable.length > 0) return 'No entries returned by available DNS sources.'
-  if (props.entriesTruncated) return 'No entries retained within bounded DNS query results.'
+  if (unavailable.length > 0) {
+    return 'No entries returned by available DNS sources.'
+  }
+  if (props.entriesTruncated) {
+    return 'No entries retained within bounded DNS query results.'
+  }
   return 'No matching DNS entries.'
 })
 const sourceWarnings = computed(() =>
@@ -163,9 +182,15 @@ function outcomeLabel(value: DnsEntry['outcome']) {
 }
 
 function duration(seconds: number | undefined) {
-  if (seconds === undefined) return '-'
-  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)} µs`
-  if (seconds < 1) return `${(seconds * 1_000).toFixed(2)} ms`
+  if (seconds === undefined) {
+    return '-'
+  }
+  if (seconds < 0.001) {
+    return `${Math.round(seconds * 1_000_000)} µs`
+  }
+  if (seconds < 1) {
+    return `${(seconds * 1_000).toFixed(2)} ms`
+  }
   return `${seconds.toFixed(2)} s`
 }
 
@@ -176,7 +201,9 @@ function endpoint(observation: DnsObservation, side: 'client' | 'server') {
 }
 
 function destination(entry: DnsEntry) {
-  if (entry.destination) return entry.destination
+  if (entry.destination) {
+    return entry.destination
+  }
   const observation = entry.observations.find(
     (item) => Boolean(item.serverIp) || Boolean(item.serverPort),
   )
@@ -247,8 +274,8 @@ function completeness(value: DnsEntry['completeness']) {
           @reset="emit('reset')"
         />
       </template>
-      <template v-if="$slots['query-controls']" #query>
-        <slot name="query-controls" />
+      <template v-if="$slots['queryControls']" #query>
+        <slot name="queryControls" />
       </template>
     </LogsLogAnalysisToolbar>
 

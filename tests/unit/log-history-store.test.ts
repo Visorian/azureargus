@@ -1,5 +1,6 @@
 import type { PersistedFirewallLogRecord } from '../../app/utils/logHistoryRecord'
-import { createLogHistoryStore, type LogHistoryStoreAdapter } from '../../app/utils/logHistoryStore'
+import { createLogHistoryStore } from '../../app/utils/logHistoryStore'
+import type { LogHistoryStoreAdapter } from '../../app/utils/logHistoryStore'
 
 function createRecord(id: string): PersistedFirewallLogRecord {
   return {
@@ -13,15 +14,14 @@ function createRecord(id: string): PersistedFirewallLogRecord {
   }
 }
 
-function createAdapter(overrides: Partial<LogHistoryStoreAdapter> = {}): LogHistoryStoreAdapter {
+function createAdapter() {
   return {
-    clear: vi.fn(async () => undefined),
-    deleteBefore: vi.fn(async () => 0),
-    deleteExcessRecords: vi.fn(async () => 0),
-    putMany: vi.fn(async () => undefined),
-    queryRange: vi.fn(async () => []),
-    ...overrides,
-  }
+    clear: vi.fn<LogHistoryStoreAdapter['clear']>(async () => {}),
+    deleteBefore: vi.fn<LogHistoryStoreAdapter['deleteBefore']>(async () => 0),
+    deleteExcessRecords: vi.fn<LogHistoryStoreAdapter['deleteExcessRecords']>(async () => 0),
+    putMany: vi.fn<LogHistoryStoreAdapter['putMany']>(async () => {}),
+    queryRange: vi.fn<LogHistoryStoreAdapter['queryRange']>(async () => []),
+  } satisfies LogHistoryStoreAdapter
 }
 
 describe('log history store', () => {
@@ -31,14 +31,14 @@ describe('log history store', () => {
     const calls: string[] = []
     const records = [createRecord('first'), createRecord('second')]
     const adapter = createAdapter()
-    vi.mocked(adapter.putMany).mockImplementation(async () => {
+    adapter.putMany.mockImplementation(async () => {
       calls.push('put')
     })
-    vi.mocked(adapter.deleteBefore).mockImplementation(async () => {
+    adapter.deleteBefore.mockImplementation(async () => {
       calls.push('delete-before')
       return 0
     })
-    vi.mocked(adapter.deleteExcessRecords).mockImplementation(async () => {
+    adapter.deleteExcessRecords.mockImplementation(async () => {
       calls.push('delete-excess')
       return 0
     })

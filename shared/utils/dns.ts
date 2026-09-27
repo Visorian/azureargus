@@ -3,6 +3,7 @@ import type {
   DnsEntry,
   DnsObservation,
   DnsOutcome,
+  DnsPathKind,
   DnsRawProjection,
   DnsSourceKind,
   DnsStage,
@@ -27,6 +28,14 @@ const QUERY_NAME_LIMIT = 1_024
 const CANONICAL_TEXT_LIMIT = 2_048
 const SHORT_TEXT_LIMIT = 256
 const CODE_LIMIT = 64
+const collator = new Intl.Collator()
+const DNS_SOURCE_PATHS: Readonly<Record<DnsSourceKind, DnsPathKind>> = {
+  'dns-flow-trace': 'proxy',
+  'dns-proxy': 'proxy',
+  'internal-fqdn-failure': 'internal',
+  'network-rule': 'direct',
+  'proxy-structured': 'proxy',
+}
 const DNS_PROXY_SUCCESS_PATTERN =
   /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>\d+(?:\.\d+)?)s$/i
 const DNS_PROXY_ERROR_PATTERN =
@@ -61,7 +70,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readRecord(raw: unknown) {
   const record = isRecord(raw) ? raw : {}
-  const properties = isRecord(record.properties) ? record.properties : {}
+  const properties = isRecord(record['properties']) ? record['properties'] : {}
   return { properties, record }
 }
 
@@ -69,7 +78,7 @@ function readValue(
   record: Record<string, unknown>,
   properties: Record<string, unknown>,
   keys: readonly string[],
-) {
+): unknown {
   for (const key of keys) {
     if (properties[key] !== undefined && properties[key] !== null) {
       return properties[key]
@@ -97,7 +106,7 @@ function readNumber(
   record: Record<string, unknown>,
   properties: Record<string, unknown>,
   keys: readonly string[],
-) {
+): number | undefined {
   const value = readValue(record, properties, keys)
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
@@ -113,26 +122,34 @@ function readBoolean(
   record: Record<string, unknown>,
   properties: Record<string, unknown>,
   keys: readonly string[],
-) {
+): boolean | undefined {
   const value = readValue(record, properties, keys)
   if (typeof value === 'boolean') {
     return value
   }
   if (typeof value === 'string') {
-    if (value.toLowerCase() === 'true') return true
-    if (value.toLowerCase() === 'false') return false
+    if (value.toLowerCase() === 'true') {
+      return true
+    }
+    if (value.toLowerCase() === 'false') {
+      return false
+    }
   }
   return undefined
 }
 
 function splitEndpoint(value: string | undefined) {
-  if (!value) return {}
+  if (!value) {
+    return {}
+  }
   if (value.startsWith('[')) {
-    const match = value.match(BRACKETED_ENDPOINT_PATTERN)
-    return { ip: match?.groups?.ip, port: match?.groups?.port }
+    const match = BRACKETED_ENDPOINT_PATTERN.exec(value)
+    return { ip: match?.groups?.['ip'], port: match?.groups?.['port'] }
   }
   const separator = value.lastIndexOf(':')
-  if (separator <= 0 || value.indexOf(':') !== separator) return { ip: value }
+  if (separator <= 0 || value.indexOf(':') !== separator) {
+    return { ip: value }
+  }
   return { ip: value.slice(0, separator), port: value.slice(separator + 1) }
 }
 
@@ -141,15 +158,26 @@ function getOutcome(
   errorMessage?: string,
   errorNumber?: string,
 ): DnsOutcome {
-  if (errorMessage || (errorNumber && errorNumber !== '0')) return 'transport-error'
-  if (!responseCode) return 'pending'
+  if (errorMessage || (errorNumber && errorNumber !== '0')) {
+    return 'transport-error'
+  }
+  if (!responseCode) {
+    return 'pending'
+  }
   const normalized = responseCode.toUpperCase()
   return normalized === 'NOERROR' || normalized === '0' ? 'response-unknown' : 'dns-error'
 }
 
-function boundedText(value: unknown, limit = RAW_FIELD_LIMIT) {
-  if (typeof value === 'string') return value.slice(0, limit)
-  if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value
+function boundedText(
+  value: unknown,
+  limit = RAW_FIELD_LIMIT,
+): string | number | boolean | null | undefined {
+  if (typeof value === 'string') {
+    return value.slice(0, limit)
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return value
+  }
   return undefined
 }
 
@@ -203,14 +231,18 @@ function projectRaw(raw: unknown) {
     const value = boundedText(original, limit)
     if (value !== undefined) {
       projection[key] = value
-      if (typeof value === 'string') remaining -= value.length
+      if (typeof value === 'string') {
+        remaining -= value.length
+      }
       if (
         typeof original === 'string' &&
         original.length > (typeof value === 'string' ? value.length : 0)
       ) {
         warnings.push(`Raw ${key} truncated`)
       }
-      if (remaining <= 0) break
+      if (remaining <= 0) {
+        break
+      }
     }
   }
   return { projection, warnings }
@@ -222,19 +254,27 @@ function canonicalText(
   warnings: string[],
   limit = CANONICAL_TEXT_LIMIT,
 ) {
-  if (!value || value.length <= limit) return value
+  if (!value || value.length <= limit) {
+    return value
+  }
   warnings.push(`${label} truncated`)
   return value.slice(0, limit)
 }
 
 function canonicalFlags(value: string | undefined, warnings: string[]) {
   const bounded = canonicalText(value, 'Response flags', warnings, SHORT_TEXT_LIMIT)
-  if (!bounded || bounded === '-') return []
+  if (!bounded || bounded === '-') {
+    return []
+  }
   const flags = bounded.split(',')
-  if (flags.length > 32) warnings.push('Response flag count truncated')
+  if (flags.length > 32) {
+    warnings.push('Response flag count truncated')
+  }
   return flags.slice(0, 32).map((flag) => {
     const trimmed = flag.trim()
-    if (trimmed.length > CODE_LIMIT) warnings.push('Response flag truncated')
+    if (trimmed.length > CODE_LIMIT) {
+      warnings.push('Response flag truncated')
+    }
     return trimmed.slice(0, CODE_LIMIT)
   })
 }
@@ -253,12 +293,7 @@ function baseObservation(
     ...(input.logAnalyticsStorage ? { logAnalyticsStorage: input.logAnalyticsStorage } : {}),
     source,
     stage,
-    path:
-      source === 'network-rule'
-        ? 'direct'
-        : source === 'internal-fqdn-failure'
-          ? 'internal'
-          : 'proxy',
+    path: DNS_SOURCE_PATHS[source],
     outcome: 'pending',
     resourceId: canonicalText(input.resourceId, 'Resource ID', warnings, 1_024),
     protocol:
@@ -273,40 +308,44 @@ function baseObservation(
 }
 
 function parseDnsProxyMessage(input: DnsRecordInput): DnsObservation | undefined {
-  if (input.message.length > DNS_PROXY_MESSAGE_LIMIT) return undefined
+  if (input.message.length > DNS_PROXY_MESSAGE_LIMIT) {
+    return undefined
+  }
   const observation = baseObservation(input, 'dns-proxy', 'proxy-exchange')
-  const match = input.message.match(DNS_PROXY_SUCCESS_PATTERN)
+  const match = DNS_PROXY_SUCCESS_PATTERN.exec(input.message)
   if (!match?.groups) {
-    const errorMatch = input.message.match(DNS_PROXY_ERROR_PATTERN)
-    if (!errorMatch?.groups) return undefined
+    const errorMatch = DNS_PROXY_ERROR_PATTERN.exec(input.message)
+    if (!errorMatch?.groups) {
+      return undefined
+    }
     const warnings = [...observation.warnings]
     return {
       ...observation,
       queryName: canonicalText(
-        errorMatch.groups.queryName,
+        errorMatch.groups['queryName'],
         'Query name',
         warnings,
         QUERY_NAME_LIMIT,
       ),
-      queryType: canonicalText(errorMatch.groups.queryType?.trim(), 'Query type', warnings),
+      queryType: canonicalText(errorMatch.groups['queryType']?.trim(), 'Query type', warnings),
       errorNumber: canonicalText(
-        errorMatch.groups.errorNumber,
+        errorMatch.groups['errorNumber'],
         'Error number',
         warnings,
         CODE_LIMIT,
       ),
-      errorMessage: canonicalText(errorMatch.groups.errorMessage, 'Error message', warnings),
+      errorMessage: canonicalText(errorMatch.groups['errorMessage'], 'Error message', warnings),
       outcome: 'transport-error',
       warnings,
     }
   }
 
-  const client = splitEndpoint(match.groups.client)
+  const client = splitEndpoint(match.groups['client'])
   const warnings = [...observation.warnings]
-  const requestSizeBytes = Number(match.groups.requestSize)
-  const ednsBufferSizeBytes = Number(match.groups.ednsBuffer)
-  const responseSizeBytes = Number(match.groups.responseSize)
-  const durationSeconds = Number(match.groups.duration)
+  const requestSizeBytes = Number(match.groups['requestSize'])
+  const ednsBufferSizeBytes = Number(match.groups['ednsBuffer'])
+  const responseSizeBytes = Number(match.groups['responseSize'])
+  const durationSeconds = Number(match.groups['duration'])
   if (
     !Number.isFinite(requestSizeBytes) ||
     !Number.isFinite(ednsBufferSizeBytes) ||
@@ -316,7 +355,7 @@ function parseDnsProxyMessage(input: DnsRecordInput): DnsObservation | undefined
     return undefined
   }
   const responseCode = canonicalText(
-    match.groups.responseCode,
+    match.groups['responseCode'],
     'Response code',
     warnings,
     CODE_LIMIT,
@@ -325,16 +364,21 @@ function parseDnsProxyMessage(input: DnsRecordInput): DnsObservation | undefined
     ...observation,
     clientIp: canonicalText(client.ip, 'Client IP', warnings, SHORT_TEXT_LIMIT),
     clientPort: canonicalText(client.port, 'Client port', warnings, CODE_LIMIT),
-    queryId: canonicalText(match.groups.queryId, 'Query ID', warnings, SHORT_TEXT_LIMIT),
-    queryType: canonicalText(match.groups.queryType, 'Query type', warnings),
-    queryClass: canonicalText(match.groups.queryClass, 'Query class', warnings),
-    queryName: canonicalText(match.groups.queryName, 'Query name', warnings, QUERY_NAME_LIMIT),
-    protocol: canonicalText(match.groups.protocol?.toUpperCase(), 'Protocol', warnings, CODE_LIMIT),
+    queryId: canonicalText(match.groups['queryId'], 'Query ID', warnings, SHORT_TEXT_LIMIT),
+    queryType: canonicalText(match.groups['queryType'], 'Query type', warnings),
+    queryClass: canonicalText(match.groups['queryClass'], 'Query class', warnings),
+    queryName: canonicalText(match.groups['queryName'], 'Query name', warnings, QUERY_NAME_LIMIT),
+    protocol: canonicalText(
+      match.groups['protocol']?.toUpperCase(),
+      'Protocol',
+      warnings,
+      CODE_LIMIT,
+    ),
     requestSizeBytes,
-    dnssecOk: match.groups.dnssecOk?.toLowerCase() === 'true',
+    dnssecOk: match.groups['dnssecOk']?.toLowerCase() === 'true',
     ednsBufferSizeBytes,
     responseCode,
-    responseFlags: canonicalFlags(match.groups.flags, warnings),
+    responseFlags: canonicalFlags(match.groups['flags'], warnings),
     responseSizeBytes,
     durationSeconds,
     outcome: getOutcome(responseCode),
@@ -540,36 +584,26 @@ function parseNetwork(input: DnsRecordInput): DnsObservation | undefined {
   const denied = input.action.toLowerCase().includes('deny')
   const sourceIsServer = input.sourcePort === '53' && input.destinationPort !== '53'
   const destinationIsServer = input.destinationPort === '53' && input.sourcePort !== '53'
-  if (!sourceIsServer && !destinationIsServer) {
+  const sourceEndpoint = { ip: input.sourceIp, port: input.sourcePort }
+  const destinationEndpoint = { ip: input.destinationIp, port: input.destinationPort }
+  let clientEndpoint: Partial<typeof sourceEndpoint> = {}
+  let serverEndpoint: Partial<typeof sourceEndpoint> = {}
+  if (destinationIsServer) {
+    clientEndpoint = sourceEndpoint
+    serverEndpoint = destinationEndpoint
+  } else if (sourceIsServer) {
+    clientEndpoint = destinationEndpoint
+    serverEndpoint = sourceEndpoint
+  } else {
     warnings.push('DNS transport direction is ambiguous')
   }
   return {
     ...observation,
     action: canonicalText(input.action, 'Action', warnings, SHORT_TEXT_LIMIT),
-    clientIp: canonicalText(
-      destinationIsServer ? input.sourceIp : sourceIsServer ? input.destinationIp : undefined,
-      'Client IP',
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    clientPort: canonicalText(
-      destinationIsServer ? input.sourcePort : sourceIsServer ? input.destinationPort : undefined,
-      'Client port',
-      warnings,
-      CODE_LIMIT,
-    ),
-    serverIp: canonicalText(
-      destinationIsServer ? input.destinationIp : sourceIsServer ? input.sourceIp : undefined,
-      'Server IP',
-      warnings,
-      SHORT_TEXT_LIMIT,
-    ),
-    serverPort: canonicalText(
-      destinationIsServer ? input.destinationPort : sourceIsServer ? input.sourcePort : undefined,
-      'Server port',
-      warnings,
-      CODE_LIMIT,
-    ),
+    clientIp: canonicalText(clientEndpoint.ip, 'Client IP', warnings, SHORT_TEXT_LIMIT),
+    clientPort: canonicalText(clientEndpoint.port, 'Client port', warnings, CODE_LIMIT),
+    serverIp: canonicalText(serverEndpoint.ip, 'Server IP', warnings, SHORT_TEXT_LIMIT),
+    serverPort: canonicalText(serverEndpoint.port, 'Server port', warnings, CODE_LIMIT),
     networkSourceIp: canonicalText(input.sourceIp, 'Source IP', warnings, SHORT_TEXT_LIMIT),
     networkSourcePort: canonicalText(input.sourcePort, 'Source port', warnings, CODE_LIMIT),
     networkDestinationIp: canonicalText(
@@ -609,12 +643,15 @@ export function parseDnsObservation(input: DnsRecordInput): DnsObservation | und
   if (category === 'azurefirewalldnsproxy') {
     return input.origin === 'event-hub' ? parseDnsProxyMessage(input) : undefined
   }
-  if (category === 'azfwdnsquery')
+  if (category === 'azfwdnsquery') {
     return input.origin === 'log-analytics' ? parseStructured(input) : undefined
-  if (category === 'azfwdnsflowtrace')
+  }
+  if (category === 'azfwdnsflowtrace') {
     return input.origin === 'log-analytics' ? parseDnsFlowTrace(input) : undefined
-  if (category === 'azfwinternalfqdnresolutionfailure')
+  }
+  if (category === 'azfwinternalfqdnresolutionfailure') {
     return input.origin === 'log-analytics' ? parseInternalFqdnFailure(input) : undefined
+  }
   if (category === 'azfwnetworkrule' || category === 'azurefirewallnetworkrule') {
     return parseNetwork(input)
   }
@@ -624,8 +661,12 @@ export function parseDnsObservation(input: DnsRecordInput): DnsObservation | und
 export function createDnsDetailSelector(
   observation: DnsObservation,
 ): DnsDetailSelector | undefined {
-  if (!observation.resourceId) return undefined
-  if (observation.source === 'dns-proxy') return undefined
+  if (!observation.resourceId) {
+    return undefined
+  }
+  if (observation.source === 'dns-proxy') {
+    return undefined
+  }
   if (observation.source === 'network-rule') {
     if (
       !observation.protocol ||
@@ -717,8 +758,8 @@ export function createDnsEntries(observations: readonly DnsObservation[]): DnsEn
       detailSelector: createDnsDetailSelector(observation),
     }))
     .toSorted((left, right) => {
-      const timestampOrder = right.timestamp.localeCompare(left.timestamp)
-      return timestampOrder || right.id.localeCompare(left.id)
+      const timestampOrder = collator.compare(right.timestamp, left.timestamp)
+      return timestampOrder || collator.compare(right.id, left.id)
     })
 }
 

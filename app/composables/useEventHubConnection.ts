@@ -6,7 +6,7 @@ export const EVENT_HUB_LOOKBACK_OPTIONS = [
   { label: 'Last 5 minutes', value: 5 },
   { label: 'Last 10 minutes', value: 10 },
   { label: 'Last 15 minutes', value: 15 },
-] satisfies Array<{ label: string; value: EventHubLookbackMinutes }>
+] satisfies { label: string; value: EventHubLookbackMinutes }[]
 export const DEFAULT_LOOKBACK_MINUTES: EventHubLookbackMinutes = 15
 export const DEFAULT_BUFFER_SIZE = 5_000
 export const RAW_BUFFER_MULTIPLIER = 10

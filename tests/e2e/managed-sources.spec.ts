@@ -9,6 +9,8 @@ import {
   mockManagedEventHubStream,
 } from './support/managedEventHub'
 
+const NETWORK_RULE_ROW_PATTERN = /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/
+
 test('managed Event Hub uses configured server stream without exposing credentials', async ({
   page,
 }) => {
@@ -23,7 +25,7 @@ test('managed Event Hub uses configured server stream without exposing credentia
   await expect(page.getByRole('checkbox', { name: 'Remember connection string' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect
-    .poll(() => getManagedEventHubRequests(page))
+    .poll(async () => getManagedEventHubRequests(page))
     .toEqual([{ consumerGroup: '$Default', lookbackMinutes: 15 }])
   await expect
     .poll(async () => JSON.stringify(await getManagedEventHubRequests(page)))
@@ -67,7 +69,7 @@ test('managed Event Hub uses configured server stream without exposing credentia
       .getByText('reconnecting', { exact: true }),
   ).toBeVisible()
   await expect
-    .poll(() => getManagedEventHubRequests(page))
+    .poll(async () => getManagedEventHubRequests(page))
     .toEqual([
       { consumerGroup: '$Default', lookbackMinutes: 15 },
       { consumerGroup: '$Default', lookbackMinutes: 15, resumeFrom: { '0': 42 } },
@@ -100,7 +102,7 @@ test('managed Event Hub uses configured server stream without exposing credentia
   await expect(page.getByText('Latest', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open Event Hub settings' })).toHaveCount(0)
   const networkRows = page.getByRole('row', {
-    name: /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/,
+    name: NETWORK_RULE_ROW_PATTERN,
   })
   await expect(networkRows).toHaveCount(2)
   await expect(networkRows.first()).toBeVisible()
@@ -185,11 +187,13 @@ test('managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
     })
   })
   await page.route('**/api/log-analytics/query', async (route) => {
-    const requestBody = route.request().postDataJSON()
+    const requestBody: unknown = route.request().postDataJSON()
     expect(requestBody).not.toHaveProperty('workspaceId')
-    expect(requestBody.limit).toBe(2_000)
-    expect(requestBody.storage).toBe('azure-diagnostics')
-    expect(requestBody.filters.category).toEqual(['AZFWNetworkRule', 'AZFWApplicationRule'])
+    expect(requestBody).toMatchObject({
+      filters: { category: ['AZFWNetworkRule', 'AZFWApplicationRule'] },
+      limit: 2_000,
+      storage: 'azure-diagnostics',
+    })
     await route.fulfill({
       contentType: 'application/json',
       json: {

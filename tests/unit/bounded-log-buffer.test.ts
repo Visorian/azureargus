@@ -1,4 +1,5 @@
-import { effectScope, isRef, ref, type Ref } from 'vue'
+import { effectScope, isRef, ref } from 'vue'
+import type { Ref } from 'vue'
 
 import {
   mergeIntoBoundedBuffer,
@@ -10,14 +11,14 @@ import {
 beforeEach(() => {
   vi.useFakeTimers()
   const stateByKey = new Map<string, Ref<unknown>>()
-  vi.stubGlobal('useState', <T>(key: string, initialize: () => T | Ref<T>) => {
+  vi.stubGlobal('useState', (key: string, initialize: () => unknown) => {
     const existing = stateByKey.get(key)
     if (existing) {
-      return existing as Ref<T>
+      return existing
     }
     const initial = initialize()
     const state = isRef(initial) ? initial : ref(initial)
-    stateByKey.set(key, state as Ref<unknown>)
+    stateByKey.set(key, state)
     return state
   })
 })
@@ -122,7 +123,7 @@ describe('bounded log buffer helpers', () => {
     expect(buffer.items.value).toEqual([])
 
     vi.advanceTimersByTime(1)
-    expect(buffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2])
+    expect(buffer.items.value).toEqual([{ id: 3 }, { id: 2 }])
     expect(buffer.version.value).toBe(1)
   })
 
@@ -137,7 +138,7 @@ describe('bounded log buffer helpers', () => {
       publishedSize: ref(2),
     })
 
-    expect(recreatedBuffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2])
+    expect(recreatedBuffer.items.value).toEqual([{ id: 3 }, { id: 2 }])
     expect(recreatedBuffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1])
   })
 

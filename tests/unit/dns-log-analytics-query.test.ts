@@ -64,10 +64,27 @@ function azureResponse(columns: string[], rows: unknown[][]) {
 }
 
 function response(payload: unknown) {
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })
+  return Response.json(payload)
+}
+
+function requestJson(init: RequestInit | undefined): unknown {
+  if (typeof init?.body !== 'string') {
+    throw new TypeError('Expected JSON request body')
+  }
+  return JSON.parse(init.body)
+}
+
+function requestQuery(init: RequestInit | undefined): string {
+  const body = requestJson(init)
+  if (typeof body !== 'object' || body === null || !('query' in body)) {
+    throw new TypeError('Expected query request')
+  }
+  return String(body.query)
+}
+
+function firstLine(text: string | undefined) {
+  const end = text?.indexOf('\n') ?? -1
+  return end === -1 ? text : text?.slice(0, end)
 }
 
 function readinessResponse(sampleCount: 0 | 1 | 2 = 2, tableExists = true) {
@@ -201,7 +218,7 @@ describe('DNS Log Analytics KQL', () => {
       'internal-fqdn-failure',
       'network-rule',
     ])
-    expect(queries.map(({ query }) => query.split('\n')[0])).toEqual([
+    expect(queries.map(({ query }) => firstLine(query))).toEqual([
       'AZFWDnsQuery',
       'AZFWDnsFlowTrace',
       'AZFWInternalFqdnResolutionFailure',
@@ -230,7 +247,7 @@ describe('DNS Log Analytics KQL', () => {
       source: 'network-rule',
       storage: 'azure-diagnostics',
     })
-    expect(queries[0]?.query.split('\n')[0]).toBe('AzureDiagnostics')
+    expect(firstLine(queries[0]?.query)).toBe('AzureDiagnostics')
     expect(queries[0]?.query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"')
     expect(queries[0]?.query).toContain('| where ResourceType =~ "AZUREFIREWALLS"')
     expect(queries[0]?.query).toContain('| where Category == "AZFWNetworkRule"')
@@ -290,7 +307,7 @@ describe('DNS Log Analytics KQL', () => {
 
     const [flow] = buildDnsListQueries(request)
 
-    expect(flow?.query.split('\n')[0]).toBe('AZFWDnsFlowTrace')
+    expect(firstLine(flow?.query)).toBe('AZFWDnsFlowTrace')
     expect(flow?.query).toContain(
       'strcat(MsgType, " ", QueryMessage, " ", ServerMessage, " ", SourceIp, " ", SourcePort, " ", ServerIp, " ", ServerPort)',
     )
@@ -310,7 +327,7 @@ describe('DNS Log Analytics KQL', () => {
 
     const [internal] = buildDnsListQueries(request)
 
-    expect(internal?.query.split('\n')[0]).toBe('AZFWInternalFqdnResolutionFailure')
+    expect(firstLine(internal?.query)).toBe('AZFWInternalFqdnResolutionFailure')
     expect(internal?.query).toContain(
       'strcat(Fqdn, " ", Error, " ", ServerIp, " ", ServerPort, " ", Policy, " ", RuleCollectionGroup, " ", RuleCollection, " ", Rule)',
     )
@@ -351,7 +368,7 @@ describe('DNS Log Analytics KQL', () => {
 
     const query = buildDnsDetailQuery(request.selector)
 
-    expect(query.split('\n')[0]).toBe('AZFWDnsQuery')
+    expect(firstLine(query)).toBe('AZFWDnsQuery')
     expect(query).toContain(`| where _ResourceId =~ ${JSON.stringify(resourceId)}`)
     expect(query).toContain(`| where QueryName =~ ${JSON.stringify(request.selector.queryName)}`)
     expect(query).toContain('| take 201')
@@ -390,7 +407,7 @@ describe('DNS Log Analytics KQL', () => {
       networkDestinationPort: '52338',
     })
 
-    expect(query.split('\n')[0]).toBe('AZFWNetworkRule')
+    expect(firstLine(query)).toBe('AZFWNetworkRule')
     expect(query).toContain('| where Protocol =~ "TCP"')
     expect(query).toContain('| where SourceIp == "10.0.0.53"')
     expect(query).toContain('| where tostring(SourcePort) == "53"')
@@ -412,7 +429,7 @@ describe('DNS Log Analytics KQL', () => {
       networkDestinationPort: '53',
     })
 
-    expect(query.split('\n')[0]).toBe('AzureDiagnostics')
+    expect(firstLine(query)).toBe('AzureDiagnostics')
     expect(query).toContain('| where ResourceProvider =~ "MICROSOFT.NETWORK"')
     expect(query).toContain('| where Category == "AZFWNetworkRule"')
     expect(query).toContain('SourceIp = tostring(column_ifexists("SourceIP", ""))')
@@ -434,8 +451,10 @@ describe('DNS Log Analytics KQL', () => {
       serverPort: '53',
     })
 
-    expect(query.split('\n')[0]).toBe('AZFWDnsFlowTrace')
-    expect(query).toContain('| where tostring(MsgType) == "future\\" | union AzureActivity"')
+    expect(firstLine(query)).toBe('AZFWDnsFlowTrace')
+    expect(query).toContain(
+      String.raw`| where tostring(MsgType) == "future\" | union AzureActivity"`,
+    )
     expect(query).toContain('| where tostring(QueryMessage) == "opaque query"')
     expect(query).toContain('| where tostring(SourceIp) == "10.0.0.4"')
     expect(query).toContain('| where tostring(ServerPort) == "53"')
@@ -458,8 +477,8 @@ describe('DNS Log Analytics KQL', () => {
       rule: 'allow-service',
     })
 
-    expect(query.split('\n')[0]).toBe('AZFWInternalFqdnResolutionFailure')
-    expect(query).toContain('| where tostring(Fqdn) =~ "example.com\\" | take 9999"')
+    expect(firstLine(query)).toBe('AZFWInternalFqdnResolutionFailure')
+    expect(query).toContain(String.raw`| where tostring(Fqdn) =~ "example.com\" | take 9999"`)
     expect(query).toContain('| where tostring(Error) == "resolver timed out"')
     expect(query).toContain('| where tostring(ServerIp) == "168.63.129.16"')
     expect(query).toContain('| where tostring(Rule) == "allow-service"')
@@ -474,7 +493,7 @@ describe('DNS Log Analytics KQL', () => {
       'flow-trace',
       'nat-rule',
     ])
-    expect(queries.map(({ query }) => query.split('\n')[0])).toEqual([
+    expect(queries.map(({ query }) => firstLine(query))).toEqual([
       'AZFWApplicationRule',
       'AZFWFlowTrace',
       'AZFWNatRule',
@@ -514,7 +533,9 @@ describe('DNS Log Analytics KQL', () => {
     expect(injected).toHaveLength(3)
     expect(injected.every(({ query }) => !query.includes('\n| union AzureActivity'))).toBe(true)
     expect(injected.every(({ query }) => !query.includes('\n| take 9999\n'))).toBe(true)
-    expect(injected.every(({ query }) => query.includes('10.0.0.4\\" | take 9999'))).toBe(true)
+    expect(injected.every(({ query }) => query.includes(String.raw`10.0.0.4\" | take 9999`))).toBe(
+      true,
+    )
 
     expect(buildDnsRelatedEvidenceQueries(relatedObservation({ resourceId: undefined }))).toEqual(
       [],
@@ -552,7 +573,7 @@ describe('DNS Log Analytics source mapping', () => {
     const initial = await assignStableLogAnalyticsRowIds('proxy-structured', rows)
     const reordered = await assignStableLogAnalyticsRowIds('proxy-structured', rows.toReversed())
     const idsByName = (assigned: typeof initial) =>
-      Object.fromEntries(assigned.map(({ id, row }) => [row.QueryName, id]))
+      new Map(assigned.map(({ id, row }): [unknown, string] => [row['QueryName'], id]))
 
     expect(idsByName(reordered)).toEqual(idsByName(initial))
     expect(initial.every(({ id }) => id.startsWith('la:proxy-structured:'))).toBe(true)
@@ -629,8 +650,7 @@ describe('DNS Log Analytics source mapping', () => {
       'RequestDurationSecs',
     ]
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       if (query.startsWith('AZFWDnsQuery')) {
         return response(
           azureResponse(structuredColumns, [
@@ -686,11 +706,11 @@ describe('DNS Log Analytics source mapping', () => {
   })
 
   it('keeps exact zero, one, and two-plus readiness per source and storage', async () => {
-    const sampleCounts: Array<0 | 1 | 2> = [0, 1, 1, 2, 2, 0, 2, 1, 1, 0, 0, 2, 2, 1]
+    const sampleCounts: (0 | 1 | 2)[] = [0, 1, 1, 2, 2, 0, 2, 1, 1, 0, 0, 2, 2, 1]
     let requestIndex = 0
     const fetchImplementation = vi
       .fn<typeof fetch>()
-      .mockImplementation(async () => readinessResponse(sampleCounts[requestIndex++]!))
+      .mockImplementation(async () => readinessResponse(sampleCounts[requestIndex++]))
 
     const result = await executeDnsReadinessQuery({ workspaceId }, 'access-token', {
       fetchImplementation,
@@ -713,18 +733,14 @@ describe('DNS Log Analytics source mapping', () => {
     expect(result.readiness.every(({ status }) => status === 'success')).toBe(true)
     expect(result.readiness.map(({ sampleCount }) => sampleCount)).toEqual(sampleCounts)
     expect(fetchImplementation).toHaveBeenCalledTimes(14)
-    expect(
-      fetchImplementation.mock.calls.every(([, init]) => {
-        if (typeof init?.body !== 'string') return false
-        return !('timespan' in (JSON.parse(init.body) as object))
-      }),
-    ).toBe(true)
+    for (const [, init] of fetchImplementation.mock.calls) {
+      expect(requestJson(init)).not.toHaveProperty('timespan')
+    }
   })
 
   it('reports missing tables separately from empty AzureDiagnostics categories', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       return query.includes('\nAZFWDnsFlowTrace\n')
         ? readinessResponse(0, false)
         : readinessResponse(0)
@@ -752,10 +768,13 @@ describe('DNS Log Analytics source mapping', () => {
 
   it('reports authorization and query failures for each storage check', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
-      if (query.includes('\nAZFWDnsQuery\n')) return new Response(null, { status: 403 })
-      if (query.includes('\nAZFWNetworkRule\n')) return new Response(null, { status: 500 })
+      const query = requestQuery(init)
+      if (query.includes('\nAZFWDnsQuery\n')) {
+        return new Response(null, { status: 403 })
+      }
+      if (query.includes('\nAZFWNetworkRule\n')) {
+        return new Response(null, { status: 500 })
+      }
       return readinessResponse()
     })
 
@@ -785,9 +804,10 @@ describe('DNS Log Analytics source mapping', () => {
 
   it('does not hide an AzureDiagnostics failure behind an empty dedicated table', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
-      if (query.includes('\nAzureDiagnostics\n')) return new Response(null, { status: 500 })
+      const query = requestQuery(init)
+      if (query.includes('\nAzureDiagnostics\n')) {
+        return new Response(null, { status: 500 })
+      }
       return readinessResponse(0)
     })
 
@@ -825,9 +845,10 @@ describe('DNS Log Analytics source mapping', () => {
       'ResponseFlags',
     ]
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
-      if (query.includes('| project SampleCount')) return readinessResponse()
+      const query = requestQuery(init)
+      if (query.includes('| project SampleCount')) {
+        return readinessResponse()
+      }
       if (query.startsWith('AZFWDnsQuery')) {
         return response(
           azureResponse(columns, [
@@ -846,7 +867,9 @@ describe('DNS Log Analytics source mapping', () => {
           ]),
         )
       }
-      if (query.startsWith('AZFWNetworkRule')) return new Response(null, { status: 403 })
+      if (query.startsWith('AZFWNetworkRule')) {
+        return new Response(null, { status: 403 })
+      }
       return response(azureResponse(['TimeGenerated'], []))
     })
 
@@ -872,8 +895,7 @@ describe('DNS Log Analytics source mapping', () => {
     request.filters.source = 'network-rule'
     request.storage = 'azure-diagnostics'
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       return query.startsWith('AzureDiagnostics')
         ? azure()
         : response(azureResponse(['TimeGenerated'], []))
@@ -919,8 +941,7 @@ describe('DNS Log Analytics source mapping', () => {
       '53',
     ]
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       expect(query.startsWith('AZFWNetworkRule')).toBe(true)
       expect(query).not.toContain('AzureDiagnostics')
       return response(azureResponse(columns, [row]))
@@ -942,8 +963,7 @@ describe('DNS Log Analytics source mapping', () => {
     request.filters.source = 'network-rule'
     request.storage = 'azure-diagnostics'
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       expect(query.startsWith('AzureDiagnostics')).toBe(true)
       return new Response(null, { status: 403 })
     })
@@ -1029,23 +1049,24 @@ describe('DNS Log Analytics source mapping', () => {
       'DestinationIp',
       'DestinationPort',
     ]
-    const row = (timestamp: string) => [
-      timestamp,
-      'AZFWNetworkRule',
-      resourceId,
-      'Allow',
-      'UDP',
-      '10.0.0.4',
-      '52338',
-      '10.0.0.53',
-      '53',
-    ]
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       expect(query.startsWith('AzureDiagnostics')).toBe(true)
-      const timestamp = '2026-07-10T10:02:00.000Z'
-      return response(azureResponse(columns, [row(timestamp)]))
+      return response(
+        azureResponse(columns, [
+          [
+            '2026-07-10T10:02:00.000Z',
+            'AZFWNetworkRule',
+            resourceId,
+            'Allow',
+            'UDP',
+            '10.0.0.4',
+            '52338',
+            '10.0.0.53',
+            '53',
+          ],
+        ]),
+      )
     })
 
     const result = await executeDnsListQuery({ workspaceId }, request, 'access-token', {
@@ -1068,8 +1089,7 @@ describe('DNS Log Analytics source mapping', () => {
 
     for (const failedResponse of failureResponses) {
       const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-        if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-        const query = String(JSON.parse(init.body).query)
+        const query = requestQuery(init)
         return query.startsWith('AZFWDnsQuery')
           ? failedResponse.clone()
           : response(azureResponse(['TimeGenerated'], []))
@@ -1099,12 +1119,11 @@ describe('DNS Log Analytics source mapping', () => {
   })
 
   it('returns per-source diagnostics when every source probe fails', async () => {
-    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ error: { message: 'table unavailable' } }), {
-        status: 500,
-        headers: { 'content-type': 'application/json' },
-      }),
-    )
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json({ error: { message: 'table unavailable' } }, { status: 500 }),
+      )
 
     const result = await executeDnsListQuery({ workspaceId }, createListRequest(), 'access-token', {
       fetchImplementation,
@@ -1148,9 +1167,10 @@ describe('DNS Log Analytics source mapping', () => {
       0.011,
     ]
     const listFetch = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
-      if (query.includes('| project SampleCount')) return readinessResponse()
+      const query = requestQuery(init)
+      if (query.includes('| project SampleCount')) {
+        return readinessResponse()
+      }
       return response(
         query.startsWith('AZFWDnsQuery')
           ? azureResponse(columns, [row])
@@ -1162,7 +1182,9 @@ describe('DNS Log Analytics source mapping', () => {
       queryId: 'list',
     })
     const selector = listed.queriedEntries[0]?.detailSelector
-    if (!selector) throw new Error('Expected detail selector')
+    if (!selector) {
+      throw new Error('Expected detail selector')
+    }
     const detailFetch = vi
       .fn<typeof fetch>()
       .mockResolvedValue(response(azureResponse(columns, [row])))
@@ -1218,8 +1240,7 @@ describe('DNS Log Analytics source mapping', () => {
       'Rule',
     ]
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       if (query.startsWith('AZFWDnsQuery')) {
         return response(
           azureResponse(primaryColumns, [
@@ -1322,8 +1343,7 @@ describe('DNS Log Analytics source mapping', () => {
       'Rule',
     ]
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       if (query.startsWith('AZFWNetworkRule')) {
         return response(
           azureResponse(networkColumns, [
@@ -1345,8 +1365,12 @@ describe('DNS Log Analytics source mapping', () => {
           ]),
         )
       }
-      if (query.startsWith('AZFWFlowTrace')) return new Response(null, { status: 403 })
-      if (query.startsWith('AZFWNatRule')) return new Response(null, { status: 500 })
+      if (query.startsWith('AZFWFlowTrace')) {
+        return new Response(null, { status: 403 })
+      }
+      if (query.startsWith('AZFWNatRule')) {
+        return new Response(null, { status: 500 })
+      }
       throw new Error(`Unexpected query: ${query}`)
     })
 
@@ -1415,8 +1439,7 @@ describe('DNS Log Analytics source mapping', () => {
       'example.com',
     ])
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
-      const query = String(JSON.parse(init.body).query)
+      const query = requestQuery(init)
       return response(
         query.startsWith('AZFWDnsQuery')
           ? azureResponse(primaryColumns, [

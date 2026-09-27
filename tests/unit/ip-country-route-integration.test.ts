@@ -2,12 +2,17 @@ import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 
 const databasePath = fileURLToPath(
   new URL('../fixtures/GeoLite2-Country-Test.mmdb', import.meta.url),
 )
 let handler: (event: H3Event) => Promise<unknown>
+
+function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
+  return typeof value === 'function'
+}
 
 function createTestEvent(body: unknown) {
   const request = new IncomingMessage(new Socket())
@@ -24,7 +29,11 @@ function createTestEvent(body: unknown) {
 beforeAll(async () => {
   vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
   vi.stubGlobal('useRuntimeConfig', () => ({ ipCountry: { databasePath } }))
-  handler = (await import('../../server/api/ip-country.post')).default
+  const routeModule: { default: unknown } = await import('../../server/api/ip-country.post')
+  if (!isEventHandler(routeModule.default)) {
+    throw new TypeError('IP country route has no default event handler.')
+  }
+  handler = routeModule.default
 })
 
 afterAll(() => {

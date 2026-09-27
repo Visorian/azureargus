@@ -1,4 +1,5 @@
-import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
+import type { Ref } from 'vue'
 
 import type {
   FirewallLogFilters,
@@ -56,6 +57,8 @@ function isAbortError(error: unknown) {
     : error instanceof Error && error.name === 'AbortError'
 }
 
+const optionCollator = new Intl.Collator()
+
 function mergeOptions(current: readonly string[], values: readonly (string | undefined)[]) {
   const options = new Map(current.map((value) => [value.toLowerCase(), value]))
   for (const value of values) {
@@ -64,14 +67,14 @@ function mergeOptions(current: readonly string[], values: readonly (string | und
       options.set(trimmed.toLowerCase(), trimmed)
     }
   }
-  return [...options.values()].toSorted((left, right) => left.localeCompare(right))
+  return [...options.values()].toSorted((left, right) => optionCollator.compare(left, right))
 }
 
 export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
   let request: QueryRequest
   if (options.request === undefined) {
     const requestFetch = useRequestFetch()
-    request = (body: LogAnalyticsQueryRequest, signal: AbortSignal) =>
+    request = async (body: LogAnalyticsQueryRequest, signal: AbortSignal) =>
       requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
         body,
         method: 'POST',

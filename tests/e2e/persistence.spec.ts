@@ -1,11 +1,9 @@
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
 import { EVENT_HUB_CONNECTION_STRING_STORAGE_KEY } from '../../app/utils/eventHubConnectionStorage'
-import {
-  LOG_HISTORY_DB_NAME,
-  LOG_HISTORY_STORE_NAME,
-  type PersistedFirewallLogRecord,
-} from '../../app/utils/logHistoryRecord'
+import { LOG_HISTORY_DB_NAME, LOG_HISTORY_STORE_NAME } from '../../app/utils/logHistoryRecord'
+import type { PersistedFirewallLogRecord } from '../../app/utils/logHistoryRecord'
 import { mockManagedDeployment } from './support/deployment'
 import { enterAnonymousMode, openSettings } from './support/logsWorkspace'
 import {
@@ -17,48 +15,52 @@ const LOGS_URL_PATTERN = /\/logs/
 const RETENTION_OFF_ROW_PATTERN = /Jul 21, 2026, 10:00:00 AZFWNetworkRule/
 const RETENTION_ON_ROW_PATTERN = /Jul 21, 2026, 10:01:00 AZFWNetworkRule/
 
-function getStoredLogCount(page: Page) {
+async function getStoredLogCount(page: Page) {
   return page.evaluate(
-    ({ databaseName, storeName }) =>
-      new Promise<number>((resolveCount, rejectCount) => {
+    async ({ databaseName, storeName }) =>
+      new Promise<number>((resolve, reject) => {
         const openRequest = indexedDB.open(databaseName)
-        openRequest.onerror = () => rejectCount(openRequest.error)
-        openRequest.onsuccess = () => {
+        openRequest.addEventListener('error', () => {
+          reject(openRequest.error ?? new Error('Opening log history database failed'))
+        })
+        openRequest.addEventListener('success', () => {
           const database = openRequest.result
           const countRequest = database.transaction(storeName).objectStore(storeName).count()
-          countRequest.onerror = () => {
+          countRequest.addEventListener('error', () => {
             database.close()
-            rejectCount(countRequest.error)
-          }
-          countRequest.onsuccess = () => {
+            reject(countRequest.error ?? new Error('Counting stored logs failed'))
+          })
+          countRequest.addEventListener('success', () => {
             database.close()
-            resolveCount(countRequest.result)
-          }
-        }
+            resolve(countRequest.result)
+          })
+        })
       }),
     { databaseName: LOG_HISTORY_DB_NAME, storeName: LOG_HISTORY_STORE_NAME },
   )
 }
 
-function storeLog(page: Page, record: PersistedFirewallLogRecord) {
+async function storeLog(page: Page, record: PersistedFirewallLogRecord) {
   return page.evaluate(
-    ({ databaseName, log, storeName }) =>
-      new Promise<void>((resolveStore, rejectStore) => {
+    async ({ databaseName, log, storeName }) =>
+      new Promise<void>((resolve, reject) => {
         const openRequest = indexedDB.open(databaseName)
-        openRequest.onerror = () => rejectStore(openRequest.error)
-        openRequest.onsuccess = () => {
+        openRequest.addEventListener('error', () => {
+          reject(openRequest.error ?? new Error('Opening log history database failed'))
+        })
+        openRequest.addEventListener('success', () => {
           const database = openRequest.result
           const transaction = database.transaction(storeName, 'readwrite')
           transaction.objectStore(storeName).put(log)
-          transaction.onerror = () => {
+          transaction.addEventListener('error', () => {
             database.close()
-            rejectStore(transaction.error)
-          }
-          transaction.oncomplete = () => {
+            reject(transaction.error ?? new Error('Storing log failed'))
+          })
+          transaction.addEventListener('complete', () => {
             database.close()
-            resolveStore()
-          }
-        }
+            resolve()
+          })
+        })
       }),
     { databaseName: LOG_HISTORY_DB_NAME, log: record, storeName: LOG_HISTORY_STORE_NAME },
   )
@@ -107,7 +109,7 @@ test('local log retention is opt-in and clearing is persistent', async ({ page }
   await expect(
     page.getByRole('group', { name: 'All logs status and actions' }).getByRole('status'),
   ).toHaveText('connected')
-  await expect.poll(() => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
 
   await page.reload()
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
@@ -142,12 +144,12 @@ test('local log retention is opt-in and clearing is persistent', async ({ page }
   await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
   await expect(page.getByText('1 visible / 1 received')).toBeVisible()
   await expect(page.getByRole('row', { name: RETENTION_ON_ROW_PATTERN })).toBeVisible()
-  await expect.poll(() => getStoredLogCount(page)).toBe(1)
+  await expect.poll(async () => getStoredLogCount(page)).toBe(1)
 
   await openSettings(page)
   await logRetentionSwitch.click()
   await expect(logRetentionSwitch).not.toBeChecked()
-  await expect.poll(() => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
   await page.reload()
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await openSettings(page)
@@ -166,7 +168,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
   })
   await logRetentionSwitch.click()
   await expect(logRetentionSwitch).toBeChecked()
-  await expect.poll(() => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
 
   await storeLog(page, {
     id: 'source-a-record',
@@ -177,7 +179,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
     message: 'source A must not survive',
     searchableText: 'source A must not survive',
   })
-  await expect.poll(() => getStoredLogCount(page)).toBe(1)
+  await expect.poll(async () => getStoredLogCount(page)).toBe(1)
 
   await settingsDrawer
     .getByRole('textbox', { name: 'Connection string*' })
@@ -186,7 +188,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
     )
   await settingsDrawer.getByRole('button', { name: 'Connect', exact: true }).click()
 
-  await expect.poll(() => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
   await expect(logRetentionSwitch).toBeChecked()
   await expect(searchInput).toHaveValue('')
   await expect(page.getByRole('main')).toBeVisible()
@@ -230,14 +232,14 @@ test('connection string persistence is explicit and reversible', async ({ page }
   await rememberConnectionString.check()
 
   await page.reload()
-  await expect(page).toHaveURL(/\/logs/)
+  await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await openSettings(page)
   await expect(connectionStringInput).toHaveValue(connectionString)
   await expect(rememberConnectionString).toBeChecked()
 
   await rememberConnectionString.uncheck()
   await page.reload()
-  await expect(page).toHaveURL(/\/logs/)
+  await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await openSettings(page)
   await expect(connectionStringInput).toHaveValue('')
   await expect(rememberConnectionString).not.toBeChecked()
@@ -259,12 +261,13 @@ test('connection string remains opted in when browser storage removal fails', as
   await connectionStringInput.fill(connectionString)
   await rememberConnectionString.check()
   await page.evaluate((key) => {
+    // oxlint-disable-next-line typescript/unbound-method -- keeps the native method to delegate with the patched receiver via .call(this)
     const removeItem = Storage.prototype.removeItem
     Storage.prototype.removeItem = function (itemKey) {
       if (itemKey === key) {
         throw new DOMException('Storage is blocked', 'SecurityError')
       }
-      return removeItem.call(this, itemKey)
+      removeItem.call(this, itemKey)
     }
   }, EVENT_HUB_CONNECTION_STRING_STORAGE_KEY)
 
@@ -290,12 +293,13 @@ test('connection string stays opted out when browser storage saving fails', asyn
   })
   await connectionStringInput.fill(connectionString)
   await page.evaluate((key) => {
+    // oxlint-disable-next-line typescript/unbound-method -- keeps the native method to delegate with the patched receiver via .call(this)
     const setItem = Storage.prototype.setItem
     Storage.prototype.setItem = function (itemKey, value) {
       if (itemKey === key) {
         throw new DOMException('Storage is blocked', 'SecurityError')
       }
-      return setItem.call(this, itemKey, value)
+      setItem.call(this, itemKey, value)
     }
   }, EVENT_HUB_CONNECTION_STRING_STORAGE_KEY)
 
@@ -306,7 +310,7 @@ test('connection string stays opted out when browser storage saving fails', asyn
     page.getByText('Connection string could not be saved in browser storage.'),
   ).toBeVisible()
   await page.reload()
-  await expect(page).toHaveURL(/\/logs/)
+  await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await openSettings(page)
   await expect(connectionStringInput).toHaveValue('')
   await expect(rememberConnectionString).not.toBeChecked()

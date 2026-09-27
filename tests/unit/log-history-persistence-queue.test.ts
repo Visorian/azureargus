@@ -1,7 +1,5 @@
-import {
-  createLogHistoryPersistenceQueue,
-  type LogHistoryPersistenceQueueOptions,
-} from '../../app/utils/logHistoryPersistenceQueue'
+import { createLogHistoryPersistenceQueue } from '../../app/utils/logHistoryPersistenceQueue'
+import type { LogHistoryPersistenceQueueOptions } from '../../app/utils/logHistoryPersistenceQueue'
 import type { PersistedFirewallLogRecord } from '../../app/utils/logHistoryRecord'
 import type { LogHistoryStoreApi } from '../../app/utils/logHistoryStore'
 import type { FirewallLogRecord } from '../../shared/types/firewall'
@@ -47,10 +45,12 @@ async function flushPromises() {
   await Promise.resolve()
 }
 
+type Scheduler = NonNullable<LogHistoryPersistenceQueueOptions['scheduler']>
+
 function createDeferred() {
   let resolve!: () => void
-  const promise = new Promise<void>((resolvePromise) => {
-    resolve = resolvePromise
+  const promise = new Promise<void>((_resolve) => {
+    resolve = _resolve
   })
   return { promise, resolve }
 }
@@ -82,7 +82,9 @@ describe('log history persistence queue', () => {
       store,
     })
 
-    expect(() => queue.queueRecords([createLog('one'), createLog('two')])).not.toThrow()
+    expect(() => {
+      queue.queueRecords([createLog('one'), createLog('two')])
+    }).not.toThrow()
     await flushPromises()
 
     expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([['one', 'two']])
@@ -135,11 +137,13 @@ describe('log history persistence queue', () => {
   it('uses idle callback when available', async () => {
     const { batches, store } = createStore()
     let idleCallback: (() => void) | undefined
-    const scheduler: NonNullable<LogHistoryPersistenceQueueOptions['scheduler']> = {
-      cancelIdleCallback: vi.fn(),
-      clearTimeout: vi.fn(),
+    const scheduler: Scheduler = {
+      cancelIdleCallback: vi.fn<NonNullable<Scheduler['cancelIdleCallback']>>(),
+      clearTimeout: vi.fn<Scheduler['clearTimeout']>(),
       requestIdleCallback: (callback) => {
-        idleCallback = () => callback({ didTimeout: false, timeRemaining: () => 10 })
+        idleCallback = () => {
+          callback({ didTimeout: false, timeRemaining: () => 10 })
+        }
         return 1
       },
       setTimeout: vi.fn(),
@@ -167,7 +171,9 @@ describe('log history persistence queue', () => {
     })
     const queue = createLogHistoryPersistenceQueue({
       enabled: true,
-      onError: (error) => errors.push(error),
+      onError: (error) => {
+        errors.push(error)
+      },
       store,
     })
 
@@ -222,9 +228,10 @@ describe('log history persistence queue', () => {
 
     queue.disable()
     let idleResolved = false
-    const idlePromise = queue.waitForIdle().then(() => {
+    const idlePromise = (async () => {
+      await queue.waitForIdle()
       idleResolved = true
-    })
+    })()
 
     await flushPromises()
     expect(idleResolved).toBe(false)
@@ -260,9 +267,10 @@ describe('log history persistence queue', () => {
     queue.queueRecords([createLog('first')])
     queue.queueRecords([createLog('second')])
     let idleResolved = false
-    const idle = queue.waitForIdle().then(() => {
+    const idle = (async () => {
+      await queue.waitForIdle()
       idleResolved = true
-    })
+    })()
 
     expect(startedBatches).toEqual([['first']])
     firstWrite.resolve()

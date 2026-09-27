@@ -1,19 +1,25 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 
 import {
   ipCountryLookup,
   IpCountryLookupUnavailableError,
 } from '../../server/utils/ipCountryLookup'
+import type * as IpCountryLookupModule from '../../server/utils/ipCountryLookup'
 
 vi.mock('../../server/utils/ipCountryLookup', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../server/utils/ipCountryLookup')>()),
+  ...(await importOriginal<typeof IpCountryLookupModule>()),
   ipCountryLookup: { lookup: vi.fn() },
 }))
 
 let handler: (event: H3Event) => Promise<unknown>
+
+function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
+  return typeof value === 'function'
+}
 
 function createTestEvent(body: unknown) {
   const request = new IncomingMessage(new Socket())
@@ -32,15 +38,19 @@ beforeAll(async () => {
   vi.stubGlobal('useRuntimeConfig', () => ({
     ipCountry: { databasePath: '/var/lib/geoip/dbip-country-lite.mmdb' },
   }))
-  handler = (await import('../../server/api/ip-country.post')).default
-})
-
-afterAll(() => {
-  vi.unstubAllGlobals()
+  const routeModule: { default: unknown } = await import('../../server/api/ip-country.post')
+  if (!isEventHandler(routeModule.default)) {
+    throw new TypeError('IP country route has no default event handler.')
+  }
+  handler = routeModule.default
 })
 
 beforeEach(() => {
   vi.mocked(ipCountryLookup.lookup).mockReset().mockResolvedValue(null)
+})
+
+afterAll(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('IP country route', () => {

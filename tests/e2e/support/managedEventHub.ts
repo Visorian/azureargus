@@ -1,4 +1,5 @@
-import { expect, type Page } from '@playwright/test'
+import { expect } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
 import type { ManagedEventHubStreamEnvelope } from '../../../shared/types/managedEventHub'
 
@@ -7,18 +8,18 @@ interface ManagedEventHubTestStreamState {
   requests: unknown[]
 }
 
-type ManagedEventHubTestWindow = Window & {
-  __azureArgusManagedEventHubStream?: ManagedEventHubTestStreamState
+type ManagedEventHubTestGlobal = typeof globalThis & {
+  azureArgusManagedEventHubTestStream?: ManagedEventHubTestStreamState
 }
 
 export async function mockManagedEventHubStream(page: Page) {
   await page.addInitScript(() => {
-    const originalFetch = window.fetch.bind(window)
+    const originalFetch = globalThis.fetch.bind(globalThis)
     const state: ManagedEventHubTestStreamState = { requests: [] }
-    const testWindow = window as ManagedEventHubTestWindow
-    testWindow.__azureArgusManagedEventHubStream = state
+    const testGlobal = globalThis as ManagedEventHubTestGlobal
+    testGlobal.azureArgusManagedEventHubTestStream = state
 
-    window.fetch = async (input, init) => {
+    globalThis.fetch = async (input, init) => {
       const requestUrl = new URL(
         input instanceof Request ? input.url : String(input),
         location.href,
@@ -49,16 +50,16 @@ export async function enqueueManagedEventHubEnvelope(
   envelope: ManagedEventHubStreamEnvelope,
 ) {
   await expect
-    .poll(() =>
+    .poll(async () =>
       page.evaluate(() =>
         Boolean(
-          (window as ManagedEventHubTestWindow).__azureArgusManagedEventHubStream?.controller,
+          (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream?.controller,
         ),
       ),
     )
     .toBe(true)
   await page.evaluate((nextEnvelope) => {
-    const controller = (window as ManagedEventHubTestWindow).__azureArgusManagedEventHubStream
+    const controller = (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream
       ?.controller
     if (!controller) {
       throw new Error('Managed Event Hub test stream is unavailable')
@@ -69,7 +70,7 @@ export async function enqueueManagedEventHubEnvelope(
 
 export async function closeManagedEventHubStream(page: Page) {
   await page.evaluate(() => {
-    const state = (window as ManagedEventHubTestWindow).__azureArgusManagedEventHubStream
+    const state = (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream
     if (!state?.controller) {
       throw new Error('Managed Event Hub test stream is unavailable')
     }
@@ -78,8 +79,9 @@ export async function closeManagedEventHubStream(page: Page) {
   })
 }
 
-export function getManagedEventHubRequests(page: Page) {
+export async function getManagedEventHubRequests(page: Page) {
   return page.evaluate(
-    () => (window as ManagedEventHubTestWindow).__azureArgusManagedEventHubStream?.requests ?? [],
+    () =>
+      (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream?.requests ?? [],
   )
 }

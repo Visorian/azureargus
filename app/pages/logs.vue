@@ -12,17 +12,15 @@ import type {
   DnsSort,
 } from '#shared/types/dns'
 import type { FirewallLogRecord, FirewallLogSortKey } from '#shared/types/firewall'
-import type { LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
+import type { LogAnalyticsQueryResponse, LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
 import { hasDnsReadinessData } from '#shared/utils/dnsReadiness'
 import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from '#shared/utils/logAnalytics'
 import visorianNegative from '~/assets/img/visorian-negative.svg'
 import visorianPositive from '~/assets/img/visorian-positive.svg'
 import type { AnalysisMode } from '~/composables/useAnalysisMode'
 import type { DnsReadinessTarget } from '~/composables/useDnsSourceReadiness'
-import {
-  validateEventHubConnectionForm,
-  type EventHubConnectionForm,
-} from '~/composables/useEventHubConnection'
+import { validateEventHubConnectionForm } from '~/composables/useEventHubConnection'
+import type { EventHubConnectionForm } from '~/composables/useEventHubConnection'
 import {
   createDefaultLogFilters,
   isLogCategoryFilterValueActive,
@@ -32,11 +30,8 @@ import {
 } from '~/composables/useLogQuery'
 import { createDefaultLogSort } from '~/composables/useLogSorting'
 import { formatIcmpProtocol } from '~/utils/icmpProtocol'
-import {
-  createDefaultLogAnalysisDateRange,
-  LOG_ANALYSIS_CATEGORIES,
-  type LogAnalysisDateRange,
-} from '~/utils/logAnalysis'
+import { createDefaultLogAnalysisDateRange, LOG_ANALYSIS_CATEGORIES } from '~/utils/logAnalysis'
+import type { LogAnalysisDateRange } from '~/utils/logAnalysis'
 import { createLogAnalyticsAdminConsentUrl, isEntraId } from '~/utils/logAnalyticsOnboarding'
 import { createTemporaryLogAnalyticsClient } from '~/utils/temporaryLogAnalyticsClient.client'
 
@@ -114,7 +109,7 @@ const logAnalyticsSourceAvailable = computed(() =>
     ? capabilities.value.temporaryLogAnalyticsAuthAvailable
     : capabilities.value?.predefinedLogAnalyticsAvailable === true,
 )
-const versionNumber = appConfig.versionNumber as string
+const versionNumber = appConfig.versionNumber
 const activeLens = ref<LogsLens>('all-logs')
 const allLogsLensActive = computed(() => activeLens.value === 'all-logs')
 const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive })
@@ -202,7 +197,7 @@ const temporaryAdminConsentUrl = computed(() =>
     ? createLogAnalyticsAdminConsentUrl(
         temporaryTenantId.value,
         runtimeConfig.public.logAnalyticsDelegated.clientId,
-        window.location.origin,
+        globalThis.location.origin,
       )
     : null,
 )
@@ -215,7 +210,9 @@ const canRunLogAnalytics = computed(
       temporaryWorkspaceValid.value),
 )
 const dnsReadinessTarget = computed<DnsReadinessTarget | null>(() => {
-  if (!import.meta.client) return null
+  if (!import.meta.client) {
+    return null
+  }
   if (managedMode.value && logAnalyticsSourceAvailable.value) {
     return { mode: 'managed' }
   }
@@ -279,7 +276,9 @@ watch(
   { flush: 'sync' },
 )
 watch([dnsSourceReadiness.readiness, dnsSourceReadiness.status], ([readiness, status]) => {
-  if (status !== 'success') return
+  if (status !== 'success') {
+    return
+  }
   const resourceSpecificHasData = hasDnsReadinessData(readiness, 'resource-specific')
   const azureDiagnosticsHasData = hasDnsReadinessData(readiness, 'azure-diagnostics')
   if (azureDiagnosticsHasData && !resourceSpecificHasData) {
@@ -303,7 +302,7 @@ const logQuery = useLogAnalyticsQuery({
   },
   request: async (body, signal) => {
     if (managedMode.value) {
-      return requestFetch('/api/log-analytics/query', {
+      return requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
         body,
         method: 'POST',
         signal,
@@ -373,7 +372,9 @@ const dns = useDnsTroubleshooting({
 const dnsDetailOpen = computed({
   get: () => dns.selectedEntry.value !== null,
   set: (open: boolean) => {
-    if (!open) dns.closeDetail()
+    if (!open) {
+      dns.closeDetail()
+    }
   },
 })
 const modeState = useAnalysisMode({
@@ -433,13 +434,12 @@ const actions = computed(() =>
 const protocols = computed(() =>
   logAnalysisActive.value ? logQuery.protocolOptions.value : realTimeProtocols.value,
 )
-const activeStatus = computed(() =>
-  activeLens.value === 'dns-troubleshooting' && logAnalysisActive.value
-    ? dns.status.value
-    : logAnalysisActive.value
-      ? logQuery.status.value
-      : receiver.status.value,
-)
+const activeStatus = computed(() => {
+  if (!logAnalysisActive.value) {
+    return receiver.status.value
+  }
+  return activeLens.value === 'dns-troubleshooting' ? dns.status.value : logQuery.status.value
+})
 const showRealTimeLag = computed(
   () =>
     !logAnalysisActive.value &&
@@ -471,7 +471,9 @@ const logAppliedRangeLabel = computed(() => {
   return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)} (${logTimeZone.value})`
 })
 const dnsAppliedRangeLabel = computed(() => {
-  if (dns.appliedRange.value === null) return ''
+  if (dns.appliedRange.value === null) {
+    return ''
+  }
   return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)} (${logTimeZone.value})`
 })
 const activeAppliedRangeLabel = computed(() =>
@@ -677,7 +679,9 @@ async function updateAnalysisMode(mode: AnalysisMode, event: MouseEvent) {
 }
 
 function commitLogAnalysisInteraction(event: Event) {
-  if (!logAnalysisActive.value) return
+  if (!logAnalysisActive.value) {
+    return
+  }
   const target = event.target
   if (
     !(target instanceof Element) ||
@@ -728,7 +732,9 @@ async function resetEventHub() {
 }
 
 function setLens(lens: LogsLens) {
-  if (activeLens.value === lens) return
+  if (activeLens.value === lens) {
+    return
+  }
   closeDetail()
   activeLens.value = lens
 }
@@ -786,11 +792,19 @@ function toggleQuickFilter(key: QuickFilterKey, value: string | undefined) {
   activeFilters.value[key] = toggleLogFilterValue(activeFilters.value[key], value)
 }
 
+const quickFilterKeyLabels: Record<QuickFilterKey, string> = {
+  action: 'action',
+  category: 'category',
+  destination: 'destination',
+  destinationPort: 'destination port',
+  protocol: 'protocol',
+  source: 'source',
+  sourcePort: 'source port',
+}
+
 function quickFilterLabel(key: QuickFilterKey, value: string | undefined) {
   const action = isQuickFilterActive(key, value) ? 'Remove' : 'Filter by'
-  const label =
-    key === 'sourcePort' ? 'source port' : key === 'destinationPort' ? 'destination port' : key
-  return `${action} ${label}: ${displayValue(value)}`
+  return `${action} ${quickFilterKeyLabels[key]}: ${displayValue(value)}`
 }
 
 function clearActiveResults() {
@@ -904,7 +918,9 @@ async function checkTemporaryLogAnalyticsAuthorization() {
 }
 
 function selectTemporaryWorkspace(workspaceId: string) {
-  if (workspaceId === temporaryWorkspaceId.value) return
+  if (workspaceId === temporaryWorkspaceId.value) {
+    return
+  }
   logQuery.abort()
   logQuery.clear()
   dns.abort()
@@ -997,27 +1013,27 @@ function displayValue(value: string | undefined) {
   return value && value.length > 0 ? value : '-'
 }
 
-function copyValue(label: string, value: string | undefined) {
+async function copyValue(label: string, value: string | undefined) {
   if (!value || value.length === 0) {
     return
   }
 
-  void navigator.clipboard.writeText(value).then(
-    () => {
-      toast.add({
-        title: `${label} copied`,
-        color: 'success',
-        icon: 'i-lucide-copy-check',
-      })
-    },
-    () => {
-      toast.add({
-        title: `Could not copy ${label.toLowerCase()}`,
-        color: 'error',
-        icon: 'i-lucide-circle-alert',
-      })
-    },
-  )
+  try {
+    await navigator.clipboard.writeText(value)
+  } catch {
+    toast.add({
+      title: `Could not copy ${label.toLowerCase()}`,
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
+    return
+  }
+
+  toast.add({
+    title: `${label} copied`,
+    color: 'success',
+    icon: 'i-lucide-copy-check',
+  })
 }
 
 function selectLog(log: FirewallLogRecord) {
@@ -1034,13 +1050,13 @@ function clearClosedDetail() {
 async function openSettings() {
   settingsOpen.value = true
   await nextTick()
-  document.getElementById('logs-settings-close')?.focus({ preventScroll: true })
+  document.querySelector<HTMLElement>('#logs-settings-close')?.focus({ preventScroll: true })
 }
 
 async function closeSettings() {
   settingsOpen.value = false
   await nextTick()
-  document.getElementById('logs-settings-toggle')?.focus({ preventScroll: true })
+  document.querySelector<HTMLElement>('#logs-settings-toggle')?.focus({ preventScroll: true })
 }
 
 function toggleSettings() {
@@ -1053,7 +1069,9 @@ function toggleSettings() {
 }
 
 function closeSettingsFromEscape(event: KeyboardEvent) {
-  if (!settingsOpen.value || event.defaultPrevented) return
+  if (!settingsOpen.value || event.defaultPrevented) {
+    return
+  }
   void closeSettings()
 }
 
@@ -1197,8 +1215,8 @@ function statusColor(status: string) {
         leave-to-class="translate-x-full"
       >
         <aside
-          id="logs-settings-drawer"
           v-show="settingsOpen"
+          id="logs-settings-drawer"
           :aria-label="settingsDrawerLabel"
           :aria-hidden="!settingsOpen"
           :inert="!settingsOpen"
@@ -1219,8 +1237,8 @@ function statusColor(status: string) {
           <section class="min-h-0 flex-1 overflow-y-auto p-4">
             <LogsEventHubSettingsPanel
               v-if="!logAnalysisActive"
-              class="[&>div:first-child]:pr-12"
               v-model:remember-connection-string="rememberConnectionString"
+              class="[&>div:first-child]:pr-12"
               :connection-form="connectionForm"
               :clearing-log-history="clearingLogHistory"
               :connection-active="eventHubConnectionActive"
@@ -1243,11 +1261,11 @@ function statusColor(status: string) {
               @change.capture="commitLogAnalysisInteraction"
             >
               <LogsLogAnalyticsSettingsPanel
-                class="[&>div:first-child]:pr-12"
                 v-model:query-storage="logAnalyticsStorage"
                 v-model:tenant-id="temporaryTenantId"
                 v-model:workspace-id="temporaryWorkspaceId"
                 v-model:query-limit="logAnalyticsQueryLimit"
+                class="[&>div:first-child]:pr-12"
                 :admin-consent-url="temporaryAdminConsentUrl"
                 :dns-readiness="dnsSourceReadiness.readiness.value"
                 :dns-readiness-status="dnsSourceReadiness.status.value"
@@ -1367,7 +1385,7 @@ function statusColor(status: string) {
                   relative-style="narrow"
                   numeric="always"
                   :time-zone="logTimeZone"
-                  :title="true"
+                  title
                 />
               </UBadge>
               <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
@@ -1498,11 +1516,8 @@ function statusColor(status: string) {
           >
             <div
               role="row"
-              :class="[
-                'grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100',
-                logTableGridClass,
-                logTableMinWidthClass,
-              ]"
+              class="grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100"
+              :class="[logTableGridClass, logTableMinWidthClass]"
             >
               <button
                 v-for="column in logTableColumns"
@@ -1529,15 +1544,14 @@ function statusColor(status: string) {
                 :item-size="64"
                 :emit-update="false"
                 key-field="id"
-                :class="['min-h-0 flex-1', logTableMinWidthClass]"
+                class="min-h-0 flex-1"
+                :class="[logTableMinWidthClass]"
               >
                 <div
                   role="row"
                   tabindex="0"
-                  :class="[
-                    'grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900',
-                    logTableGridClass,
-                  ]"
+                  class="grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900"
+                  :class="[logTableGridClass]"
                   @click="selectLog(item)"
                   @keydown.enter.self="selectLog(item)"
                   @keydown.space.self.prevent="selectLog(item)"
@@ -1779,7 +1793,7 @@ function statusColor(status: string) {
                 relative-style="narrow"
                 numeric="always"
                 :time-zone="logTimeZone"
-                :title="true"
+                title
               />
             </UBadge>
           </div>
@@ -1810,6 +1824,7 @@ function statusColor(status: string) {
           </div>
         </div>
         <LogsDnsTroubleshootingView
+          v-model:show-unidentified-transports="dns.showUnidentifiedTransports.value"
           :hour-cycle="logHourCycle"
           :time-zone="logTimeZone"
           :filters="dns.filters.value"
@@ -1820,7 +1835,6 @@ function statusColor(status: string) {
           :error="dns.lastError.value"
           :entries-truncated="dns.entriesTruncated.value"
           :transports-truncated="dns.transportsTruncated.value"
-          v-model:show-unidentified-transports="dns.showUnidentifiedTransports.value"
           :log-analysis="logAnalysisActive"
           :can-apply-filters="dns.canApplyFilters.value"
           :filter-options="dns.filterOptions.value"
@@ -1831,7 +1845,7 @@ function statusColor(status: string) {
           @reset="dns.resetFilters"
           @select="dns.selectEntry"
         >
-          <template v-if="logAnalysisActive" #query-controls>
+          <template v-if="logAnalysisActive" #queryControls>
             <LogsLogAnalyticsQueryControls
               :draft-range="logDraftRange"
               :applied-range-label="activeAppliedRangeLabel"
@@ -1888,7 +1902,10 @@ function statusColor(status: string) {
                     :destination="field.countryDestination"
                     :lookup="ipCountryLookup"
                   />
-                  <span :class="['min-w-0 break-words', field.mono ? 'font-mono text-xs' : '']">
+                  <span
+                    class="min-w-0 break-words"
+                    :class="[field.mono ? 'font-mono text-xs' : '']"
+                  >
                     {{ displayValue(field.value) }}
                   </span>
                   <UButton

@@ -20,38 +20,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function isIpCountryLookupRequest(value: unknown): value is IpCountryLookupRequest {
-  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value.ips)) {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value['ips'])) {
     return false
   }
 
   return (
-    value.ips.length <= MAX_IP_COUNTRY_BATCH_SIZE &&
-    value.ips.every((ip) => typeof ip === 'string' && ip.length <= MAX_IP_COUNTRY_VALUE_LENGTH)
+    value['ips'].length <= MAX_IP_COUNTRY_BATCH_SIZE &&
+    value['ips'].every((ip) => typeof ip === 'string' && ip.length <= MAX_IP_COUNTRY_VALUE_LENGTH)
   )
 }
 
 export function isIpCountryLookupResponse(value: unknown): value is IpCountryLookupResponse {
-  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value.results)) {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value['results'])) {
     return false
   }
 
-  if (value.results.length > MAX_IP_COUNTRY_BATCH_SIZE) {
+  if (value['results'].length > MAX_IP_COUNTRY_BATCH_SIZE) {
     return false
   }
 
   const seenIps = new Set<string>()
-  for (const result of value.results) {
+  for (const result of value['results']) {
     if (
       !isRecord(result) ||
       Object.keys(result).length !== 2 ||
-      typeof result.ip !== 'string' ||
-      result.ip.length > MAX_IP_COUNTRY_VALUE_LENGTH ||
-      (result.countryCode !== null && typeof result.countryCode !== 'string') ||
-      seenIps.has(result.ip)
+      typeof result['ip'] !== 'string' ||
+      result['ip'].length > MAX_IP_COUNTRY_VALUE_LENGTH ||
+      (result['countryCode'] !== null && typeof result['countryCode'] !== 'string') ||
+      seenIps.has(result['ip'])
     ) {
       return false
     }
-    seenIps.add(result.ip)
+    seenIps.add(result['ip'])
   }
 
   return true

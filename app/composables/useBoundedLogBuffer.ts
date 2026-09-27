@@ -1,4 +1,5 @@
-import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, watch, type Ref } from 'vue'
+import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, watch } from 'vue'
+import type { Ref } from 'vue'
 
 export const DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS = 250
 
@@ -36,22 +37,13 @@ export function prependToBoundedBuffer<T>(
     return trimToBufferSize(currentItems, boundedSize)
   }
 
-  const result: T[] = []
+  const result = nextItems.slice(-boundedSize).toReversed()
 
-  for (
-    let nextIndex = nextItems.length - 1;
-    nextIndex >= 0 && result.length < boundedSize;
-    nextIndex -= 1
-  ) {
-    result.push(nextItems[nextIndex]!)
-  }
-
-  for (
-    let currentIndex = 0;
-    currentIndex < currentItems.length && result.length < boundedSize;
-    currentIndex += 1
-  ) {
-    result.push(currentItems[currentIndex]!)
+  for (const item of currentItems) {
+    if (result.length >= boundedSize) {
+      break
+    }
+    result.push(item)
   }
 
   return result
@@ -70,22 +62,21 @@ export function mergeIntoBoundedBuffer<T>(
 
   const sortedNextItems = nextItems.toSorted(compare)
   const result: T[] = []
-  let currentIndex = 0
-  let nextIndex = 0
+  const currentIterator = currentItems.values()
+  const nextIterator = sortedNextItems.values()
+  let current = currentIterator.next()
+  let next = nextIterator.next()
 
   // Current items already have the requested order; only the incoming batch needs sorting.
-  while (
-    result.length < boundedSize &&
-    (currentIndex < currentItems.length || nextIndex < sortedNextItems.length)
-  ) {
-    if (
-      nextIndex < sortedNextItems.length &&
-      (currentIndex >= currentItems.length ||
-        compare(sortedNextItems[nextIndex]!, currentItems[currentIndex]!) <= 0)
-    ) {
-      result.push(sortedNextItems[nextIndex++]!)
+  while (result.length < boundedSize) {
+    if (next.done !== true && (current.done === true || compare(next.value, current.value) <= 0)) {
+      result.push(next.value)
+      next = nextIterator.next()
+    } else if (current.done === true) {
+      break
     } else {
-      result.push(currentItems[currentIndex++]!)
+      result.push(current.value)
+      current = currentIterator.next()
     }
   }
 

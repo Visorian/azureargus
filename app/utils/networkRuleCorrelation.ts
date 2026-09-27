@@ -35,20 +35,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getNetworkRuleSchema(category: string): NetworkRuleSchema | undefined {
   const normalized = category.trim().toLowerCase()
-  if (normalized === 'azfwnetworkrule') return 'structured'
-  if (normalized === 'azurefirewallnetworkrule') return 'legacy'
+  if (normalized === 'azfwnetworkrule') {
+    return 'structured'
+  }
+  if (normalized === 'azurefirewallnetworkrule') {
+    return 'legacy'
+  }
   return undefined
 }
 
-function readExactSourceTimestamp(raw: unknown) {
-  if (!isRecord(raw)) return undefined
+function readExactSourceTimestamp(raw: unknown): string | undefined {
+  if (!isRecord(raw)) {
+    return undefined
+  }
 
-  const properties = isRecord(raw.properties) ? raw.properties : undefined
+  const properties = isRecord(raw['properties']) ? raw['properties'] : undefined
   const sources = properties ? [raw, properties] : [raw]
   for (const source of sources) {
     for (const key of ['time', 'TimeGenerated', 'timestamp'] as const) {
       const value = source[key]
-      if (typeof value !== 'string' || value.trim().length === 0) continue
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        continue
+      }
 
       const timestamp = value.trim()
       return Number.isNaN(Date.parse(timestamp)) ? undefined : timestamp
@@ -58,20 +66,29 @@ function readExactSourceTimestamp(raw: unknown) {
   return undefined
 }
 
-function normalizeRequired(value: string | undefined, casing: 'lower' | 'upper') {
+function normalizeRequired(
+  value: string | undefined,
+  casing: 'lower' | 'upper',
+): string | undefined {
   const normalized = value?.trim()
-  if (!normalized) return undefined
+  if (!normalized) {
+    return undefined
+  }
   return casing === 'lower' ? normalized.toLowerCase() : normalized.toUpperCase()
 }
 
-function normalizeProtocol(protocol: string) {
+function normalizeProtocol(protocol: string): string | undefined {
   const normalized = normalizeRequired(protocol, 'upper')
-  if (!normalized || normalized === 'UNKNOWN') return undefined
+  if (!normalized || normalized === 'UNKNOWN') {
+    return undefined
+  }
   return ICMP_PROTOCOL_PATTERN.test(normalized) ? 'ICMP' : normalized
 }
 
-export function getNetworkRuleCorrelationKey(record: FirewallLogRecord) {
-  if (!getNetworkRuleSchema(record.category)) return undefined
+export function getNetworkRuleCorrelationKey(record: FirewallLogRecord): string | undefined {
+  if (!getNetworkRuleSchema(record.category)) {
+    return undefined
+  }
 
   const timestamp = readExactSourceTimestamp(record.raw)
   const resourceId = normalizeRequired(record.resourceId, 'lower')
@@ -118,7 +135,9 @@ function normalizeCandidateLimit(value: number) {
 }
 
 const defaultScheduler: NetworkRuleCorrelationScheduler = {
-  clearTimeout: (handle) => clearTimeout(handle),
+  clearTimeout: (handle) => {
+    clearTimeout(handle)
+  },
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
 }
 
@@ -137,14 +156,18 @@ export function createNetworkRuleCorrelator({
 
   function readNow() {
     const value = clock()
-    if (!Number.isFinite(value)) return lastNow === Number.NEGATIVE_INFINITY ? 0 : lastNow
+    if (!Number.isFinite(value)) {
+      return lastNow === Number.NEGATIVE_INFINITY ? 0 : lastNow
+    }
     lastNow = Math.max(lastNow, value)
     return lastNow
   }
 
   function getBucket(key: string) {
     const existing = buckets.get(key)
-    if (existing) return existing
+    if (existing) {
+      return existing
+    }
 
     const bucket: CandidateBucket = { legacy: new Set(), structured: new Set() }
     buckets.set(key, bucket)
@@ -154,7 +177,9 @@ export function createNetworkRuleCorrelator({
   function removeCandidate(candidate: CorrelationCandidate) {
     candidates.delete(candidate)
     const bucket = buckets.get(candidate.key)
-    if (!bucket) return
+    if (!bucket) {
+      return
+    }
 
     bucket[candidate.schema].delete(candidate)
     if (bucket.legacy.size === 0 && bucket.structured.size === 0) {
@@ -162,11 +187,15 @@ export function createNetworkRuleCorrelator({
     }
   }
 
-  function takeCandidate(key: string, schema: NetworkRuleSchema) {
+  function takeCandidate(key: string, schema: NetworkRuleSchema): CorrelationCandidate | undefined {
     const bucket = buckets.get(key)
-    if (!bucket) return undefined
+    if (!bucket) {
+      return undefined
+    }
     const candidate = firstValue(bucket[schema])
-    if (candidate) removeCandidate(candidate)
+    if (candidate) {
+      removeCandidate(candidate)
+    }
     return candidate
   }
 
@@ -183,30 +212,42 @@ export function createNetworkRuleCorrelator({
 
   function drainExpired(now: number, accepted: FirewallLogRecord[]) {
     for (const candidate of candidates) {
-      if (candidate.expiresAt > now) break
+      if (candidate.expiresAt > now) {
+        break
+      }
       removeCandidate(candidate)
-      if (candidate.schema === 'legacy' && candidate.record) accepted.push(candidate.record)
+      if (candidate.schema === 'legacy' && candidate.record) {
+        accepted.push(candidate.record)
+      }
     }
   }
 
   function enforceCapacity(maximum: number, accepted: FirewallLogRecord[]) {
     while (candidates.size > maximum) {
       const candidate = firstValue(candidates)
-      if (!candidate) break
+      if (!candidate) {
+        break
+      }
       removeCandidate(candidate)
-      if (candidate.schema === 'legacy' && candidate.record) accepted.push(candidate.record)
+      if (candidate.schema === 'legacy' && candidate.record) {
+        accepted.push(candidate.record)
+      }
     }
   }
 
   function cancelTimer() {
     timerGeneration += 1
-    if (timer !== undefined) scheduler.clearTimeout(timer)
+    if (timer !== undefined) {
+      scheduler.clearTimeout(timer)
+    }
     timer = undefined
     timerExpiresAt = undefined
   }
 
   function emit(records: FirewallLogRecord[]) {
-    if (records.length > 0) onRecords(records)
+    if (records.length > 0) {
+      onRecords(records)
+    }
   }
 
   function scheduleTimer() {
@@ -215,14 +256,18 @@ export function createNetworkRuleCorrelator({
       cancelTimer()
       return
     }
-    if (timer !== undefined && timerExpiresAt === candidate.expiresAt) return
+    if (timer !== undefined && timerExpiresAt === candidate.expiresAt) {
+      return
+    }
 
     cancelTimer()
     const generation = timerGeneration
     timerExpiresAt = candidate.expiresAt
     timer = scheduler.setTimeout(
       () => {
-        if (generation !== timerGeneration) return
+        if (generation !== timerGeneration) {
+          return
+        }
         timer = undefined
         timerExpiresAt = undefined
         const accepted: FirewallLogRecord[] = []
@@ -235,7 +280,9 @@ export function createNetworkRuleCorrelator({
   }
 
   function push(records: readonly FirewallLogRecord[]) {
-    if (records.length === 0) return
+    if (records.length === 0) {
+      return
+    }
 
     const accepted: FirewallLogRecord[] = []
     const arrivalTime = readNow()
@@ -276,7 +323,9 @@ export function createNetworkRuleCorrelator({
     cancelTimer()
     const accepted: FirewallLogRecord[] = []
     for (const candidate of candidates) {
-      if (candidate.schema === 'legacy' && candidate.record) accepted.push(candidate.record)
+      if (candidate.schema === 'legacy' && candidate.record) {
+        accepted.push(candidate.record)
+      }
     }
     candidates.clear()
     buckets.clear()

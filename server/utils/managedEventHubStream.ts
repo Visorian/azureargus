@@ -2,11 +2,10 @@ import type { ServerResponse } from 'node:http'
 
 import type { EventPosition, ReceivedEventData } from '@azure/event-hubs'
 
-import {
-  MANAGED_EVENT_HUB_LOOKBACK_MINUTES,
-  type ManagedEventHubLookbackMinutes,
-  type ManagedEventHubStreamEnvelope,
-  type ManagedEventHubStreamRequest,
+import { MANAGED_EVENT_HUB_LOOKBACK_MINUTES } from '../../shared/types/managedEventHub'
+import type {
+  ManagedEventHubStreamEnvelope,
+  ManagedEventHubStreamRequest,
 } from '../../shared/types/managedEventHub'
 
 type ManagedEventHubReceivedEvent = Pick<
@@ -65,30 +64,39 @@ function normalizeEventBodyForStream(body: unknown) {
 
 function containsControlCharacter(value: string) {
   for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index)
-    if (code <= 31 || code === 127) {
+    const code = value.codePointAt(index)
+    if (code !== undefined && (code <= 31 || code === 127)) {
       return true
     }
   }
   return false
 }
 
-function waitForResponseDrain(response: ServerResponse) {
+// The caller of a write observes its failure; the chain only orders later writes.
+async function settled(promise: Promise<unknown>): Promise<void> {
+  try {
+    await promise
+  } catch {
+    // Intentionally ignored, see above.
+  }
+}
+
+async function waitForResponseDrain(response: ServerResponse) {
   return new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
+    function cleanup() {
       response.off('close', onClose)
       response.off('drain', onDrain)
       response.off('error', onError)
     }
-    const onClose = () => {
+    function onClose() {
       cleanup()
       reject(new Error('Managed Event Hub response closed'))
     }
-    const onDrain = () => {
+    function onDrain() {
       cleanup()
       resolve()
     }
-    const onError = (error: Error) => {
+    function onError(error: Error) {
       cleanup()
       reject(error)
     }
@@ -139,8 +147,9 @@ export function validateManagedEventHubStreamRequest(
     return false
   }
 
-  const request = value as Record<string, unknown>
-  const consumerGroup = request.consumerGroup
+  const consumerGroup = 'consumerGroup' in value ? value.consumerGroup : undefined
+  const lookbackMinutes = 'lookbackMinutes' in value ? value.lookbackMinutes : undefined
+  const resumeFrom = 'resumeFrom' in value ? value.resumeFrom : undefined
   if (
     !(
       typeof consumerGroup === 'string' &&
@@ -148,27 +157,20 @@ export function validateManagedEventHubStreamRequest(
       consumerGroup.length > 0 &&
       consumerGroup.length <= 256 &&
       !containsControlCharacter(consumerGroup) &&
-      typeof request.lookbackMinutes === 'number' &&
-      MANAGED_EVENT_HUB_LOOKBACK_MINUTES.includes(
-        request.lookbackMinutes as ManagedEventHubLookbackMinutes,
-      )
+      MANAGED_EVENT_HUB_LOOKBACK_MINUTES.some((minutes) => minutes === lookbackMinutes)
     )
   ) {
     return false
   }
 
-  if (request.resumeFrom === undefined) {
+  if (resumeFrom === undefined) {
     return true
   }
-  if (
-    typeof request.resumeFrom !== 'object' ||
-    request.resumeFrom === null ||
-    Array.isArray(request.resumeFrom)
-  ) {
+  if (typeof resumeFrom !== 'object' || resumeFrom === null || Array.isArray(resumeFrom)) {
     return false
   }
 
-  return Object.entries(request.resumeFrom).every(
+  return Object.entries(resumeFrom).every(
     ([partitionId, sequenceNumber]) =>
       partitionIdPattern.test(partitionId) &&
       typeof sequenceNumber === 'number' &&
@@ -235,22 +237,28 @@ export function createManagedEventHubStream({
     demandResolve = null
   }
 
+  const lacksDemand = () =>
+    !closed && controller?.desiredSize !== null && (controller?.desiredSize ?? 0) <= 0
+
+  const nextDemand = async () =>
+    new Promise<void>((resolve) => {
+      demandResolve = resolve
+    })
+
   const waitForDemand = async () => {
-    while (!closed && controller?.desiredSize !== null && (controller?.desiredSize ?? 0) <= 0) {
-      await new Promise<void>((resolve) => {
-        demandResolve = resolve
-      })
+    while (lacksDemand()) {
+      await nextDemand()
     }
   }
 
-  const cleanup = () => {
+  const cleanup = async () => {
     if (cleanupPromise) {
       return cleanupPromise
     }
 
     closed = true
     releaseDemand()
-    signal?.removeEventListener('abort', cleanup)
+    signal?.removeEventListener('abort', onAbort)
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer)
     }
@@ -274,19 +282,41 @@ export function createManagedEventHubStream({
     return cleanupPromise
   }
 
-  const write = (envelope: ManagedEventHubStreamEnvelope, waitForBackpressure = true) => {
+  // cleanup() never rejects: client closes are settled and controller.close() is guarded.
+  function onAbort() {
+    void cleanup()
+  }
+
+  const enqueueAfter = async (
+    previousWrite: Promise<void>,
+    encoded: Uint8Array,
+    waitForBackpressure: boolean,
+  ) => {
+    await previousWrite
+    if (closed || !controller) {
+      throw new Error('Managed Event Hub stream is closed')
+    }
+    controller.enqueue(encoded)
+    if (waitForBackpressure) {
+      await waitForDemand()
+    }
+  }
+
+  const write = async (envelope: ManagedEventHubStreamEnvelope, waitForBackpressure = true) => {
     const encoded = encodeManagedEventHubEnvelope(envelope)
-    const pendingWrite = writeChain.then(async () => {
-      if (closed || !controller) {
-        throw new Error('Managed Event Hub stream is closed')
-      }
-      controller.enqueue(encoded)
-      if (waitForBackpressure) {
-        await waitForDemand()
-      }
-    })
-    writeChain = pendingWrite.catch(() => undefined)
+    const pendingWrite = enqueueAfter(writeChain, encoded, waitForBackpressure)
+    writeChain = settled(pendingWrite)
     return pendingWrite
+  }
+
+  const sendHeartbeat = async () => {
+    try {
+      await write({ type: 'heartbeat' })
+    } catch {
+      await cleanup()
+    } finally {
+      heartbeatPending = false
+    }
   }
 
   const terminateForExpiredSession = async () => {
@@ -303,6 +333,26 @@ export function createManagedEventHubStream({
     await cleanup()
   }
 
+  const checkSession = async () => {
+    try {
+      if (!(await revalidateSession())) {
+        await terminateForExpiredSession()
+      }
+    } catch {
+      await terminateForExpiredSession()
+    } finally {
+      sessionCheckPending = false
+    }
+  }
+
+  const reportSubscribeFailure = async () => {
+    try {
+      await write({ type: 'error', message: 'Event Hub receiver error' }, false)
+    } finally {
+      await cleanup()
+    }
+  }
+
   const stream = new ReadableStream<Uint8Array>(
     {
       start(streamController) {
@@ -311,7 +361,7 @@ export function createManagedEventHubStream({
           void cleanup()
           return
         }
-        signal?.addEventListener('abort', cleanup, { once: true })
+        signal?.addEventListener('abort', onAbort, { once: true })
 
         try {
           subscription = client.subscribe(
@@ -337,6 +387,8 @@ export function createManagedEventHubStream({
                     enqueuedTimeUtc: event.enqueuedTimeUtc.toISOString(),
                     partitionId: context.partitionId,
                     sequenceNumber: event.sequenceNumber,
+                    // The SDK passes the raw AMQP x-opt-offset annotation through untyped at runtime.
+                    // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- keep coercing to the string the browser parser requires
                     offset: event.offset === undefined ? undefined : String(event.offset),
                     applicationProperties: event.properties,
                   })),
@@ -371,7 +423,7 @@ export function createManagedEventHubStream({
             },
           )
         } catch {
-          void write({ type: 'error', message: 'Event Hub receiver error' }, false).finally(cleanup)
+          void reportSubscribeFailure()
           return
         }
 
@@ -380,23 +432,14 @@ export function createManagedEventHubStream({
             return
           }
           heartbeatPending = true
-          void write({ type: 'heartbeat' })
-            .catch(() => cleanup())
-            .finally(() => {
-              heartbeatPending = false
-            })
+          void sendHeartbeat()
         }, heartbeatIntervalMs)
         sessionTimer = setInterval(() => {
           if (sessionCheckPending) {
             return
           }
           sessionCheckPending = true
-          void revalidateSession()
-            .then((valid) => (valid ? undefined : terminateForExpiredSession()))
-            .catch(() => terminateForExpiredSession())
-            .finally(() => {
-              sessionCheckPending = false
-            })
+          void checkSession()
         }, sessionCheckIntervalMs)
         expiryTimer = setTimeout(
           () => void terminateForExpiredSession(),

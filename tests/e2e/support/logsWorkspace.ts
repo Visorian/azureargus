@@ -1,8 +1,11 @@
-import { expect, type Page } from '@playwright/test'
+import { expect } from '@playwright/test'
+import type { Page } from '@playwright/test'
+
+const LOGS_URL_PATTERN = /\/logs/
 
 export async function enterAnonymousMode(page: Page) {
   await page.goto('/logs')
-  await expect(page).toHaveURL(/\/logs/)
+  await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await expect(page.getByRole('region', { name: 'Data source' })).toBeVisible()
 }
 

@@ -5,8 +5,8 @@ import { playwright } from '@vitest/browser-playwright'
 import { defineConfig } from 'vitest/config'
 
 const alias = {
-  '#shared': fileURLToPath(new URL('./shared', import.meta.url)),
-  '~': fileURLToPath(new URL('./app', import.meta.url)),
+  '#shared': fileURLToPath(new URL('shared', import.meta.url)),
+  '~': fileURLToPath(new URL('app', import.meta.url)),
 }
 const browserExecutablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH
 const browserProjects = browserExecutablePath
@@ -55,7 +55,7 @@ export default defineConfig({
           environmentOptions: {
             nuxt: {
               domEnvironment: 'happy-dom',
-              rootDir: fileURLToPath(new URL('.', import.meta.url)),
+              rootDir: import.meta.dirname,
             },
           },
           globals: true,

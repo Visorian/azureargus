@@ -1,7 +1,11 @@
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
+import type { Ref } from 'vue'
 
 const msal = vi.hoisted(() => {
-  type AuthEvent = { eventType: string; payload: unknown }
+  interface AuthEvent {
+    eventType: string
+    payload: unknown
+  }
   const eventCallbacks = new Set<(event: AuthEvent) => void>()
   const addEventCallback = vi.fn<(callback: (event: AuthEvent) => void) => string>((callback) => {
     eventCallbacks.add(callback)
@@ -12,7 +16,10 @@ const msal = vi.hoisted(() => {
   const loginPopup = vi.fn()
   const acquireTokenPopup = vi.fn()
   const acquireTokenSilent = vi.fn()
-  const removeEventCallback = vi.fn<(callbackId: string) => void>(() => eventCallbacks.clear())
+  const removeEventCallback = vi.fn<(callbackId: string) => void>(() => {
+    eventCallbacks.clear()
+  })
+  // oxlint-disable-next-line eslint/prefer-arrow-callback -- PublicClientApplication is instantiated with `new`, which arrow functions do not support
   const constructor = vi.fn(function () {
     return {
       acquireTokenPopup,
@@ -32,7 +39,9 @@ const msal = vi.hoisted(() => {
     clearCache,
     constructor,
     emitEvent(event: AuthEvent) {
-      for (const callback of eventCallbacks) callback(event)
+      for (const callback of eventCallbacks) {
+        callback(event)
+      }
     },
     eventCallbacks,
     initialize,
@@ -67,11 +76,7 @@ async function createAuth() {
 }
 
 function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise
-  })
-  return { promise, resolve }
+  return Promise.withResolvers<T>()
 }
 
 beforeEach(() => {
@@ -91,7 +96,7 @@ beforeEach(() => {
   msal.eventCallbacks.clear()
   msal.removeEventCallback.mockClear()
 
-  vi.stubGlobal('window', { location: { origin: 'https://argus.example.com' } })
+  vi.stubGlobal('location', { origin: 'https://argus.example.com' })
   vi.stubGlobal('useRuntimeConfig', () => ({
     public: {
       logAnalyticsDelegated: {
@@ -99,11 +104,11 @@ beforeEach(() => {
       },
     },
   }))
-  vi.stubGlobal('useState', <T>(key: string, initialize: () => T) => {
+  vi.stubGlobal('useState', (key: string, initialize: () => unknown) => {
     if (!state.has(key)) {
       state.set(key, ref(initialize()))
     }
-    return state.get(key) as Ref<T>
+    return state.get(key)
   })
   vi.stubGlobal('onScopeDispose', (callback: () => void | Promise<void>) => {
     dispose = callback
@@ -136,13 +141,14 @@ describe('temporary Log Analytics authentication', () => {
       username: 'user@example.com',
     })
 
+    const expectedAuth: unknown = expect.objectContaining({
+      clientId: '11111111-1111-4111-8111-111111111111',
+      authority: 'https://login.microsoftonline.com/organizations',
+      redirectUri: 'https://argus.example.com/log-analytics-redirect.html',
+    })
     expect(msal.constructor).toHaveBeenCalledWith(
       expect.objectContaining({
-        auth: expect.objectContaining({
-          clientId: '11111111-1111-4111-8111-111111111111',
-          authority: 'https://login.microsoftonline.com/organizations',
-          redirectUri: 'https://argus.example.com/log-analytics-redirect.html',
-        }),
+        auth: expectedAuth,
         cache: { cacheLocation: 'MemoryStorage' },
       }),
     )
@@ -168,7 +174,9 @@ describe('temporary Log Analytics authentication', () => {
     const auth = await createAuth()
 
     const connection = auth.connect()
-    await vi.waitFor(() => expect(msal.loginPopup).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(msal.loginPopup).toHaveBeenCalledOnce()
+    })
     const popupWindow = { closed: false }
     msal.emitEvent({ eventType: 'msal:popupOpened', payload: { popupWindow } })
     popupWindow.closed = true
@@ -203,7 +211,9 @@ describe('temporary Log Analytics authentication', () => {
     const auth = await createAuth()
 
     const firstConnection = auth.connect()
-    await vi.waitFor(() => expect(msal.loginPopup).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(msal.loginPopup).toHaveBeenCalledOnce()
+    })
     const popupWindow = { closed: false }
     msal.emitEvent({ eventType: 'msal:popupOpened', payload: { popupWindow } })
     popupWindow.closed = true
@@ -241,7 +251,7 @@ describe('temporary Log Analytics authentication', () => {
       authority: `https://login.microsoftonline.com/${tenantId}`,
       scopes: ['https://api.loganalytics.io/Data.Read'],
     })
-    expect(await auth.getAccessToken(tenantId)).toBe(token)
+    await expect(auth.getAccessToken(tenantId)).resolves.toBe(token)
     expect(msal.acquireTokenSilent).toHaveBeenCalledTimes(2)
     expect([...state.entries()]).toEqual([
       ['temporary-log-analytics-connected', expect.objectContaining({ value: true })],
@@ -294,10 +304,11 @@ describe('temporary Log Analytics authentication', () => {
       authority: `https://login.microsoftonline.com/${selectedTenantId}`,
       scopes: ['https://management.azure.com/user_impersonation'],
     })
+    const logAnalyticsScopes: unknown = expect.arrayContaining([
+      'https://api.loganalytics.io/Data.Read',
+    ])
     expect(msal.acquireTokenSilent).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        scopes: expect.arrayContaining(['https://api.loganalytics.io/Data.Read']),
-      }),
+      expect.objectContaining({ scopes: logAnalyticsScopes }),
     )
   })
 
@@ -460,7 +471,9 @@ describe('temporary Log Analytics authentication', () => {
     const auth = await createAuth()
 
     const connecting = auth.connect()
-    await vi.waitFor(() => expect(msal.loginPopup).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(msal.loginPopup).toHaveBeenCalledOnce()
+    })
     await auth.disconnect()
     popup.resolve({ account, accessToken: 'late-token', tenantId })
 
@@ -477,7 +490,9 @@ describe('temporary Log Analytics authentication', () => {
     await auth.connect()
 
     const preparing = auth.getAccessToken(tenantId, true)
-    await vi.waitFor(() => expect(msal.acquireTokenPopup).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(msal.acquireTokenPopup).toHaveBeenCalledOnce()
+    })
     await auth.disconnect()
     popup.resolve({ account, accessToken: 'late-token' })
 
@@ -495,7 +510,9 @@ describe('temporary Log Analytics authentication', () => {
     await auth.connect()
 
     const checking = auth.checkAuthorization(tenantId)
-    await vi.waitFor(() => expect(msal.acquireTokenSilent).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(msal.acquireTokenSilent).toHaveBeenCalledOnce()
+    })
     await auth.disconnect()
     token.resolve({ account, accessToken: 'late-token' })
 

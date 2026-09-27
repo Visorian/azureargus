@@ -1,25 +1,28 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
 import { getLogAnalyticsAccessToken } from '../../server/utils/logAnalyticsAuth'
+import type * as LogAnalyticsAuthModule from '../../server/utils/logAnalyticsAuth'
 import type { LogAnalyticsQueryRequest } from '../../shared/types/logAnalytics'
 import {
   executeLogAnalyticsQuery,
   LogAnalyticsQueryError,
 } from '../../shared/utils/logAnalyticsQuery'
+import type * as LogAnalyticsQueryModule from '../../shared/utils/logAnalyticsQuery'
 
 vi.mock('nuxt-oidc-auth/runtime/server/utils/session.js', () => ({
   requireUserSession: vi.fn(),
 }))
 vi.mock('../../server/utils/logAnalyticsAuth', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../server/utils/logAnalyticsAuth')>()),
+  ...(await importOriginal<typeof LogAnalyticsAuthModule>()),
   getLogAnalyticsAccessToken: vi.fn(),
 }))
 vi.mock('../../shared/utils/logAnalyticsQuery', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../shared/utils/logAnalyticsQuery')>()),
+  ...(await importOriginal<typeof LogAnalyticsQueryModule>()),
   executeLogAnalyticsQuery: vi.fn(),
 }))
 
@@ -41,7 +44,8 @@ const oidc = {
   },
 }
 let runtimeConfig: Record<string, unknown>
-let handler: (event: H3Event) => Promise<unknown>
+let handler: (event: H3Event) => unknown
+const anyAbortSignal: unknown = expect.any(AbortSignal)
 
 function createRequest(): LogAnalyticsQueryRequest {
   return {
@@ -61,6 +65,10 @@ function createRequest(): LogAnalyticsQueryRequest {
     sort: { direction: 'desc', key: 'timestamp' },
     to: '2026-07-10T10:15:00.000Z',
   }
+}
+
+function isEventHandler(value: unknown): value is (event: H3Event) => unknown {
+  return typeof value === 'function'
 }
 
 function createTestEvent(body?: unknown) {
@@ -84,12 +92,12 @@ beforeAll(async () => {
   runtimeConfig = { logAnalytics: config, oidc }
   vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
   vi.stubGlobal('useRuntimeConfig', () => runtimeConfig)
-  handler = (await import('../../server/api/log-analytics/query.post')).default
-})
-
-afterAll(() => {
-  vi.unstubAllEnvs()
-  vi.unstubAllGlobals()
+  const routeModule: { default: unknown } =
+    await import('../../server/api/log-analytics/query.post')
+  if (!isEventHandler(routeModule.default)) {
+    throw new TypeError('Log Analytics query route has no default event handler.')
+  }
+  handler = routeModule.default
 })
 
 beforeEach(() => {
@@ -108,6 +116,11 @@ beforeEach(() => {
     records: [],
     truncated: false,
   })
+})
+
+afterAll(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
 describe('Log Analytics query route authentication', () => {
@@ -138,7 +151,7 @@ describe('Log Analytics query route authentication', () => {
       config,
       request,
       'access-token',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: anyAbortSignal }),
     )
   })
 

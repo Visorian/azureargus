@@ -6,10 +6,7 @@ const deniedSubscriptionId = '33333333-3333-4333-8333-333333333333'
 const workspaceId = '44444444-4444-4444-8444-444444444444'
 
 function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    headers: { 'content-type': 'application/json' },
-    status,
-  })
+  return Response.json(body, { status })
 }
 
 function requestUrl(input: RequestInfo | URL) {
@@ -21,7 +18,7 @@ function requestUrl(input: RequestInfo | URL) {
 
 function parseRequestBody(body: BodyInit | null | undefined): unknown {
   if (typeof body !== 'string') {
-    throw new Error('Expected JSON request body')
+    throw new TypeError('Expected JSON request body')
   }
   return JSON.parse(body) as unknown
 }

@@ -6,18 +6,19 @@ describe('managed Event Hub stream registry', () => {
     const firstFinished = new Promise<void>((resolve) => {
       finishFirst = resolve
     })
-    const closeFirst = vi.fn<() => Promise<void>>(() => firstFinished)
-    const closeSecond = vi.fn<() => Promise<void>>(async () => undefined)
+    const closeFirst = vi.fn<() => Promise<void>>(async () => firstFinished)
+    const closeSecond = vi.fn<() => Promise<void>>(async () => {})
     const unregisterFirst = await registerManagedEventHubStream('session', closeFirst)
 
     let secondRegistered = false
-    const registeringSecond = registerManagedEventHubStream('session', closeSecond).then(
-      (unregister) => {
-        secondRegistered = true
-        return unregister
-      },
-    )
-    await vi.waitFor(() => expect(closeFirst).toHaveBeenCalledOnce())
+    const registeringSecond = (async () => {
+      const unregister = await registerManagedEventHubStream('session', closeSecond)
+      secondRegistered = true
+      return unregister
+    })()
+    await vi.waitFor(() => {
+      expect(closeFirst).toHaveBeenCalledOnce()
+    })
     expect(secondRegistered).toBe(false)
 
     finishFirst()
@@ -26,7 +27,7 @@ describe('managed Event Hub stream registry', () => {
 
     const unregisterThird = await registerManagedEventHubStream(
       'session',
-      vi.fn<() => Promise<void>>(async () => undefined),
+      vi.fn<() => Promise<void>>(async () => {}),
     )
     expect(closeSecond).toHaveBeenCalledOnce()
 
@@ -35,8 +36,8 @@ describe('managed Event Hub stream registry', () => {
   })
 
   it('keeps different sessions independent', async () => {
-    const closeFirst = vi.fn<() => Promise<void>>(async () => undefined)
-    const closeSecond = vi.fn<() => Promise<void>>(async () => undefined)
+    const closeFirst = vi.fn<() => Promise<void>>(async () => {})
+    const closeSecond = vi.fn<() => Promise<void>>(async () => {})
 
     const unregisterFirst = await registerManagedEventHubStream('first', closeFirst)
     const unregisterSecond = await registerManagedEventHubStream('second', closeSecond)
@@ -51,13 +52,13 @@ describe('managed Event Hub stream registry', () => {
     const unregisterFirst = await registerManagedEventHubStream('failing', async () => {
       throw new Error('cleanup failed')
     })
-    const closeSecond = vi.fn<() => Promise<void>>(async () => undefined)
+    const closeSecond = vi.fn<() => Promise<void>>(async () => {})
 
     const unregisterSecond = await registerManagedEventHubStream('failing', closeSecond)
     unregisterFirst()
     const unregisterThird = await registerManagedEventHubStream(
       'failing',
-      vi.fn<() => Promise<void>>(async () => undefined),
+      vi.fn<() => Promise<void>>(async () => {}),
     )
     expect(closeSecond).toHaveBeenCalledOnce()
 

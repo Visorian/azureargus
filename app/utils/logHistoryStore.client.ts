@@ -1,4 +1,5 @@
 import {
+  isPersistedFirewallLogRecord,
   LOG_HISTORY_ACTION_INDEX,
   LOG_HISTORY_CATEGORY_INDEX,
   LOG_HISTORY_DB_NAME,
@@ -6,19 +7,16 @@ import {
   LOG_HISTORY_PROTOCOL_INDEX,
   LOG_HISTORY_STORE_NAME,
   LOG_HISTORY_TIMESTAMP_INDEX,
-  type PersistedFirewallLogRecord,
 } from './logHistoryRecord'
-import {
-  createLogHistoryStore,
-  type LogHistoryRangeQuery,
-  type LogHistoryStoreAdapter,
-} from './logHistoryStore'
+import type { PersistedFirewallLogRecord } from './logHistoryRecord'
+import { createLogHistoryStore } from './logHistoryStore'
+import type { LogHistoryRangeQuery, LogHistoryStoreAdapter } from './logHistoryStore'
 
 function getIndexedDBError(error: DOMException | null, fallback: string) {
   return error ?? new Error(fallback)
 }
 
-function createTimestampRange({ from, to }: LogHistoryRangeQuery) {
+function createTimestampRange({ from, to }: LogHistoryRangeQuery): IDBKeyRange | undefined {
   if (from && to) {
     return IDBKeyRange.bound(from, to)
   }
@@ -55,42 +53,55 @@ function upgradeDatabase(database: IDBDatabase, transaction: IDBTransaction | nu
   createIndex(store, LOG_HISTORY_PROTOCOL_INDEX, 'protocol')
 }
 
-function transactionToPromise(transaction: IDBTransaction) {
+async function transactionToPromise(transaction: IDBTransaction) {
   return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve()
-    transaction.onabort = () =>
+    transaction.addEventListener('complete', () => {
+      resolve()
+    })
+    transaction.addEventListener('abort', () => {
       reject(getIndexedDBError(transaction.error, 'IndexedDB transaction aborted.'))
-    transaction.onerror = () =>
+    })
+    transaction.addEventListener('error', () => {
       reject(getIndexedDBError(transaction.error, 'IndexedDB transaction failed.'))
+    })
   })
 }
 
-function requestToPromise<T>(request: IDBRequest<T>) {
+async function requestToPromise<T>(request: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(getIndexedDBError(request.error, 'IndexedDB request failed.'))
+    request.addEventListener('success', () => {
+      resolve(request.result)
+    })
+    request.addEventListener('error', () => {
+      reject(getIndexedDBError(request.error, 'IndexedDB request failed.'))
+    })
   })
 }
 
-export function openLogHistoryStore() {
+export async function openLogHistoryStore(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') {
-    return Promise.resolve<IDBDatabase | null>(null)
+    return null
   }
 
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(LOG_HISTORY_DB_NAME, LOG_HISTORY_DB_VERSION)
 
-    request.onupgradeneeded = () => upgradeDatabase(request.result, request.transaction)
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () =>
+    request.addEventListener('upgradeneeded', () => {
+      upgradeDatabase(request.result, request.transaction)
+    })
+    request.addEventListener('success', () => {
+      resolve(request.result)
+    })
+    request.addEventListener('error', () => {
       reject(getIndexedDBError(request.error, 'Could not open IndexedDB log history.'))
+    })
   })
 }
 
 async function withObjectStore<T>(
   mode: IDBTransactionMode,
   callback: (store: IDBObjectStore) => T | Promise<T>,
-) {
+): Promise<T | undefined> {
   const database = await openLogHistoryStore()
   if (database === null) {
     return undefined
@@ -124,7 +135,7 @@ function createIndexedDBLogHistoryAdapter(): LogHistoryStoreAdapter {
           await new Promise<void>((resolve, reject) => {
             const request = index.openCursor(range)
 
-            request.onsuccess = () => {
+            request.addEventListener('success', () => {
               const cursor = request.result
               if (!cursor) {
                 resolve()
@@ -134,9 +145,10 @@ function createIndexedDBLogHistoryAdapter(): LogHistoryStoreAdapter {
               cursor.delete()
               deletedCount += 1
               cursor.continue()
-            }
-            request.onerror = () =>
+            })
+            request.addEventListener('error', () => {
               reject(getIndexedDBError(request.error, 'Could not delete IndexedDB log history.'))
+            })
           })
 
           return deletedCount
@@ -164,7 +176,7 @@ function createIndexedDBLogHistoryAdapter(): LogHistoryStoreAdapter {
           await new Promise<void>((resolve, reject) => {
             const request = index.openCursor()
 
-            request.onsuccess = () => {
+            request.addEventListener('success', () => {
               const cursor = request.result
               if (!cursor || deletedCount >= excessCount) {
                 resolve()
@@ -174,9 +186,10 @@ function createIndexedDBLogHistoryAdapter(): LogHistoryStoreAdapter {
               cursor.delete()
               deletedCount += 1
               cursor.continue()
-            }
-            request.onerror = () =>
+            })
+            request.addEventListener('error', () => {
               reject(getIndexedDBError(request.error, 'Could not prune IndexedDB log history.'))
+            })
           })
 
           return deletedCount
@@ -205,18 +218,22 @@ function createIndexedDBLogHistoryAdapter(): LogHistoryStoreAdapter {
           await new Promise<void>((resolve, reject) => {
             const request = index.openCursor(range, 'prev')
 
-            request.onsuccess = () => {
+            request.addEventListener('success', () => {
               const cursor = request.result
               if (!cursor || records.length >= limit) {
                 resolve()
                 return
               }
 
-              records.push(cursor.value as PersistedFirewallLogRecord)
+              const value: unknown = cursor.value
+              if (isPersistedFirewallLogRecord(value)) {
+                records.push(value)
+              }
               cursor.continue()
-            }
-            request.onerror = () =>
+            })
+            request.addEventListener('error', () => {
               reject(getIndexedDBError(request.error, 'Could not query IndexedDB log history.'))
+            })
           })
 
           return records

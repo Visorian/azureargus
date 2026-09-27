@@ -2,6 +2,8 @@
 import type { LogAnalyticsQueryStatus } from '~/composables/useLogAnalyticsQuery'
 import type { LogAnalysisDateRange } from '~/utils/logAnalysis'
 
+const draftRange = defineModel<LogAnalysisDateRange>('draftRange', { required: true })
+
 defineProps<{
   appliedRangeLabel: string
   canRun: boolean
@@ -15,7 +17,6 @@ const emit = defineEmits<{
   run: []
 }>()
 
-const draftRange = defineModel<LogAnalysisDateRange>('draftRange', { required: true })
 const draftFrom = computed({
   get: () => draftRange.value.from,
   set: (from: string) => {

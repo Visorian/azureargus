@@ -4,8 +4,8 @@ import {
   MAX_IP_COUNTRY_BATCH_SIZE,
   MAX_IP_COUNTRY_VALUE_LENGTH,
   isIpCountryLookupResponse,
-  type IpCountryLookupRequest,
 } from '#shared/types/ipCountry'
+import type { IpCountryLookupRequest } from '#shared/types/ipCountry'
 import { normalizeCountryCode } from '~/utils/countryFlag'
 
 const DEFAULT_BATCH_DELAY_MS = 50
@@ -28,7 +28,7 @@ export interface IpCountryLookupClient {
   setActive(active: boolean): void
 }
 
-function getStatusCode(error: unknown) {
+function getStatusCode(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null) {
     return undefined
   }
@@ -175,6 +175,7 @@ export function createIpCountryLookupClient(
         setCache(ip, results.get(ip) ?? null)
       }
     } catch (error) {
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- dispose() can set disposed while the request is awaited
       if (!disposed && !controller.signal.aborted) {
         const statusCode = getStatusCode(error)
         if (statusCode === 503 || !isRetryableStatus(statusCode)) {
@@ -241,7 +242,9 @@ export function createIpCountryLookupClient(
 
   function setActive(active: boolean) {
     lookupActive = active
-    if (active) return
+    if (active) {
+      return
+    }
     clearTimer()
     activeController?.abort()
     activeController = null
@@ -253,13 +256,15 @@ export function createIpCountryLookupClient(
 
 export function useIpCountryLookup() {
   const requestFetch = useRequestFetch()
-  const client = createIpCountryLookupClient((body, signal) =>
+  const client = createIpCountryLookupClient(async (body, signal) =>
     requestFetch<unknown>('/api/ip-country', {
       body,
       method: 'POST',
       signal,
     }),
   )
-  onScopeDispose(client.dispose)
+  onScopeDispose(() => {
+    client.dispose()
+  })
   return client
 }

@@ -44,10 +44,12 @@ export function sortFirewallLogs(logs: FirewallLogRecord[], sort: FirewallLogSor
   const compare = (left: FirewallLogRecord, right: FirewallLogRecord) =>
     compareFirewallLogs(left, right, sort.key) * direction
 
-  for (let index = 1; index < logs.length; index += 1) {
-    if (compare(logs[index - 1]!, logs[index]!) > 0) {
+  let previous: FirewallLogRecord | undefined
+  for (const log of logs) {
+    if (previous !== undefined && compare(previous, log) > 0) {
       return logs.toSorted(compare)
     }
+    previous = log
   }
 
   return logs

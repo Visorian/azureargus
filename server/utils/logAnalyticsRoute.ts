@@ -1,11 +1,14 @@
-import { createError, setResponseHeader, type H3Event } from 'h3'
+import { createError, setResponseHeader } from 'h3'
+import type { H3Error, H3Event } from 'h3'
 
 import { LogAnalyticsQueryError } from '../../shared/utils/logAnalyticsQuery'
 import { LogAnalyticsConfigurationError, LogAnalyticsTokenError } from './logAnalyticsAuth'
 
 export function createIncomingRequestSignal(event: H3Event) {
   const controller = new AbortController()
-  const abort = () => controller.abort()
+  const abort = () => {
+    controller.abort()
+  }
   const abortOnClosedResponse = () => {
     if (!event.node.res.writableEnded) {
       abort()
@@ -31,21 +34,22 @@ export function createIncomingRequestSignal(event: H3Event) {
   }
 }
 
-function throwThrottledError(event: H3Event, retryAfterSeconds?: number): never {
+function createThrottledError(event: H3Event, retryAfterSeconds?: number): H3Error {
   if (retryAfterSeconds !== undefined) {
     setResponseHeader(event, 'retry-after', retryAfterSeconds)
   }
 
-  throw createError({
+  return createError({
     statusCode: 429,
     message: 'Log Analytics is throttling requests',
     data: retryAfterSeconds === undefined ? undefined : { retryAfterSeconds },
   })
 }
 
-export function throwLogAnalyticsUpstreamError(event: H3Event, error: unknown): never {
+/** Maps a Log Analytics failure to the HTTP error the route should throw. */
+export function createLogAnalyticsUpstreamError(event: H3Event, error: unknown): H3Error {
   if (error instanceof LogAnalyticsConfigurationError) {
-    throw createError({
+    return createError({
       statusCode: 503,
       message: 'Log Analytics is not configured',
     })
@@ -53,16 +57,16 @@ export function throwLogAnalyticsUpstreamError(event: H3Event, error: unknown): 
 
   if (error instanceof LogAnalyticsTokenError) {
     if (error.kind === 'authorization') {
-      throw createError({
+      return createError({
         statusCode: 403,
         message: 'Log Analytics authorization failed',
       })
     }
     if (error.kind === 'throttled') {
-      throwThrottledError(event, error.retryAfterSeconds)
+      return createThrottledError(event, error.retryAfterSeconds)
     }
 
-    throw createError({
+    return createError({
       statusCode: 502,
       message: 'Log Analytics token service is unavailable',
     })
@@ -70,23 +74,23 @@ export function throwLogAnalyticsUpstreamError(event: H3Event, error: unknown): 
 
   if (error instanceof LogAnalyticsQueryError) {
     if (error.kind === 'authorization') {
-      throw createError({
+      return createError({
         statusCode: 403,
         message: 'Log Analytics authorization failed',
       })
     }
     if (error.kind === 'throttled') {
-      throwThrottledError(event, error.retryAfterSeconds)
+      return createThrottledError(event, error.retryAfterSeconds)
     }
     if (error.kind === 'timeout') {
-      throw createError({
+      return createError({
         statusCode: 504,
         message: 'Log Analytics request timed out',
       })
     }
   }
 
-  throw createError({
+  return createError({
     statusCode: 502,
     message: 'Log Analytics request failed',
   })

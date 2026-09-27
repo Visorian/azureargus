@@ -1,8 +1,6 @@
 import type { FirewallLogRecord } from '#shared/types/firewall'
-import {
-  createLogHistoryPersistenceQueue,
-  type LogHistoryPersistenceQueue,
-} from '~/utils/logHistoryPersistenceQueue'
+import { createLogHistoryPersistenceQueue } from '~/utils/logHistoryPersistenceQueue'
+import type { LogHistoryPersistenceQueue } from '~/utils/logHistoryPersistenceQueue'
 import type { PersistedFirewallLogRecord } from '~/utils/logHistoryRecord'
 import type { LogHistoryRangeQuery, LogHistoryStoreApi } from '~/utils/logHistoryStore'
 
@@ -70,17 +68,16 @@ export function useLogHistoryPersistence() {
 
   if (sharedQueue === null) {
     if (!enabled.value) {
-      startupCleanupPromise = store
-        .clearLogHistory()
-        .then(() => {
+      startupCleanupPromise = (async () => {
+        try {
+          await store.clearLogHistory()
           historyResults.value = []
-        })
-        .catch((error: unknown) => {
+        } catch (error: unknown) {
           lastError.value = getErrorMessage(error)
-        })
-        .finally(() => {
+        } finally {
           startupCleanupPromise = null
-        })
+        }
+      })()
     }
 
     sharedQueue = createLogHistoryPersistenceQueue({

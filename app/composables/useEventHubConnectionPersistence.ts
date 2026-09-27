@@ -4,8 +4,8 @@ import {
   clearStoredEventHubConnectionString,
   readStoredEventHubConnectionString,
   storeEventHubConnectionString,
-  type EventHubConnectionStorage,
 } from '~/utils/eventHubConnectionStorage'
+import type { EventHubConnectionStorage } from '~/utils/eventHubConnectionStorage'
 
 export function useEventHubConnectionPersistence(
   connectionString: Ref<string>,
@@ -67,7 +67,7 @@ export function useEventHubConnectionPersistence(
     }
 
     try {
-      storage = window.localStorage
+      storage = globalThis.localStorage
       const storedValue = readStoredEventHubConnectionString(storage)
       if (storedValue !== null) {
         hasStoredValue = true

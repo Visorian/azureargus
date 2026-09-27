@@ -1,9 +1,5 @@
-import {
-  DEFAULT_LOG_HISTORY_RETENTION,
-  getLogHistoryCutoffTimestamp,
-  type LogHistoryRetention,
-  type PersistedFirewallLogRecord,
-} from './logHistoryRecord'
+import { DEFAULT_LOG_HISTORY_RETENTION, getLogHistoryCutoffTimestamp } from './logHistoryRecord'
+import type { LogHistoryRetention, PersistedFirewallLogRecord } from './logHistoryRecord'
 
 export interface LogHistoryRangeQuery {
   from?: string
@@ -20,17 +16,17 @@ export interface LogHistoryStoreAdapter {
 }
 
 export interface LogHistoryStoreApi {
-  appendLogHistoryBatch(
+  appendLogHistoryBatch: (
     records: readonly PersistedFirewallLogRecord[],
     retention?: LogHistoryRetention,
-  ): Promise<void>
-  queryLogHistoryRange(query: LogHistoryRangeQuery): Promise<PersistedFirewallLogRecord[]>
-  deleteLogHistoryBefore(timestamp: string): Promise<number>
-  clearLogHistory(): Promise<void>
-  pruneLogHistory(retention?: LogHistoryRetention, now?: Date): Promise<void>
+  ) => Promise<void>
+  queryLogHistoryRange: (query: LogHistoryRangeQuery) => Promise<PersistedFirewallLogRecord[]>
+  deleteLogHistoryBefore: (timestamp: string) => Promise<number>
+  clearLogHistory: () => Promise<void>
+  pruneLogHistory: (retention?: LogHistoryRetention, now?: Date) => Promise<void>
 }
 
-function normalizeLimit(limit: number | undefined) {
+function normalizeLimit(limit: number | undefined): number | undefined {
   if (limit === undefined) {
     return undefined
   }
@@ -61,14 +57,14 @@ export function createLogHistoryStore(adapter: LogHistoryStoreAdapter): LogHisto
       await adapter.putMany(records)
       await pruneLogHistory(retention)
     },
-    clearLogHistory() {
+    async clearLogHistory() {
       return adapter.clear()
     },
-    deleteLogHistoryBefore(timestamp) {
+    async deleteLogHistoryBefore(timestamp) {
       return adapter.deleteBefore(timestamp)
     },
     pruneLogHistory,
-    queryLogHistoryRange(query) {
+    async queryLogHistoryRange(query) {
       return adapter.queryRange({
         ...query,
         limit: normalizeLimit(query.limit),

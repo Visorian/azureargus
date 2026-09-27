@@ -24,13 +24,15 @@ const internal = computed(() => isRfc1918Ipv4Address(props.destination))
 const countryCode = computed(() => props.lookup.getCountryCode(props.destination))
 const flag = computed(() => countryCodeToFlag(countryCode.value))
 const countryName = computed(() => countryCodeToName(countryCode.value))
-const accessibleLabel = computed(() =>
-  internal.value
-    ? 'Internal address (RFC 1918)'
-    : countryName.value && countryCode.value
-      ? `GeoIP country: ${countryName.value} (${countryCode.value})`
-      : undefined,
-)
+const accessibleLabel = computed((): string | undefined => {
+  if (internal.value) {
+    return 'Internal address (RFC 1918)'
+  }
+  if (countryName.value && countryCode.value) {
+    return `GeoIP country: ${countryName.value} (${countryCode.value})`
+  }
+  return undefined
+})
 </script>
 
 <template>

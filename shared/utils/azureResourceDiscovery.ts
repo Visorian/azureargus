@@ -10,6 +10,7 @@ const RESOURCE_GRAPH_API_VERSION = '2024-04-01'
 const WORKSPACE_QUERY =
   "Resources | where type =~ 'microsoft.operationalinsights/workspaces' | project name, location, subscriptionId, resourceGroup, workspaceId=tostring(properties.customerId)"
 const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+const collator = new Intl.Collator()
 
 interface AzurePage {
   value: unknown[]
@@ -22,8 +23,11 @@ interface AzureSubscription {
 }
 
 export class AzureResourceDiscoveryError extends Error {
-  constructor(readonly status: number) {
+  readonly status: number
+
+  constructor(status: number) {
     super('Azure resource discovery failed')
+    this.status = status
   }
 }
 
@@ -57,7 +61,7 @@ async function readPage(
   accessToken: string,
   signal: AbortSignal,
   fetchImplementation: typeof fetch,
-) {
+): Promise<AzurePage> {
   const response = await fetchImplementation(validateManagementUrl(url), {
     headers: { authorization: `Bearer ${accessToken}` },
     redirect: 'error',
@@ -69,11 +73,11 @@ async function readPage(
   }
 
   const value: unknown = await response.json()
-  if (!isRecord(value) || !Array.isArray(value.value)) {
+  if (!isRecord(value) || !Array.isArray(value['value'])) {
     throw new AzureResourceDiscoveryError(502)
   }
-  const nextLink = readString(value.nextLink) ?? undefined
-  return { nextLink, value: value.value } satisfies AzurePage
+  const nextLink = readString(value['nextLink']) ?? undefined
+  return { nextLink, value: value['value'] }
 }
 
 async function readAllPages(
@@ -103,19 +107,19 @@ function parseTenants(values: unknown[]) {
     if (!isRecord(value)) {
       continue
     }
-    const tenantId = readString(value.tenantId)
+    const tenantId = readString(value['tenantId'])
     if (!tenantId || !UUID_PATTERN.test(tenantId)) {
       continue
     }
-    const displayName = readString(value.displayName)?.trim() || tenantId
+    const displayName = readString(value['displayName'])?.trim() || tenantId
     tenants.set(tenantId, {
-      defaultDomain: readString(value.defaultDomain),
+      defaultDomain: readString(value['defaultDomain']),
       displayName,
       tenantId,
     })
   }
   return [...tenants.values()].toSorted((left, right) =>
-    left.displayName.localeCompare(right.displayName),
+    collator.compare(left.displayName, right.displayName),
   )
 }
 
@@ -125,12 +129,12 @@ function parseSubscriptions(values: unknown[]) {
     if (!isRecord(value)) {
       continue
     }
-    const subscriptionId = readString(value.subscriptionId)
+    const subscriptionId = readString(value['subscriptionId'])
     if (!subscriptionId || !UUID_PATTERN.test(subscriptionId)) {
       continue
     }
     subscriptions.set(subscriptionId, {
-      displayName: readString(value.displayName)?.trim() || subscriptionId,
+      displayName: readString(value['displayName'])?.trim() || subscriptionId,
       subscriptionId,
     })
   }
@@ -143,9 +147,9 @@ function parseWorkspaces(values: unknown[], subscriptions: ReadonlyMap<string, A
     if (!isRecord(value)) {
       continue
     }
-    const workspaceId = readString(value.workspaceId)
-    const name = readString(value.name)
-    const subscriptionId = readString(value.subscriptionId)
+    const workspaceId = readString(value['workspaceId'])
+    const name = readString(value['name'])
+    const subscriptionId = readString(value['subscriptionId'])
     if (
       !workspaceId ||
       !UUID_PATTERN.test(workspaceId) ||
@@ -157,9 +161,9 @@ function parseWorkspaces(values: unknown[], subscriptions: ReadonlyMap<string, A
     }
     const subscription = subscriptions.get(subscriptionId)
     workspaces.push({
-      location: readString(value.location) ?? '',
+      location: readString(value['location']) ?? '',
       name,
-      resourceGroup: readString(value.resourceGroup) ?? '',
+      resourceGroup: readString(value['resourceGroup']) ?? '',
       subscriptionId,
       subscriptionName: subscription?.displayName ?? subscriptionId,
       workspaceId,
@@ -207,11 +211,12 @@ async function readWorkspaceGraph(
       throw new AzureResourceDiscoveryError(response.status)
     }
     const value: unknown = await response.json()
-    if (!isRecord(value) || !Array.isArray(value.data)) {
+    if (!isRecord(value) || !Array.isArray(value['data'])) {
       throw new AzureResourceDiscoveryError(502)
     }
-    values.push(...value.data)
-    skipToken = readString(value.$skipToken) ?? undefined
+    const data: unknown[] = value['data']
+    values.push(...data)
+    skipToken = readString(value['$skipToken']) ?? undefined
     if (skipToken && seenSkipTokens.has(skipToken)) {
       throw new AzureResourceDiscoveryError(502)
     }
@@ -257,7 +262,7 @@ export async function discoverAzureLogAnalyticsAccess(
   return {
     tenants: parseTenants(tenantValues),
     workspaces: [...workspaces.values()].toSorted((left, right) =>
-      left.name.localeCompare(right.name),
+      collator.compare(left.name, right.name),
     ),
   }
 }

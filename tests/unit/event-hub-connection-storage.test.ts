@@ -2,8 +2,8 @@ import {
   clearStoredEventHubConnectionString,
   readStoredEventHubConnectionString,
   storeEventHubConnectionString,
-  type EventHubConnectionStorage,
 } from '../../app/utils/eventHubConnectionStorage'
+import type { EventHubConnectionStorage } from '../../app/utils/eventHubConnectionStorage'
 
 function createMemoryStorage(): EventHubConnectionStorage {
   const values = new Map<string, string>()

@@ -1,7 +1,8 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 
 const validOidcEnvironment = {
   NUXT_OIDC_AUTH_SESSION_SECRET: 'a'.repeat(32),
@@ -31,6 +32,10 @@ const managedRuntimeConfig = {
 let runtimeConfig: Record<string, unknown> = {}
 let handler: (event: H3Event) => unknown
 
+function isEventHandler(value: unknown): value is (event: H3Event) => unknown {
+  return typeof value === 'function'
+}
+
 function createTestEvent(path: string) {
   const request = new IncomingMessage(new Socket())
   request.url = path
@@ -44,16 +49,21 @@ beforeAll(async () => {
   }
   vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
   vi.stubGlobal('useRuntimeConfig', () => runtimeConfig)
-  handler = (await import('../../server/middleware/app-login-mode')).default
+  const middlewareModule: { default: unknown } =
+    await import('../../server/middleware/app-login-mode')
+  if (!isEventHandler(middlewareModule.default)) {
+    throw new TypeError('App login middleware has no default event handler.')
+  }
+  handler = middlewareModule.default
+})
+
+beforeEach(() => {
+  runtimeConfig = {}
 })
 
 afterAll(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
-})
-
-beforeEach(() => {
-  runtimeConfig = {}
 })
 
 describe('app login mode server guard', () => {

@@ -1,3 +1,8 @@
+import { LogAnalyticsConfigurationError } from './logAnalyticsConfigurationError'
+
+// `export *` keeps Nitro's auto-import pointing at the defining module (a named re-export would register a duplicate).
+export * from './logAnalyticsConfigurationError'
+
 const TOKEN_SCOPE = 'https://api.loganalytics.io/.default'
 const TOKEN_EXPIRY_SKEW_MS = 60_000
 const DEFAULT_TOKEN_TIMEOUT_MS = 15_000
@@ -36,13 +41,6 @@ export class LogAnalyticsTokenError extends Error {
   }
 }
 
-export class LogAnalyticsConfigurationError extends Error {
-  constructor() {
-    super('Log Analytics server configuration is incomplete')
-    this.name = 'LogAnalyticsConfigurationError'
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -56,7 +54,7 @@ function readRequiredConfigValue(source: Record<string, unknown>, key: string) {
   return value.trim()
 }
 
-function readRetryAfterSeconds(response: Response) {
+function readRetryAfterSeconds(response: Response): number | undefined {
   const value = response.headers.get('retry-after')
   if (value === null) {
     return undefined
@@ -90,7 +88,7 @@ export function parseLogAnalyticsRuntimeConfig(value: unknown): LogAnalyticsRunt
   }
 }
 
-function waitForAccessToken(
+async function waitForAccessToken(
   promise: Promise<CachedAccessToken>,
   signal?: AbortSignal,
 ): Promise<CachedAccessToken> {
@@ -98,25 +96,19 @@ function waitForAccessToken(
     return promise
   }
   if (signal.aborted) {
-    return Promise.reject(new DOMException('Aborted', 'AbortError'))
+    throw new DOMException('Aborted', 'AbortError')
   }
 
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-    signal.addEventListener('abort', abort, { once: true })
-    void promise.then(
-      (token) => {
-        signal.removeEventListener('abort', abort)
-        resolve(token)
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', abort)
-        reject(error)
-      },
-    )
-  })
+  const aborted = Promise.withResolvers<never>()
+  const abort = () => {
+    aborted.reject(new DOMException('Aborted', 'AbortError'))
+  }
+  signal.addEventListener('abort', abort, { once: true })
+  try {
+    return await Promise.race([promise, aborted.promise])
+  } finally {
+    signal.removeEventListener('abort', abort)
+  }
 }
 
 export function createLogAnalyticsTokenProvider(
@@ -176,21 +168,33 @@ export function createLogAnalyticsTokenProvider(
       throw new LogAnalyticsTokenError('upstream')
     }
 
-    if (!isRecord(payload) || typeof payload.access_token !== 'string') {
+    if (!isRecord(payload) || typeof payload['access_token'] !== 'string') {
       throw new LogAnalyticsTokenError('upstream')
     }
 
-    const expiresIn = Number(payload.expires_in)
+    const expiresIn = Number(payload['expires_in'])
     if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
       throw new LogAnalyticsTokenError('upstream')
     }
 
     return {
-      accessToken: payload.access_token,
+      accessToken: payload['access_token'],
       expiresAt: now() + expiresIn * 1000,
       tenantId: config.tenantId,
       clientId: config.clientId,
     } satisfies CachedAccessToken
+  }
+
+  async function settlePendingAccessToken(current: PendingAccessToken) {
+    try {
+      cached = await current.promise
+    } catch {
+      // Waiters observe the failure through `current.promise`; nothing is cached.
+    } finally {
+      if (pending === current) {
+        pending = undefined
+      }
+    }
   }
 
   return async function getAccessToken(config: LogAnalyticsRuntimeConfig, signal?: AbortSignal) {
@@ -211,16 +215,7 @@ export function createLogAnalyticsTokenProvider(
         tenantId: config.tenantId,
       }
       pending = current
-      void current.promise
-        .then((token) => {
-          cached = token
-        })
-        .finally(() => {
-          if (pending === current) {
-            pending = undefined
-          }
-        })
-        .catch(() => undefined)
+      void settlePendingAccessToken(current)
     }
 
     const token = await waitForAccessToken(pending.promise, signal)

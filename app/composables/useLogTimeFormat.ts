@@ -23,8 +23,8 @@ export function useLogTimeFormat() {
   onMounted(() => {
     try {
       browserTimeZone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-      const storedFormat = window.localStorage.getItem(LOG_TIME_FORMAT_STORAGE_KEY)
-      const storedTimeZone = window.localStorage.getItem(LOG_TIME_ZONE_STORAGE_KEY)
+      const storedFormat = globalThis.localStorage.getItem(LOG_TIME_FORMAT_STORAGE_KEY)
+      const storedTimeZone = globalThis.localStorage.getItem(LOG_TIME_ZONE_STORAGE_KEY)
       format.value = isLogTimeFormat(storedFormat) ? storedFormat : '24-hour'
       timeZoneMode.value = isLogTimeZoneMode(storedTimeZone) ? storedTimeZone : 'utc'
       lastError.value = null
@@ -38,10 +38,12 @@ export function useLogTimeFormat() {
   watch(
     format,
     (value) => {
-      if (!initialized) return
+      if (!initialized) {
+        return
+      }
 
       try {
-        window.localStorage.setItem(LOG_TIME_FORMAT_STORAGE_KEY, value)
+        globalThis.localStorage.setItem(LOG_TIME_FORMAT_STORAGE_KEY, value)
         lastError.value = null
       } catch {
         lastError.value = 'Display preferences could not be saved in browser storage.'
@@ -53,10 +55,12 @@ export function useLogTimeFormat() {
   watch(
     timeZoneMode,
     (value) => {
-      if (!initialized) return
+      if (!initialized) {
+        return
+      }
 
       try {
-        window.localStorage.setItem(LOG_TIME_ZONE_STORAGE_KEY, value)
+        globalThis.localStorage.setItem(LOG_TIME_ZONE_STORAGE_KEY, value)
         lastError.value = null
       } catch {
         lastError.value = 'Display preferences could not be saved in browser storage.'

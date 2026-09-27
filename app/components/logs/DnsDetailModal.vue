@@ -15,6 +15,7 @@ import {
 } from '#shared/utils/dns'
 import type { LogHourCycle } from '~/composables/useLogTimeFormat'
 
+const open = defineModel<boolean>('open', { required: true })
 const props = withDefaults(
   defineProps<{
     entry: DnsEntry | null
@@ -26,21 +27,32 @@ const props = withDefaults(
   }>(),
   { hourCycle: 'h23', timeZone: 'UTC' },
 )
-const open = defineModel<boolean>('open', { required: true })
 const toast = useToast()
 const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? [])
 const relatedEvidence = computed(() => props.detail?.relatedEvidence ?? [])
 const modalTitle = computed(() => {
-  if (props.entry?.source === 'network-rule') return 'DNS transport detail'
-  if (props.entry?.source === 'dns-flow-trace') return 'DNS flow trace detail'
-  if (props.entry?.source === 'internal-fqdn-failure') return 'Internal FQDN failure detail'
+  if (props.entry?.source === 'network-rule') {
+    return 'DNS transport detail'
+  }
+  if (props.entry?.source === 'dns-flow-trace') {
+    return 'DNS flow trace detail'
+  }
+  if (props.entry?.source === 'internal-fqdn-failure') {
+    return 'Internal FQDN failure detail'
+  }
   return 'DNS resolution detail'
 })
 
 function stageLabel(observation: DnsObservation) {
-  if (observation.stage === 'proxy-exchange') return 'Proxy exchange'
-  if (observation.stage === 'dns-flow-trace') return 'DNS flow trace'
-  if (observation.stage === 'internal-resolution') return 'Internal resolution failure'
+  if (observation.stage === 'proxy-exchange') {
+    return 'Proxy exchange'
+  }
+  if (observation.stage === 'dns-flow-trace') {
+    return 'DNS flow trace'
+  }
+  if (observation.stage === 'internal-resolution') {
+    return 'Internal resolution failure'
+  }
   return 'Transport'
 }
 
@@ -53,8 +65,12 @@ function rawRowCount(item: DnsObservation | DnsRelatedEvidence) {
 }
 
 function stageActor(observation: DnsObservation) {
-  if (observation.stage === 'transport') return 'Network rule'
-  if (observation.stage === 'internal-resolution') return 'Azure Firewall resolver'
+  if (observation.stage === 'transport') {
+    return 'Network rule'
+  }
+  if (observation.stage === 'internal-resolution') {
+    return 'Azure Firewall resolver'
+  }
   return 'Azure Firewall'
 }
 
@@ -64,10 +80,16 @@ const relatedSourceLabels: Record<DnsRelatedSourceKind, string> = {
   'nat-rule': 'NAT rule',
 }
 
-function duration(seconds: number | undefined) {
-  if (seconds === undefined) return undefined
-  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)} µs`
-  if (seconds < 1) return `${(seconds * 1_000).toFixed(2)} ms`
+function duration(seconds: number | undefined): string | undefined {
+  if (seconds === undefined) {
+    return undefined
+  }
+  if (seconds < 0.001) {
+    return `${Math.round(seconds * 1_000_000)} µs`
+  }
+  if (seconds < 1) {
+    return `${(seconds * 1_000).toFixed(2)} ms`
+  }
   return `${seconds.toFixed(2)} s`
 }
 

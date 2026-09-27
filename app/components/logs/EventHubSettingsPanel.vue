@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import {
-  EVENT_HUB_LOOKBACK_OPTIONS,
-  type EventHubConnectionForm,
-} from '~/composables/useEventHubConnection'
+import { EVENT_HUB_LOOKBACK_OPTIONS } from '~/composables/useEventHubConnection'
+import type { EventHubConnectionForm } from '~/composables/useEventHubConnection'
 
-const DEPLOY_EVENT_HUB_URL =
-  'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json'
-const DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL =
-  'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json'
-
+const connectionForm = defineModel<EventHubConnectionForm>('connectionForm', { required: true })
+const rememberConnectionString = defineModel<boolean>('rememberConnectionString', {
+  required: true,
+})
 const props = defineProps<{
   clearingLogHistory: boolean
   connectionActive: boolean
@@ -20,17 +17,15 @@ const props = defineProps<{
   modeTransitioning: boolean
   reconnecting: boolean
 }>()
-
 const emit = defineEmits<{
   connect: []
   disconnect: []
   updateLogRetention: [enabled: boolean]
 }>()
-
-const connectionForm = defineModel<EventHubConnectionForm>('connectionForm', { required: true })
-const rememberConnectionString = defineModel<boolean>('rememberConnectionString', {
-  required: true,
-})
+const DEPLOY_EVENT_HUB_URL =
+  'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json'
+const DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL =
+  'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json'
 
 function createConnectionFieldModel<Key extends keyof EventHubConnectionForm>(key: Key) {
   return computed<EventHubConnectionForm[Key]>({

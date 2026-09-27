@@ -32,6 +32,39 @@ export interface PersistedFirewallLogRecord {
   raw?: unknown
 }
 
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string'
+}
+
+export function isPersistedFirewallLogRecord(value: unknown): value is PersistedFirewallLogRecord {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    typeof value.id === 'string' &&
+    'timestamp' in value &&
+    typeof value.timestamp === 'string' &&
+    'category' in value &&
+    typeof value.category === 'string' &&
+    'action' in value &&
+    typeof value.action === 'string' &&
+    'protocol' in value &&
+    typeof value.protocol === 'string' &&
+    'message' in value &&
+    typeof value.message === 'string' &&
+    'searchableText' in value &&
+    typeof value.searchableText === 'string' &&
+    isOptionalString('sourceIp' in value ? value.sourceIp : undefined) &&
+    isOptionalString('sourcePort' in value ? value.sourcePort : undefined) &&
+    isOptionalString('destinationIp' in value ? value.destinationIp : undefined) &&
+    isOptionalString('destinationPort' in value ? value.destinationPort : undefined) &&
+    isOptionalString('policy' in value ? value.policy : undefined) &&
+    isOptionalString('ruleCollectionGroup' in value ? value.ruleCollectionGroup : undefined) &&
+    isOptionalString('ruleCollection' in value ? value.ruleCollection : undefined) &&
+    isOptionalString('rule' in value ? value.rule : undefined)
+  )
+}
+
 export interface LogHistoryRetention {
   maxRecords: number
   maxAgeMs: number
@@ -42,7 +75,10 @@ export const DEFAULT_LOG_HISTORY_RETENTION: LogHistoryRetention = {
   maxAgeMs: LOG_HISTORY_MAX_AGE_MS,
 }
 
-export function toPersistedFirewallLogRecord(log: FirewallLogRecord): PersistedFirewallLogRecord {
+export function toPersistedFirewallLogRecord(
+  log: FirewallLogRecord,
+  includeRaw: boolean = LOG_HISTORY_INCLUDE_RAW,
+): PersistedFirewallLogRecord {
   const persisted: PersistedFirewallLogRecord = {
     id: log.id,
     timestamp: log.timestamp,
@@ -61,7 +97,7 @@ export function toPersistedFirewallLogRecord(log: FirewallLogRecord): PersistedF
     searchableText: log.searchableText,
   }
 
-  if (LOG_HISTORY_INCLUDE_RAW) {
+  if (includeRaw) {
     persisted.raw = log.raw
   }
 

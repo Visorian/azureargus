@@ -46,10 +46,10 @@ function createProps() {
     tenantOptions: [],
     workspaceId: '',
     workspaceOptions: [],
-    'onUpdate:tenantId': () => undefined,
-    'onUpdate:queryLimit': () => undefined,
-    'onUpdate:queryStorage': () => undefined,
-    'onUpdate:workspaceId': () => undefined,
+    'onUpdate:tenantId': () => {},
+    'onUpdate:queryLimit': () => {},
+    'onUpdate:queryStorage': () => {},
+    'onUpdate:workspaceId': () => {},
   }
 }
 
@@ -180,9 +180,9 @@ describe('LogAnalyticsSettingsPanel', () => {
       'Permissions',
     )
     const refresh = wrapper.findAll('button').find((button) => button.text() === 'Refresh')
-    selectors[0]?.vm.$emit('update:modelValue', '55555555-5555-4555-8555-555555555555')
+    await selectors[0]?.setValue('55555555-5555-4555-8555-555555555555')
     expect(wrapper.emitted('changeTenant')?.[0]).toEqual(['55555555-5555-4555-8555-555555555555'])
-    selectors[1]?.vm.$emit('update:modelValue', '66666666-6666-4666-8666-666666666666')
+    await selectors[1]?.setValue('66666666-6666-4666-8666-666666666666')
     expect(wrapper.emitted('changeWorkspace')?.[0]).toEqual([
       '66666666-6666-4666-8666-666666666666',
     ])
@@ -315,7 +315,7 @@ describe('LogAnalyticsSettingsPanel', () => {
 
     expect(wrapper.text()).toContain('Query configured Azure Firewall workspace')
     expect(wrapper.text()).toContain('Source readiness')
-    const readinessRows: Array<[string, string]> = [
+    const readinessRows: [string, string][] = [
       ['Structured DNS proxy logs', 'AZFWDnsQuery'],
       ['DNS flow trace logs', 'AZFWDnsFlowTrace / AZFWDnsAdditional'],
       [
@@ -460,7 +460,9 @@ describe('LogAnalyticsSettingsPanel', () => {
     })
     function readinessIndicators(label: string) {
       const row = wrapper.findAll('tr').find((item) => item.text().includes(label))
-      if (!row) throw new Error(`Readiness row not found: ${label}`)
+      if (!row) {
+        throw new Error(`Readiness row not found: ${label}`)
+      }
       return row.findAll('[aria-label]').map((indicator) => indicator.attributes('aria-label'))
     }
 
@@ -552,7 +554,7 @@ describe('LogAnalyticsSettingsPanel', () => {
     })
     expect(queryStorageSelect.props('disabled')).toBe(false)
 
-    queryStorageSelect.vm.$emit('update:modelValue', 'azure-diagnostics')
+    await queryStorageSelect.setValue('azure-diagnostics')
     expect(wrapper.emitted('update:queryStorage')?.[0]).toEqual(['azure-diagnostics'])
     await wrapper.setProps({ queryStorage: 'azure-diagnostics' })
     expect(queryStorageSelect.props('modelValue')).toBe('azure-diagnostics')
@@ -582,7 +584,7 @@ describe('LogAnalyticsSettingsPanel', () => {
     const input = wrapper.getComponent({ name: 'UInputNumber' })
 
     expect(input.props()).toMatchObject({ min: 100, max: 5_000, step: 100, modelValue: 1_000 })
-    input.vm.$emit('update:modelValue', 2_000)
+    await input.setValue(2_000)
     expect(wrapper.emitted('update:queryLimit')?.[0]).toEqual([2_000])
     expect(wrapper.text()).toContain('Applies to next query.')
 

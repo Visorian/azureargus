@@ -9,14 +9,14 @@ export interface DnsObservationStoreSnapshot {
   evictedTransportIds: string[]
 }
 
+function newestFirst<T extends { id: string; timestamp: string }>(left: T, right: T) {
+  const timestampOrder = right.timestamp.localeCompare(left.timestamp)
+  return timestampOrder || right.id.localeCompare(left.id)
+}
+
 export function createDnsObservationStore(maxEntries = 10_000, maxTransports = maxEntries) {
   const entries = new Map<string, DnsEntry>()
   const transports = new Map<string, DnsObservation>()
-
-  function newestFirst<T extends { id: string; timestamp: string }>(left: T, right: T) {
-    const timestampOrder = right.timestamp.localeCompare(left.timestamp)
-    return timestampOrder || right.id.localeCompare(left.id)
-  }
 
   function removeId(id: string) {
     entries.delete(id)
@@ -37,7 +37,9 @@ export function createDnsObservationStore(maxEntries = 10_000, maxTransports = m
 
   function pushRecords(records: readonly FirewallLogRecord[]) {
     for (const record of records) {
-      if (!record.dns) continue
+      if (!record.dns) {
+        continue
+      }
       removeId(record.dns.id)
       if (record.dns.source === 'network-rule') {
         transports.set(record.dns.id, record.dns)
@@ -53,13 +55,17 @@ export function createDnsObservationStore(maxEntries = 10_000, maxTransports = m
     const evictedTransportIds: string[] = []
     while (entries.size > maxEntries) {
       const evicted = entries.keys().next().value
-      if (typeof evicted !== 'string') break
+      if (typeof evicted !== 'string') {
+        break
+      }
       entries.delete(evicted)
       evictedEntryIds.push(evicted)
     }
     while (transports.size > maxTransports) {
       const evicted = transports.keys().next().value
-      if (typeof evicted !== 'string') break
+      if (typeof evicted !== 'string') {
+        break
+      }
       transports.delete(evicted)
       evictedTransportIds.push(evicted)
     }

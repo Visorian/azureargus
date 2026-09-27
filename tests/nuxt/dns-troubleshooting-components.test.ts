@@ -11,6 +11,10 @@ import type {
   DnsSort,
 } from '../../shared/types/dns'
 
+function containsElement(container: Element, element: unknown) {
+  return element instanceof Node && container.contains(element)
+}
+
 const filterOptions = {
   outcomes: ['response-unknown', 'transport-observed'],
   protocols: ['TCP', 'UDP'],
@@ -181,7 +185,7 @@ describe('DNS troubleshooting components', () => {
         filterOptions,
         selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
-        'onUpdate:filters': () => undefined,
+        'onUpdate:filters': () => {},
       },
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
@@ -210,7 +214,7 @@ describe('DNS troubleshooting components', () => {
         filterOptions,
         selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
-        'onUpdate:filters': () => undefined,
+        'onUpdate:filters': () => {},
       },
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
@@ -236,16 +240,18 @@ describe('DNS troubleshooting components', () => {
         filterOptions,
         selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
-        'onUpdate:filters': () => undefined,
+        'onUpdate:filters': () => {},
       },
-      slots: { 'query-controls': '<div>Query controls</div>' },
+      slots: { queryControls: '<div>Query controls</div>' },
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
 
     const filterRow = wrapper.get('[data-testid="log-filter-row"]')
     const filterGrid = filterRow.get('[data-testid="dns-filter-grid"]')
     const filterActions = wrapper.get('[data-testid="log-filter-actions"]')
-    const buttons = filterActions.findAllComponents({ name: 'UButton' })
+    const buttons = wrapper
+      .findAllComponents({ name: 'UButton' })
+      .filter((button) => containsElement(filterActions.element, button.element))
     expect(buttons[0]?.props('label')).toBe('Apply filters')
     expect(buttons[1]?.props('label')).toBe('Reset')
     expect(buttons[1]?.props()).toMatchObject({ color: 'neutral', variant: 'ghost' })
@@ -279,7 +285,7 @@ describe('DNS troubleshooting components', () => {
         filterOptions,
         selectedEntryId: null,
         sort,
-        'onUpdate:filters': () => undefined,
+        'onUpdate:filters': () => {},
         'onUpdate:sort': (value: DnsSort) => Object.assign(sort, value),
       },
       global: {
@@ -290,7 +296,7 @@ describe('DNS troubleshooting components', () => {
       },
     })
     const select = wrapper.get<HTMLSelectElement>('select[aria-label="DNS sort order"]')
-    const choices: Array<[string, DnsSort]> = [
+    const choices: [string, DnsSort][] = [
       ['timestamp-desc', { key: 'timestamp', direction: 'desc' }],
       ['timestamp-asc', { key: 'timestamp', direction: 'asc' }],
       ['queryName-asc', { key: 'queryName', direction: 'asc' }],
@@ -323,7 +329,7 @@ describe('DNS troubleshooting components', () => {
         },
         error: null,
         loading: false,
-        'onUpdate:open': () => undefined,
+        'onUpdate:open': () => {},
       },
       global: {
         stubs: {
@@ -357,7 +363,7 @@ describe('DNS troubleshooting components', () => {
         detail: null,
         error: null,
         loading: true,
-        'onUpdate:open': () => undefined,
+        'onUpdate:open': () => {},
       },
       global: {
         stubs: {
@@ -412,7 +418,7 @@ describe('DNS troubleshooting components', () => {
         },
         error: null,
         loading: false,
-        'onUpdate:open': () => undefined,
+        'onUpdate:open': () => {},
       },
       global: {
         stubs: {
@@ -473,7 +479,7 @@ describe('DNS troubleshooting components', () => {
         },
         error: null,
         loading: false,
-        'onUpdate:open': () => undefined,
+        'onUpdate:open': () => {},
       },
       global: {
         stubs: {

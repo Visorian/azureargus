@@ -8,9 +8,17 @@ const deployment = useDeploymentCapabilities()
 const retrying = ref(false)
 const errors = computed(() => deployment.capabilities.value?.errors ?? [])
 
+async function loadCapabilities() {
+  try {
+    await deployment.load()
+  } catch {
+    // Error state is exposed by composable.
+  }
+}
+
 onMounted(() => {
   if (deployment.capabilities.value === null && deployment.status.value === 'idle') {
-    void deployment.load().catch(() => undefined)
+    void loadCapabilities()
   }
 })
 

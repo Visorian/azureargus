@@ -6,11 +6,15 @@ const eventHubOnlyDeploymentUrl =
   'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json'
 const eventHubWithDiagnosticsDeploymentUrl =
   'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json'
+const LOGS_URL_PATTERN = /\/logs/
+const LOGIN_URL_PATTERN = /\/login/
+const DARK_CLASS_PATTERN = /dark/
+const VISIBLE_RECEIVED_PATTERN = /visible \/ .*received/
 
 test('anonymous deployment bypasses application login', async ({ page }) => {
   await page.goto('/login')
 
-  await expect(page).toHaveURL(/\/logs/, { timeout: 15_000 })
+  await expect(page).toHaveURL(LOGS_URL_PATTERN, { timeout: 15_000 })
   await expect(page.getByText('Temporary session')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Leave' })).toHaveCount(0)
 })
@@ -18,18 +22,18 @@ test('anonymous deployment bypasses application login', async ({ page }) => {
 test('anonymous deployment starts directly in logs', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await page.goto('/logs')
-  await expect(page).toHaveURL(/\/logs/)
+  await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await expect(page.getByText('Temporary session')).toBeVisible()
   await expect(page.getByText('Azure Firewall Analytics', { exact: true })).toBeVisible()
 
   const darkModeToggle = page.getByRole('button', { name: 'Switch to dark mode' })
   await expect(darkModeToggle).toBeVisible()
   await darkModeToggle.click()
-  await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect(page.locator('html')).toHaveClass(DARK_CLASS_PATTERN)
   await expect(page.getByRole('button', { name: 'Switch to light mode' })).toBeVisible()
 
   await page.reload()
-  await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect(page.locator('html')).toHaveClass(DARK_CLASS_PATTERN)
 })
 
 test('anonymous Event Hub settings expose both bounded deployment choices', async ({ page }) => {
@@ -52,7 +56,7 @@ test('anonymous Event Hub settings expose both bounded deployment choices', asyn
   await expect(eventHubOnlyLink).toHaveAttribute('target', '_blank')
   await expect(eventHubWithDiagnosticsLink).toHaveAttribute('target', '_blank')
   await expect
-    .poll(() =>
+    .poll(async () =>
       page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
@@ -75,7 +79,7 @@ test('managed deployment requires application login', async ({ page }) => {
   })
 
   await page.goto('/logs')
-  await expect(page).toHaveURL(/\/login/)
+  await expect(page).toHaveURL(LOGIN_URL_PATTERN)
   await expect(page.getByRole('button', { name: 'Sign in with Entra' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Use without login' })).toHaveCount(0)
 })
@@ -147,9 +151,9 @@ test('anonymous mode can reach logs page', async ({ page }) => {
   await expect(
     page.getByText('Temporary Log Analytics app registration is not configured.'),
   ).toBeVisible()
-  await expect(dataSource.getByText(/visible \/ .*received/)).toHaveCount(0)
+  await expect(dataSource.getByText(VISIBLE_RECEIVED_PATTERN)).toHaveCount(0)
   await expect(dataSource.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0)
-  await expect(page.getByText(/visible \/ .*received/)).toBeVisible()
+  await expect(page.getByText(VISIBLE_RECEIVED_PATTERN)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Clear', exact: true })).toBeVisible()
   const firewallTable = page.getByRole('table', { name: 'Firewall logs' })
   const searchLogs = page.getByRole('textbox', { name: 'Search logs' })
@@ -159,7 +163,7 @@ test('anonymous mode can reach logs page', async ({ page }) => {
     (element) => element.getBoundingClientRect().width,
   )
   await expect
-    .poll(() =>
+    .poll(async () =>
       page.evaluate(() => ({
         horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,

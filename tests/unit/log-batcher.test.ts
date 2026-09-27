@@ -14,7 +14,9 @@ describe('log batcher', () => {
     const flushedItems: string[][] = []
     const batcher = createLogBatcher<string>({
       flushIntervalMs: 100,
-      onFlush: (items) => flushedItems.push([...items]),
+      onFlush: (items) => {
+        flushedItems.push([...items])
+      },
     })
 
     batcher.pushMany(['old'])
@@ -31,7 +33,9 @@ describe('log batcher', () => {
     const flushedItems: string[][] = []
     const batcher = createLogBatcher<string>({
       flushIntervalMs: 100,
-      onFlush: (items) => flushedItems.push([...items]),
+      onFlush: (items) => {
+        flushedItems.push([...items])
+      },
     })
 
     batcher.pushMany(['pending'])
@@ -46,7 +50,9 @@ describe('log batcher', () => {
     const flushedItems: string[][] = []
     const batcher = createLogBatcher<string>({
       flushIntervalMs: 100,
-      onFlush: (items) => flushedItems.push([...items]),
+      onFlush: (items) => {
+        flushedItems.push([...items])
+      },
     })
 
     batcher.pushMany(['pending'])

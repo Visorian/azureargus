@@ -3,8 +3,8 @@ import { AddressNotFoundError } from '@maxmind/geoip2-node'
 import {
   createIpCountryLookup,
   IpCountryLookupUnavailableError,
-  type IpCountryReader,
 } from '../../server/utils/ipCountryLookup'
+import type { IpCountryReader } from '../../server/utils/ipCountryLookup'
 
 function createReader(countryCode = 'DE'): IpCountryReader {
   return {
@@ -84,7 +84,7 @@ describe('IP country lookup', () => {
   })
 
   it('reports database initialization failure once', async () => {
-    const onInitializationError = vi.fn()
+    const onInitializationError = vi.fn<(message: string) => void>()
     const lookup = createIpCountryLookup({
       onInitializationError,
       openReader: async () => {

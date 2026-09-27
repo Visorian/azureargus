@@ -8,7 +8,7 @@ import { Reader } from '@maxmind/geoip2-node'
 
 export const MAX_COMPRESSED_BYTES = 16 * 1024 * 1024
 export const MAX_DATABASE_BYTES = 32 * 1024 * 1024
-const DEFAULT_PIN_PATH = fileURLToPath(new URL('./dbip-country-lite.pin.json', import.meta.url))
+const DEFAULT_PIN_PATH = fileURLToPath(new URL('dbip-country-lite.pin.json', import.meta.url))
 const RELEASE_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 
@@ -39,7 +39,8 @@ function parsePin(value: unknown): DatabasePin {
     throw new Error('DB-IP Country Lite pin must be an object')
   }
 
-  const { archiveSha256, release } = value as Record<string, unknown>
+  const release = 'release' in value ? value.release : undefined
+  const archiveSha256 = 'archiveSha256' in value ? value.archiveSha256 : undefined
   if (typeof release !== 'string' || !RELEASE_PATTERN.test(release)) {
     throw new Error('DB-IP Country Lite pin release must use YYYY-MM')
   }
@@ -62,7 +63,7 @@ async function readPin(pinPath: string) {
 
 export async function updateIpCountryDatabase({
   databasePath = resolve(
-    process.env.NUXT_IP_COUNTRY_DATABASE_PATH || '.data/dbip-country-lite.mmdb',
+    process.env['NUXT_IP_COUNTRY_DATABASE_PATH'] || '.data/dbip-country-lite.mmdb',
   ),
   fetcher = fetch,
   fileOperations = { mkdir, rename, rm, writeFile },
@@ -88,15 +89,10 @@ export async function updateIpCountryDatabase({
 
     const chunks: Uint8Array[] = []
     let compressedSize = 0
-    const reader = response.body.getReader()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
+    // Leaving the loop early (throw) cancels the body stream via the async iterator's return().
+    for await (const value of response.body) {
       compressedSize += value.byteLength
       if (compressedSize > maxCompressedBytes) {
-        await reader.cancel()
         throw new Error('DB-IP Country Lite download exceeds expected size')
       }
       chunks.push(value)
@@ -114,7 +110,9 @@ export async function updateIpCountryDatabase({
     await fileOperations.writeFile(temporaryPath, database, { mode: 0o600 })
     await fileOperations.rename(temporaryPath, databasePath)
   } catch (error) {
-    await fileOperations.rm(temporaryPath, { force: true }).catch(() => undefined)
+    await fileOperations.rm(temporaryPath, { force: true }).catch(() => {
+      // Best-effort cleanup; the original error is rethrown below.
+    })
     throw error
   }
 

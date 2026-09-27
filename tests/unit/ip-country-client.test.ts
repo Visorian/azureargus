@@ -1,8 +1,7 @@
-import {
-  createIpCountryLookupClient,
-  type IpCountryLookupClient,
-} from '../../app/composables/useIpCountryLookup'
+import { createIpCountryLookupClient } from '../../app/composables/useIpCountryLookup'
 import type { IpCountryLookupResponse } from '../../shared/types/ipCountry'
+
+type LookupRequest = Parameters<typeof createIpCountryLookupClient>[0]
 
 function createResponse(ips: string[], countryCode: string | null = 'DE'): IpCountryLookupResponse {
   return { results: ips.map((ip) => ({ ip, countryCode })) }
@@ -18,7 +17,7 @@ describe('IP country client', () => {
   })
 
   it('batches and deduplicates queued destinations', async () => {
-    const request = vi.fn(async ({ ips }) => createResponse(ips))
+    const request = vi.fn<LookupRequest>(async ({ ips }) => createResponse(ips))
     const client = createIpCountryLookupClient(request)
 
     client.queue('8.8.8.8')
@@ -37,9 +36,11 @@ describe('IP country client', () => {
     const request = vi
       .fn<(body: { ips: string[] }, signal: AbortSignal) => Promise<IpCountryLookupResponse>>()
       .mockImplementationOnce(
-        ({ ips }) =>
+        async ({ ips }) =>
           new Promise((resolve) => {
-            resolveFirst = () => resolve(createResponse(ips))
+            resolveFirst = () => {
+              resolve(createResponse(ips))
+            }
           }),
       )
       .mockImplementation(async ({ ips }) => createResponse(ips))
@@ -67,9 +68,11 @@ describe('IP country client', () => {
     const request = vi
       .fn<(body: { ips: string[] }, signal: AbortSignal) => Promise<IpCountryLookupResponse>>()
       .mockImplementationOnce(
-        ({ ips }) =>
+        async ({ ips }) =>
           new Promise((resolve) => {
-            resolveFirst = () => resolve(createResponse(ips, 'DE'))
+            resolveFirst = () => {
+              resolve(createResponse(ips, 'DE'))
+            }
           }),
       )
       .mockImplementation(async ({ ips }) => createResponse(ips, 'US'))
@@ -87,7 +90,7 @@ describe('IP country client', () => {
   })
 
   it('bounds positive and negative cache entries', async () => {
-    const request = vi.fn(async ({ ips }) => createResponse(ips, null))
+    const request = vi.fn<LookupRequest>(async ({ ips }) => createResponse(ips, null))
     const client = createIpCountryLookupClient(request, { cacheSize: 2 })
 
     for (const ip of ['1.1.1.1', '8.8.8.8', '9.9.9.9']) {
@@ -102,7 +105,7 @@ describe('IP country client', () => {
   })
 
   it('refreshes LRU recency when a cached destination is queued again', async () => {
-    const request = vi.fn(async ({ ips }) => createResponse(ips))
+    const request = vi.fn<LookupRequest>(async ({ ips }) => createResponse(ips))
     const client = createIpCountryLookupClient(request, { cacheSize: 2 })
 
     client.queue('1.1.1.1')
@@ -119,7 +122,7 @@ describe('IP country client', () => {
   })
 
   it('does not refetch a negatively cached destination', async () => {
-    const request = vi.fn(async ({ ips }) => createResponse(ips, null))
+    const request = vi.fn<LookupRequest>(async ({ ips }) => createResponse(ips, null))
     const client = createIpCountryLookupClient(request)
 
     client.queue('8.8.8.8')
@@ -167,7 +170,7 @@ describe('IP country client', () => {
 
   it('disables session after unavailable response', async () => {
     const request = vi.fn(async () => {
-      throw { statusCode: 503 }
+      throw Object.assign(new Error('IP country lookup unavailable'), { statusCode: 503 })
     })
     const client = createIpCountryLookupClient(request)
 
@@ -182,7 +185,7 @@ describe('IP country client', () => {
 
   it('disables session after a permanent client error', async () => {
     const request = vi.fn(async () => {
-      throw { statusCode: 400 }
+      throw Object.assign(new Error('Invalid IP country lookup request'), { statusCode: 400 })
     })
     const client = createIpCountryLookupClient(request)
 
@@ -238,28 +241,27 @@ describe('IP country client', () => {
 
   it('aborts active request when disposed', async () => {
     let signal: AbortSignal | undefined
-    const request = vi.fn((_body, nextSignal: AbortSignal) => {
+    const request = vi.fn(async (_body, nextSignal: AbortSignal) => {
       signal = nextSignal
       return new Promise<IpCountryLookupResponse>(() => {})
     })
-    let client: IpCountryLookupClient | undefined = createIpCountryLookupClient(request)
+    const client = createIpCountryLookupClient(request)
 
     client.queue('8.8.8.8')
     await vi.advanceTimersByTimeAsync(50)
     client.dispose()
 
     expect(signal?.aborted).toBe(true)
-    client = undefined
   })
 
   it('aborts and drops pending lookup work while its pane is inactive', async () => {
     let signal: AbortSignal | undefined
-    const request = vi.fn((_body, nextSignal: AbortSignal) => {
+    const request = vi.fn(async (_body, nextSignal: AbortSignal) => {
       signal = nextSignal
       return new Promise<IpCountryLookupResponse>((_resolve, reject) => {
-        nextSignal.addEventListener('abort', () =>
-          reject(new DOMException('Aborted', 'AbortError')),
-        )
+        nextSignal.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
       })
     })
     const client = createIpCountryLookupClient(request)

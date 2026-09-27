@@ -63,7 +63,7 @@ describe('IP country database updater', () => {
     })
 
     expect(operations).toEqual(['write', 'rename'])
-    expect(await readFile(databasePath)).toEqual(fixture)
+    await expect(readFile(databasePath)).resolves.toEqual(fixture)
     expect(
       Reader.openBuffer(await readFile(databasePath)).country('81.2.69.142').country?.isoCode,
     ).toBe('GB')
@@ -108,7 +108,7 @@ describe('IP country database updater', () => {
         pinPath,
       }),
     ).rejects.toBeInstanceOf(Error)
-    expect(await readFile(databasePath)).toEqual(previous)
+    await expect(readFile(databasePath)).resolves.toEqual(previous)
   })
 
   it('rejects a malformed pin before fetching', async () => {
@@ -134,7 +134,7 @@ describe('IP country database updater', () => {
         pinPath,
       }),
     ).rejects.toThrow('archive checksum does not match pin')
-    expect(await readFile(databasePath)).toEqual(previous)
+    await expect(readFile(databasePath)).resolves.toEqual(previous)
   })
 
   it('selects the pinned URL independently of system date', async () => {
@@ -152,7 +152,7 @@ describe('IP country database updater', () => {
         return responseWithBody(archive)
       },
       pinPath,
-      validateDatabase: () => undefined,
+      validateDatabase: () => {},
     })
 
     expect(urls).toEqual(['https://download.db-ip.com/free/dbip-country-lite-2024-02.mmdb.gz'])

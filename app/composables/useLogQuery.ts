@@ -31,6 +31,8 @@ export function createDefaultLogFilters(): FirewallLogFilters {
   }
 }
 
+const filterOptionCollator = new Intl.Collator(undefined, { sensitivity: 'base' })
+
 export function createCaseInsensitiveFilterOptions(
   values: readonly (string | undefined)[],
   formatValue: (value: string) => string = (value) => value,
@@ -53,9 +55,7 @@ export function createCaseInsensitiveFilterOptions(
     options.push(formatValue(trimmed))
   }
 
-  return options.sort((left, right) =>
-    left.localeCompare(right, undefined, { sensitivity: 'base' }),
-  )
+  return options.toSorted((left, right) => filterOptionCollator.compare(left, right))
 }
 
 function includes(value: string | undefined, query: string) {
@@ -64,6 +64,13 @@ function includes(value: string | undefined, query: string) {
 
 function equals(value: string | undefined, query: string) {
   return query.length === 0 || (value ?? '').trim().toLowerCase() === query
+}
+
+function normalizeMatchLimit(limit: number | undefined) {
+  if (limit === undefined) {
+    return Number.POSITIVE_INFINITY
+  }
+  return Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0
 }
 
 export function filterFirewallLogs(
@@ -81,12 +88,7 @@ export function filterFirewallLogs(
   const sourcePort = filters.sourcePort.trim().toLowerCase()
   const destination = filters.destination.trim().toLowerCase()
   const destinationPort = filters.destinationPort.trim().toLowerCase()
-  const maxMatches =
-    limit === undefined
-      ? Number.POSITIVE_INFINITY
-      : Number.isFinite(limit)
-        ? Math.max(0, Math.floor(limit))
-        : 0
+  const maxMatches = normalizeMatchLimit(limit)
   const matches: FirewallLogRecord[] = []
   if (maxMatches === 0) {
     return matches
@@ -114,7 +116,8 @@ export function filterFirewallLogs(
 }
 
 export function hasActiveLogFilters(filters: FirewallLogFilters) {
-  return Object.values(filters).some((value) =>
+  const values: Record<keyof FirewallLogFilters, string | string[]> = filters
+  return Object.values(values).some((value) =>
     Array.isArray(value) ? value.some((item) => item.trim().length > 0) : value.trim().length > 0,
   )
 }

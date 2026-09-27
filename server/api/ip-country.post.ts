@@ -1,11 +1,8 @@
-import { createError, getHeader, type H3Event } from 'h3'
+import { createError, getHeader } from 'h3'
+import type { H3Event } from 'h3'
 
-import {
-  isIpCountryLookupRequest,
-  MAX_IP_COUNTRY_REQUEST_BYTES,
-  type IpCountryLookupRequest,
-  type IpCountryLookupResponse,
-} from '#shared/types/ipCountry'
+import { isIpCountryLookupRequest, MAX_IP_COUNTRY_REQUEST_BYTES } from '#shared/types/ipCountry'
+import type { IpCountryLookupRequest, IpCountryLookupResponse } from '#shared/types/ipCountry'
 
 import { ipCountryLookup, IpCountryLookupUnavailableError } from '../utils/ipCountryLookup'
 
@@ -17,7 +14,9 @@ async function readRequest(event: H3Event): Promise<IpCountryLookupRequest> {
 
   const chunks: Buffer[] = []
   let size = 0
-  for await (const chunk of event.node.req) {
+  // Node yields Buffers, or strings once an encoding is set on the request.
+  const requestChunks: AsyncIterable<Buffer | string> = event.node.req
+  for await (const chunk of requestChunks) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.byteLength
     if (size > MAX_IP_COUNTRY_REQUEST_BYTES) {

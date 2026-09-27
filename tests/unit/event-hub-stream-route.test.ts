@@ -2,7 +2,8 @@ import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
 import { EventHubConsumerClient } from '@azure/event-hubs'
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 import {
   getUserSessionId,
   requireUserSession,
@@ -12,6 +13,7 @@ import {
   createManagedEventHubStream,
   pipeManagedEventHubStream,
 } from '../../server/utils/managedEventHubStream'
+import type * as ManagedEventHubStreamModule from '../../server/utils/managedEventHubStream'
 
 vi.mock('@azure/event-hubs', () => ({
   EventHubConsumerClient: vi.fn(),
@@ -21,7 +23,7 @@ vi.mock('nuxt-oidc-auth/runtime/server/utils/session.js', () => ({
   requireUserSession: vi.fn(),
 }))
 vi.mock('../../server/utils/managedEventHubStream', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../server/utils/managedEventHubStream')>()),
+  ...(await importOriginal<typeof ManagedEventHubStreamModule>()),
   createManagedEventHubStream: vi.fn(),
   pipeManagedEventHubStream: vi.fn(),
 }))
@@ -47,18 +49,20 @@ const runtimeConfig = {
 let currentRuntimeConfig: Record<string, unknown> = runtimeConfig
 let handler: (event: H3Event) => Promise<unknown>
 const useRuntimeConfig = vi.fn(() => currentRuntimeConfig)
+const anyAbortSignal: unknown = expect.any(AbortSignal)
+
+function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
+  return typeof value === 'function'
+}
 
 function installAzureClientMock(getPartitionIds: EventHubConsumerClient['getPartitionIds']) {
-  const close = vi.fn<EventHubConsumerClient['close']>(async () => undefined)
+  const close = vi.fn<EventHubConsumerClient['close']>(async () => {})
   const client = {
     close,
     getPartitionIds: vi.fn<EventHubConsumerClient['getPartitionIds']>(getPartitionIds),
   }
-  vi.mocked(EventHubConsumerClient).mockImplementation(function () {
-    return client as Pick<
-      EventHubConsumerClient,
-      'close' | 'getPartitionIds'
-    > as EventHubConsumerClient
+  vi.mocked(EventHubConsumerClient).mockImplementation(function (this: EventHubConsumerClient) {
+    Object.assign(this, client)
   })
   return client
 }
@@ -90,12 +94,11 @@ beforeAll(async () => {
   vi.stubEnv('NUXT_OIDC_TOKEN_KEY', Buffer.alloc(32).toString('base64'))
   vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
   vi.stubGlobal('useRuntimeConfig', useRuntimeConfig)
-  handler = (await import('../../server/api/event-hub/stream.post')).default
-})
-
-afterAll(() => {
-  vi.unstubAllEnvs()
-  vi.unstubAllGlobals()
+  const routeModule: { default: unknown } = await import('../../server/api/event-hub/stream.post')
+  if (!isEventHandler(routeModule.default)) {
+    throw new TypeError('Event Hub stream route has no default event handler.')
+  }
+  handler = routeModule.default
 })
 
 beforeEach(() => {
@@ -112,6 +115,11 @@ beforeEach(() => {
   vi.mocked(pipeManagedEventHubStream).mockReset().mockResolvedValue(undefined)
 })
 
+afterAll(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+})
+
 describe('managed Event Hub stream route', () => {
   it('requires a session before reading deployment configuration', async () => {
     vi.mocked(requireUserSession).mockRejectedValueOnce({ statusCode: 401 })
@@ -124,13 +132,19 @@ describe('managed Event Hub stream route', () => {
   })
 
   it('supersedes the previous stream for the same OIDC session', async () => {
-    const cleanups: Array<ReturnType<typeof vi.fn<() => Promise<void>>>> = []
+    const cleanups: ReturnType<typeof vi.fn<() => Promise<void>>>[] = []
     vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
       let streamController: ReadableStreamDefaultController<Uint8Array>
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           streamController = controller
-          signal?.addEventListener('abort', () => controller.close(), { once: true })
+          signal?.addEventListener(
+            'abort',
+            () => {
+              controller.close()
+            },
+            { once: true },
+          )
         },
       })
       const cleanup = vi.fn<() => Promise<void>>(async () => {
@@ -152,9 +166,13 @@ describe('managed Event Hub stream route', () => {
     const secondEvent = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
 
     const first = handler(firstEvent)
-    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(createManagedEventHubStream).toHaveBeenCalledOnce()
+    })
     const second = handler(secondEvent)
-    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => {
+      expect(createManagedEventHubStream).toHaveBeenCalledTimes(2)
+    })
     await expect(first).resolves.toBeUndefined()
     expect(firstEvent.node.res.writableEnded).toBe(true)
     expect(cleanups[0]).toHaveBeenCalledOnce()
@@ -170,10 +188,16 @@ describe('managed Event Hub stream route', () => {
     vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
-          signal?.addEventListener('abort', () => controller.close(), { once: true })
+          signal?.addEventListener(
+            'abort',
+            () => {
+              controller.close()
+            },
+            { once: true },
+          )
         },
       })
-      return { cleanup: vi.fn<() => Promise<void>>(async () => undefined), stream }
+      return { cleanup: vi.fn<() => Promise<void>>(async () => {}), stream }
     })
     vi.mocked(pipeManagedEventHubStream).mockImplementation(async (_response, stream) => {
       await stream.getReader().read()
@@ -184,7 +208,9 @@ describe('managed Event Hub stream route', () => {
 
     const first = handler(firstEvent)
     const second = handler(secondEvent)
-    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => {
+      expect(createManagedEventHubStream).toHaveBeenCalledTimes(2)
+    })
     expect(firstEvent.node.res.writableEnded).toBe(false)
     expect(secondEvent.node.res.writableEnded).toBe(false)
 
@@ -235,7 +261,7 @@ describe('managed Event Hub stream route', () => {
 
   it('rejects requests without an Origin header before constructing an Azure client', async () => {
     const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
-    delete event.node.req.headers.origin
+    event.node.req.headers.origin = undefined
 
     await expect(handler(event)).rejects.toMatchObject({ statusCode: 403 })
     expect(EventHubConsumerClient).not.toHaveBeenCalled()
@@ -256,7 +282,12 @@ describe('managed Event Hub stream route', () => {
 
   it.each([
     ['no partitions', async () => [] as string[]],
-    ['partition discovery failure', async () => Promise.reject(new Error('private-secret'))],
+    [
+      'partition discovery failure',
+      async () => {
+        throw new Error('private-secret')
+      },
+    ],
   ])('cleans up and sanitizes %s', async (_name, getPartitionIds) => {
     const client = installAzureClientMock(getPartitionIds)
     const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
@@ -269,7 +300,7 @@ describe('managed Event Hub stream route', () => {
     })
 
     expect(client.getPartitionIds).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
+      abortSignal: anyAbortSignal,
     })
     expect(client.close).toHaveBeenCalledOnce()
     expect(createManagedEventHubStream).not.toHaveBeenCalled()
@@ -311,7 +342,7 @@ describe('managed Event Hub stream route', () => {
   it('aborts partition discovery when the request closes', async () => {
     let discoveryAborted = false
     const client = installAzureClientMock(
-      (options) =>
+      async (options) =>
         new Promise<string[]>((_resolve, reject) => {
           const abortSignal = options?.abortSignal
           abortSignal?.addEventListener(
@@ -326,8 +357,9 @@ describe('managed Event Hub stream route', () => {
     )
     const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
     const handling = handler(event)
-    void handling.catch(() => undefined)
-    await vi.waitFor(() => expect(client.getPartitionIds).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(client.getPartitionIds).toHaveBeenCalledOnce()
+    })
 
     event.node.req.emit('aborted')
 
@@ -355,7 +387,7 @@ describe('managed Event Hub stream route', () => {
         eventHub: { connectionString, name: eventHubName },
       }
       const stream = new ReadableStream<Uint8Array>()
-      const cleanup = vi.fn(async () => undefined)
+      const cleanup = vi.fn(async () => {})
       const client = installAzureClientMock(async () => ['0', '1'])
       vi.mocked(createManagedEventHubStream).mockReturnValue({ cleanup, stream })
       const request = {
@@ -377,7 +409,7 @@ describe('managed Event Hub stream route', () => {
         }),
       )
       expect(client.getPartitionIds).toHaveBeenCalledWith({
-        abortSignal: expect.any(AbortSignal),
+        abortSignal: anyAbortSignal,
       })
       expect(pipeManagedEventHubStream).toHaveBeenCalledWith(event.node.res, stream)
       expect(event.node.res.getHeader('content-type')).toBe('application/x-ndjson; charset=utf-8')

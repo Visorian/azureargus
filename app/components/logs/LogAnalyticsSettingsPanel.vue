@@ -2,17 +2,22 @@
 import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
 import type { DnsReadinessSourceKind, DnsSourceReadiness } from '#shared/types/dns'
 import type { LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
-import {
-  DNS_READINESS_SOURCE_DEFINITIONS,
-  hasDnsReadinessData,
-  type DnsReadinessSourceGroup,
-} from '#shared/utils/dnsReadiness'
+import { DNS_READINESS_SOURCE_DEFINITIONS, hasDnsReadinessData } from '#shared/utils/dnsReadiness'
+import type { DnsReadinessSourceGroup } from '#shared/utils/dnsReadiness'
 import {
   MAX_LOG_ANALYTICS_QUERY_LIMIT,
   MIN_LOG_ANALYTICS_QUERY_LIMIT,
 } from '#shared/utils/logAnalytics'
 import type { DnsReadinessStatus } from '~/composables/useDnsSourceReadiness'
 import { isEntraId, LOG_ANALYTICS_WORKSPACES_URL } from '~/utils/logAnalyticsOnboarding'
+
+const tenantId = defineModel<string>('tenantId', { required: true })
+
+const workspaceId = defineModel<string>('workspaceId', { required: true })
+
+const queryLimit = defineModel<number>('queryLimit', { required: true })
+
+const queryStorage = defineModel<LogAnalyticsStorageKind>('queryStorage', { required: true })
 
 const props = defineProps<{
   adminConsentUrl: string | null
@@ -40,10 +45,6 @@ const emit = defineEmits<{
   refreshAzureAccess: []
 }>()
 
-const tenantId = defineModel<string>('tenantId', { required: true })
-const workspaceId = defineModel<string>('workspaceId', { required: true })
-const queryLimit = defineModel<number>('queryLimit', { required: true })
-const queryStorage = defineModel<LogAnalyticsStorageKind>('queryStorage', { required: true })
 const tenantValid = computed(() => isEntraId(tenantId.value))
 const workspaceValid = computed(() => isEntraId(workspaceId.value))
 const tenantItems = computed(() =>
@@ -219,7 +220,7 @@ const azureDiagnosticsAvailable = computed(() =>
 const queryStorageSelectionEnabled = computed(
   () => resourceSpecificAvailable.value && azureDiagnosticsAvailable.value,
 )
-const queryStorageItems: Array<{ label: string; value: LogAnalyticsStorageKind }> = [
+const queryStorageItems: { label: string; value: LogAnalyticsStorageKind }[] = [
   { label: 'Dedicated tables', value: 'resource-specific' },
   { label: 'AzureDiagnostics', value: 'azure-diagnostics' },
 ]
@@ -592,15 +593,14 @@ const azureDiagnosticsReadyCount = computed(
                 role="img"
                 :aria-label="`${indicator.label}: ${indicator.statusLabel}`"
                 :title="`${indicator.label}: ${indicator.statusLabel}`"
-                :class="[
-                  'inline-flex size-5 items-center justify-center',
-                  readinessIndicatorStyle[indicator.state].text,
-                ]"
+                class="inline-flex size-5 items-center justify-center"
+                :class="[readinessIndicatorStyle[indicator.state].text]"
               >
                 <UIcon
                   :name="readinessIndicatorStyle[indicator.state].icon"
                   aria-hidden="true"
-                  :class="['size-3.5', readinessIndicatorStyle[indicator.state].iconClass]"
+                  class="size-3.5"
+                  :class="[readinessIndicatorStyle[indicator.state].iconClass]"
                 />
               </span>
             </td>

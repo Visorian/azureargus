@@ -1,4 +1,8 @@
 <script setup lang="ts">
+defineSlots<{
+  default?: () => unknown
+}>()
+
 const runtimeConfig = useRuntimeConfig()
 const anonymousMode = useAnonymousMode()
 const deployment = useDeploymentCapabilities()
@@ -9,12 +13,12 @@ const identityLabel = computed(() => {
     return 'Temporary session'
   }
 
-  const profile = user.value
-  if (profile && typeof profile === 'object') {
-    const claims = profile as unknown as Record<string, unknown>
-    const preferredUsername = claims.preferred_username
-    const email = claims.email
-    const name = claims.name
+  const profile: unknown = user.value
+  if (typeof profile === 'object' && profile !== null) {
+    const preferredUsername =
+      'preferred_username' in profile ? profile.preferred_username : undefined
+    const email = 'email' in profile ? profile.email : undefined
+    const name = 'name' in profile ? profile.name : undefined
 
     if (typeof preferredUsername === 'string') {
       return preferredUsername

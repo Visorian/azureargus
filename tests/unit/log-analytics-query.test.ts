@@ -79,20 +79,21 @@ function createNetworkRow(timestamp: string, message: string, protocol = 'UDP'):
 }
 
 function response(rows: unknown[][], status = 200) {
-  return new Response(JSON.stringify(createAzureResponse(rows)), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
+  return Response.json(createAzureResponse(rows), { status })
 }
 
 function requestQuery(init?: RequestInit) {
-  if (typeof init?.body !== 'string') throw new Error('Expected request body')
+  if (typeof init?.body !== 'string') {
+    throw new TypeError('Expected request body')
+  }
   const body: unknown = JSON.parse(init.body)
   if (typeof body !== 'object' || body === null || !('query' in body)) {
-    throw new Error('Expected query body')
+    throw new TypeError('Expected query body')
   }
   const query = body.query
-  if (typeof query !== 'string') throw new Error('Expected query string')
+  if (typeof query !== 'string') {
+    throw new TypeError('Expected query string')
+  }
   return query
 }
 
@@ -201,7 +202,7 @@ describe('Log Analytics KQL builder', () => {
 
 describe('Log Analytics response mapping', () => {
   it('maps canonical rows, sorts them, and reports truncation', () => {
-    const response = createAzureResponse([
+    const azureResponse = createAzureResponse([
       [
         '2026-07-10T10:00:00Z',
         'AZFWNetworkRule',
@@ -237,7 +238,7 @@ describe('Log Analytics response mapping', () => {
     ])
 
     const result = mapLogAnalyticsResponse(
-      response,
+      azureResponse,
       { key: 'timestamp', direction: 'desc' },
       'query-id',
       1,
@@ -327,7 +328,9 @@ describe('Log Analytics Azure request', () => {
 
     expect(fetchImplementation).toHaveBeenCalledOnce()
     const [url, init] = fetchImplementation.mock.calls[0] ?? []
-    if (typeof init?.body !== 'string') throw new Error('Expected request body')
+    if (typeof init?.body !== 'string') {
+      throw new TypeError('Expected request body')
+    }
     expect(url).toBe(`https://api.loganalytics.azure.com/v1/workspaces/${config.workspaceId}/query`)
     expect(init.headers).toEqual({
       authorization: 'Bearer access-token',
@@ -416,21 +419,21 @@ describe('Log Analytics Azure request', () => {
   })
 
   it('aborts timed-out upstream requests', async () => {
-    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
       return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () =>
-          reject(new DOMException('Aborted', 'AbortError')),
-        )
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        })
       })
     })
 
-    const error = await executeLogAnalyticsQuery(config, createRequest(), 'access-token', {
+    const failure = await executeLogAnalyticsQuery(config, createRequest(), 'access-token', {
       fetchImplementation,
       timeoutMs: 1,
-    }).catch((caught: unknown) => caught)
+    }).catch((error: unknown) => error)
 
-    expect(error).toBeInstanceOf(LogAnalyticsQueryError)
-    expect(error).toMatchObject({
+    expect(failure).toBeInstanceOf(LogAnalyticsQueryError)
+    expect(failure).toMatchObject({
       kind: 'timeout',
       message: 'Log Analytics query failed',
     })

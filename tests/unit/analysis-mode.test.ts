@@ -1,10 +1,15 @@
 import { ref } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
 
 import { useAnalysisMode } from '../../app/composables/useAnalysisMode'
 
+type RouteLeaveGuard = () => unknown
+
+const routeLeaveGuards = vi.hoisted((): RouteLeaveGuard[] => [])
+
 vi.mock('vue-router', () => ({
-  onBeforeRouteLeave: vi.fn<typeof onBeforeRouteLeave>(),
+  onBeforeRouteLeave: (guard: RouteLeaveGuard) => {
+    routeLeaveGuards.push(guard)
+  },
 }))
 
 function createVoidMock() {
@@ -12,19 +17,15 @@ function createVoidMock() {
 }
 
 function createAsyncVoidMock() {
-  return vi.fn<() => Promise<void>>(async () => undefined)
+  return vi.fn<() => Promise<void>>(async () => {})
 }
 
-function createDeferred() {
-  let resolve!: () => void
-  const promise = new Promise<void>((resolvePromise) => {
-    resolve = resolvePromise
-  })
-  return { promise, resolve }
+function createDeferred(): PromiseWithResolvers<void> {
+  return Promise.withResolvers()
 }
 
 beforeEach(() => {
-  vi.mocked(onBeforeRouteLeave).mockClear()
+  routeLeaveGuards.length = 0
 })
 
 describe('analysis mode orchestration', () => {
@@ -113,7 +114,7 @@ describe('analysis mode orchestration', () => {
   it('aborts Log work and awaits Real-time teardown before route leave completes', async () => {
     const abortLogAnalysis = createVoidMock()
     const disconnect = createDeferred()
-    const disconnectRealTime = vi.fn<() => Promise<void>>(() => disconnect.promise)
+    const disconnectRealTime = vi.fn<() => Promise<void>>(async () => disconnect.promise)
     useAnalysisMode({
       abortLogAnalysis,
       canUseLogAnalysis: ref(true),
@@ -124,13 +125,13 @@ describe('analysis mode orchestration', () => {
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
     })
-    const guard = vi.mocked(onBeforeRouteLeave).mock.calls.at(-1)?.[0]
+    const guard = routeLeaveGuards.at(-1)
 
     expect(guard).toBeDefined()
     if (!guard) {
       throw new Error('Route leave guard was not registered.')
     }
-    const leave = Reflect.apply(guard, undefined, [])
+    const leave = guard()
     expect(abortLogAnalysis).toHaveBeenCalledOnce()
     expect(disconnectRealTime).toHaveBeenCalledOnce()
 

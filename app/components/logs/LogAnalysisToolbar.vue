@@ -7,13 +7,13 @@
       <slot name="filters" />
     </div>
     <div
-      v-if="$slots.query || $slots.summary"
+      v-if="$slots['query'] || $slots['summary']"
       class="mt-3 flex flex-wrap items-end justify-between gap-3"
       data-testid="log-query-row"
     >
       <slot name="query" />
       <div
-        v-if="$slots.summary"
+        v-if="$slots['summary']"
         class="self-end py-2 text-xs text-brand-gray-600 dark:text-brand-gray-300"
       >
         <slot name="summary" />

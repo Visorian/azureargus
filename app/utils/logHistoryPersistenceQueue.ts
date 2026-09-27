@@ -5,9 +5,8 @@ import {
   LOG_HISTORY_MAX_WRITE_BATCH_SIZE,
   LOG_HISTORY_MAX_WRITE_DELAY_MS,
   toPersistedFirewallLogRecords,
-  type LogHistoryRetention,
-  type PersistedFirewallLogRecord,
 } from './logHistoryRecord'
+import type { LogHistoryRetention, PersistedFirewallLogRecord } from './logHistoryRecord'
 import type { LogHistoryStoreApi } from './logHistoryStore'
 
 interface IdleDeadlineLike {
@@ -36,15 +35,15 @@ export interface LogHistoryPersistenceQueueOptions {
 }
 
 export interface LogHistoryPersistenceQueue {
-  clearQueue(): void
-  clearQueueIfDisabled(): void
-  disable(): void
-  enable(): void
-  flush(): Promise<void>
-  isEnabled(): boolean
-  pendingCount(): number
-  queueRecords(records: readonly FirewallLogRecord[]): void
-  waitForIdle(): Promise<void>
+  clearQueue: () => void
+  clearQueueIfDisabled: () => void
+  disable: () => void
+  enable: () => void
+  flush: () => Promise<void>
+  isEnabled: () => boolean
+  pendingCount: () => number
+  queueRecords: (records: readonly FirewallLogRecord[]) => void
+  waitForIdle: () => Promise<void>
 }
 
 function createDefaultScheduler(): LogHistoryPersistenceScheduler {
@@ -111,10 +110,20 @@ export function createLogHistoryPersistenceQueue({
     }, flushDelayMs)
   }
 
+  async function writeBatch(records: PersistedFirewallLogRecord[]) {
+    try {
+      await store.appendLogHistoryBatch(records, retention)
+    } catch (error: unknown) {
+      isEnabled = false
+      pendingRecords = []
+      onError?.(error)
+    }
+  }
+
   async function flush() {
     cancelScheduledFlush()
 
-    while (isEnabled || activeFlushPromise !== null) {
+    for (;;) {
       if (activeFlushPromise !== null) {
         const inFlight = activeFlushPromise
         await inFlight
@@ -125,21 +134,13 @@ export function createLogHistoryPersistenceQueue({
         continue
       }
 
-      if (pendingRecords.length === 0) {
+      if (!isEnabled || pendingRecords.length === 0) {
         return
       }
 
       const records = pendingRecords.splice(0, writeBatchSize)
       isFlushing = true
-      const currentFlush = (async () => {
-        try {
-          await store.appendLogHistoryBatch(records, retention)
-        } catch (error: unknown) {
-          isEnabled = false
-          pendingRecords = []
-          onError?.(error)
-        }
-      })()
+      const currentFlush = writeBatch(records)
       activeFlushPromise = currentFlush
 
       await currentFlush

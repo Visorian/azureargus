@@ -1,6 +1,6 @@
 import { BlockList, isIP } from 'node:net'
 
-import { AddressNotFoundError, Reader, type ReaderModel } from '@maxmind/geoip2-node'
+import { AddressNotFoundError, Reader } from '@maxmind/geoip2-node'
 
 interface CountryRecord {
   country?: {
@@ -23,6 +23,7 @@ interface IpCountryLookupOptions {
 const nonPublicIpv4Addresses = new BlockList()
 const nonPublicIpv6Addresses = new BlockList()
 const publicIpv4Exceptions = new Set(['192.0.0.9', '192.0.0.10'])
+const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/
 
 for (const [network, prefix] of [
   ['0.0.0.0', 8],
@@ -73,7 +74,7 @@ export class IpCountryLookupUnavailableError extends Error {
 
 function normalizeCountryCode(value: string | undefined) {
   const countryCode = value?.trim().toUpperCase()
-  return countryCode && /^[A-Z]{2}$/.test(countryCode) ? countryCode : null
+  return countryCode && COUNTRY_CODE_PATTERN.test(countryCode) ? countryCode : null
 }
 
 function isPublicIp(ip: string) {
@@ -91,8 +92,10 @@ function isPublicIp(ip: string) {
 }
 
 export function createIpCountryLookup({
-  onInitializationError = (message) => console.error(message),
-  openReader = (databasePath) => Reader.open(databasePath) as Promise<ReaderModel>,
+  onInitializationError = (message) => {
+    console.error(message)
+  },
+  openReader = async (databasePath) => Reader.open(databasePath),
 }: IpCountryLookupOptions = {}) {
   let readerPromise: Promise<IpCountryReader> | null = null
   let initializationErrorReported = false
@@ -105,15 +108,21 @@ export function createIpCountryLookup({
     onInitializationError('IP country database could not be opened.')
   }
 
+  async function openReaderOrReportUnavailable(databasePath: string) {
+    try {
+      return await openReader(databasePath)
+    } catch {
+      reportUnavailable()
+      throw new IpCountryLookupUnavailableError()
+    }
+  }
+
   async function getReader(databasePath: string) {
     if (!databasePath) {
       throw new IpCountryLookupUnavailableError()
     }
 
-    readerPromise ??= openReader(databasePath).catch(() => {
-      reportUnavailable()
-      throw new IpCountryLookupUnavailableError()
-    })
+    readerPromise ??= openReaderOrReportUnavailable(databasePath)
 
     return readerPromise
   }

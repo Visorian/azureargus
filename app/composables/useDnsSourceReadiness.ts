@@ -1,4 +1,5 @@
-import { onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
+import { onScopeDispose, ref, shallowRef, watch } from 'vue'
+import type { Ref } from 'vue'
 
 import type { DnsReadinessResponse, DnsSourceReadiness } from '#shared/types/dns'
 
@@ -50,17 +51,23 @@ export function useDnsSourceReadiness(options: UseDnsSourceReadinessOptions) {
     status.value = 'loading'
     try {
       const response = await options.request(target, requestController.signal)
-      if (currentGeneration !== generation) return false
+      if (currentGeneration !== generation) {
+        return false
+      }
       readiness.value = response.readiness
       status.value = 'success'
       return true
     } catch (error: unknown) {
-      if (currentGeneration !== generation || isAbortError(error)) return false
+      if (currentGeneration !== generation || isAbortError(error)) {
+        return false
+      }
       lastError.value = 'Source readiness check failed.'
       status.value = 'error'
       return false
     } finally {
-      if (currentGeneration === generation) controller = null
+      if (currentGeneration === generation) {
+        controller = null
+      }
     }
   }
 

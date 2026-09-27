@@ -23,8 +23,8 @@ import {
   executeLogAnalyticsQuery,
   isLogAnalyticsWorkspaceId,
   LogAnalyticsQueryError,
-  type LogAnalyticsQueryErrorKind,
 } from '#shared/utils/logAnalyticsQuery'
+import type { LogAnalyticsQueryErrorKind } from '#shared/utils/logAnalyticsQuery'
 import { isEntraId } from '~/utils/logAnalyticsOnboarding'
 
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 15_000
@@ -40,13 +40,18 @@ interface TemporaryLogAnalyticsClientOptions {
 }
 
 export class TemporaryLogAnalyticsClientError extends Error {
+  readonly kind: LogAnalyticsQueryErrorKind | 'validation'
+  readonly retryAfterSeconds: number | undefined
+
   constructor(
     message: string,
-    readonly kind: LogAnalyticsQueryErrorKind | 'validation',
-    readonly retryAfterSeconds?: number,
+    kind: LogAnalyticsQueryErrorKind | 'validation',
+    retryAfterSeconds?: number,
   ) {
     super(message)
     this.name = 'TemporaryLogAnalyticsClientError'
+    this.kind = kind
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -61,7 +66,9 @@ async function withTimeout<T>(
   timeoutMs: number,
   operation: (signal: AbortSignal) => Promise<T>,
 ) {
-  if (signal.aborted) throw abortReason(signal)
+  if (signal.aborted) {
+    throw abortReason(signal)
+  }
   const controller = new AbortController()
   let rejectForAbort!: (reason: unknown) => void
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -107,51 +114,59 @@ function validateWorkspaceId(workspaceId: string) {
   return normalized
 }
 
-function mapLogAnalyticsError(error: unknown): never {
-  if (error instanceof TemporaryLogAnalyticsClientError) throw error
-  if (error instanceof Error && error.name === 'AbortError') throw error
+function toLogAnalyticsClientError(error: unknown): Error {
+  if (error instanceof TemporaryLogAnalyticsClientError) {
+    return error
+  }
+  if (error instanceof Error && error.name === 'AbortError') {
+    return error
+  }
   if (!(error instanceof LogAnalyticsQueryError)) {
-    throw new TemporaryLogAnalyticsClientError('Log Analytics request failed.', 'upstream')
+    return new TemporaryLogAnalyticsClientError('Log Analytics request failed.', 'upstream')
   }
   if (error.kind === 'authorization') {
-    throw new TemporaryLogAnalyticsClientError('Log Analytics authorization failed.', error.kind)
+    return new TemporaryLogAnalyticsClientError('Log Analytics authorization failed.', error.kind)
   }
   if (error.kind === 'throttled') {
     const retry =
       error.retryAfterSeconds === undefined
         ? ''
         : ` Try again in ${error.retryAfterSeconds} seconds.`
-    throw new TemporaryLogAnalyticsClientError(
+    return new TemporaryLogAnalyticsClientError(
       `Log Analytics is throttling requests.${retry}`,
       error.kind,
       error.retryAfterSeconds,
     )
   }
   if (error.kind === 'timeout') {
-    throw new TemporaryLogAnalyticsClientError('Log Analytics request timed out.', error.kind)
+    return new TemporaryLogAnalyticsClientError('Log Analytics request timed out.', error.kind)
   }
-  throw new TemporaryLogAnalyticsClientError('Log Analytics request failed.', error.kind)
+  return new TemporaryLogAnalyticsClientError('Log Analytics request failed.', error.kind)
 }
 
-function mapDiscoveryError(error: unknown): never {
-  if (error instanceof TemporaryLogAnalyticsClientError) throw error
-  if (error instanceof Error && error.name === 'AbortError') throw error
+function toDiscoveryClientError(error: unknown): Error {
+  if (error instanceof TemporaryLogAnalyticsClientError) {
+    return error
+  }
+  if (error instanceof Error && error.name === 'AbortError') {
+    return error
+  }
   if (!(error instanceof AzureResourceDiscoveryError)) {
-    throw new TemporaryLogAnalyticsClientError('Azure resource discovery failed.', 'upstream')
+    return new TemporaryLogAnalyticsClientError('Azure resource discovery failed.', 'upstream')
   }
   if (error.status === 401 || error.status === 403) {
-    throw new TemporaryLogAnalyticsClientError(
+    return new TemporaryLogAnalyticsClientError(
       'Azure resource discovery was denied.',
       'authorization',
     )
   }
   if (error.status === 429) {
-    throw new TemporaryLogAnalyticsClientError(
+    return new TemporaryLogAnalyticsClientError(
       'Azure resource discovery is throttled.',
       'throttled',
     )
   }
-  throw new TemporaryLogAnalyticsClientError('Azure resource discovery failed.', 'upstream')
+  return new TemporaryLogAnalyticsClientError('Azure resource discovery failed.', 'upstream')
 }
 
 export function createTemporaryLogAnalyticsClient(
@@ -170,10 +185,12 @@ export function createTemporaryLogAnalyticsClient(
     const normalizedWorkspaceId = validateWorkspaceId(workspaceId)
     try {
       const accessToken = await tokenProvider.getLogAnalyticsAccessToken(normalizedTenantId, false)
-      if (signal.aborted) throw abortReason(signal)
+      if (signal.aborted) {
+        throw abortReason(signal)
+      }
       return await operation(accessToken, normalizedWorkspaceId)
     } catch (error: unknown) {
-      mapLogAnalyticsError(error)
+      throw toLogAnalyticsClientError(error)
     }
   }
 
@@ -189,67 +206,85 @@ export function createTemporaryLogAnalyticsClient(
               normalizedTenantId,
               false,
             )
-            if (boundedSignal.aborted) throw abortReason(boundedSignal)
+            if (boundedSignal.aborted) {
+              throw abortReason(boundedSignal)
+            }
             return discoverAzureLogAnalyticsAccess(accessToken, boundedSignal, fetchImplementation)
           },
         )
       } catch (error: unknown) {
-        mapDiscoveryError(error)
+        throw toDiscoveryClientError(error)
       }
     },
 
-    query(
+    async query(
       tenantId: string,
       workspaceId: string,
       request: LogAnalyticsQueryRequest,
       signal: AbortSignal,
     ): Promise<LogAnalyticsQueryResponse> {
-      return withLogAnalyticsToken(tenantId, workspaceId, signal, (accessToken, targetWorkspace) =>
-        executeLogAnalyticsQuery({ workspaceId: targetWorkspace }, request, accessToken, {
-          fetchImplementation,
-          signal,
-        }),
+      return withLogAnalyticsToken(
+        tenantId,
+        workspaceId,
+        signal,
+        async (accessToken, targetWorkspace) =>
+          executeLogAnalyticsQuery({ workspaceId: targetWorkspace }, request, accessToken, {
+            fetchImplementation,
+            signal,
+          }),
       )
     },
 
-    dnsReadiness(
+    async dnsReadiness(
       tenantId: string,
       workspaceId: string,
       signal: AbortSignal,
     ): Promise<DnsReadinessResponse> {
-      return withLogAnalyticsToken(tenantId, workspaceId, signal, (accessToken, targetWorkspace) =>
-        executeDnsReadinessQuery({ workspaceId: targetWorkspace }, accessToken, {
-          fetchImplementation,
-          signal,
-        }),
+      return withLogAnalyticsToken(
+        tenantId,
+        workspaceId,
+        signal,
+        async (accessToken, targetWorkspace) =>
+          executeDnsReadinessQuery({ workspaceId: targetWorkspace }, accessToken, {
+            fetchImplementation,
+            signal,
+          }),
       )
     },
 
-    dnsList(
+    async dnsList(
       tenantId: string,
       workspaceId: string,
       request: DnsListQueryRequest,
       signal: AbortSignal,
     ): Promise<DnsListQueryResponse> {
-      return withLogAnalyticsToken(tenantId, workspaceId, signal, (accessToken, targetWorkspace) =>
-        executeDnsListQuery({ workspaceId: targetWorkspace }, request, accessToken, {
-          fetchImplementation,
-          signal,
-        }),
+      return withLogAnalyticsToken(
+        tenantId,
+        workspaceId,
+        signal,
+        async (accessToken, targetWorkspace) =>
+          executeDnsListQuery({ workspaceId: targetWorkspace }, request, accessToken, {
+            fetchImplementation,
+            signal,
+          }),
       )
     },
 
-    dnsDetail(
+    async dnsDetail(
       tenantId: string,
       workspaceId: string,
       request: DnsDetailQueryRequest,
       signal: AbortSignal,
     ): Promise<DnsDetailQueryResponse> {
-      return withLogAnalyticsToken(tenantId, workspaceId, signal, (accessToken, targetWorkspace) =>
-        executeDnsDetailQuery({ workspaceId: targetWorkspace }, request, accessToken, {
-          fetchImplementation,
-          signal,
-        }),
+      return withLogAnalyticsToken(
+        tenantId,
+        workspaceId,
+        signal,
+        async (accessToken, targetWorkspace) =>
+          executeDnsDetailQuery({ workspaceId: targetWorkspace }, request, accessToken, {
+            fetchImplementation,
+            signal,
+          }),
       )
     },
   }

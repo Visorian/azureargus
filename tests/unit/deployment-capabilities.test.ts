@@ -153,6 +153,7 @@ describe('deployment capabilities', () => {
         eventHub: validEventHub,
         oidc: {
           providers: {
+            // oxlint-disable-next-line eslint/no-script-url -- test input: script URLs must be rejected
             entra: { ...validOidc.providers.entra, redirectUri: 'javascript:alert(1)' },
           },
         },

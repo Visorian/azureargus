@@ -1,4 +1,5 @@
-import { computed, watch, type Ref } from 'vue'
+import { computed, watch } from 'vue'
+import type { Ref } from 'vue'
 
 import type { FirewallLogRecord } from '#shared/types/firewall'
 import type { ManagedEventHubStreamRequest } from '#shared/types/managedEventHub'
@@ -13,8 +14,8 @@ import {
   parseEventHubConnectionString,
   validateEventHubConnectionForm,
   validateEventHubReceiverSettings,
-  type EventHubConnectionForm,
 } from './useEventHubConnection'
+import type { EventHubConnectionForm } from './useEventHubConnection'
 import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from './useFirewallLogParser'
 import { createLogBatcher } from './useLogBatcher'
 import { compareFirewallLogs } from './useLogSorting'
@@ -130,10 +131,10 @@ function addFilterOption(options: string[], seen: Set<string>, value: string) {
   return true
 }
 
-function sortFilterOptions(options: string[]) {
-  return options.sort((left, right) =>
-    left.localeCompare(right, undefined, { sensitivity: 'base' }),
-  )
+const filterOptionCollator = new Intl.Collator(undefined, { sensitivity: 'base' })
+
+function sortFilterOptions(options: readonly string[]) {
+  return options.toSorted((left, right) => filterOptionCollator.compare(left, right))
 }
 
 async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient> {
@@ -151,8 +152,8 @@ async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient
         : new EventHubConsumerClient(form.consumerGroup.trim(), form.connectionString.trim())
 
     return {
-      close: () => eventHubClient.close(),
-      getPartitionIds: () => eventHubClient.getPartitionIds(),
+      close: async () => eventHubClient.close(),
+      getPartitionIds: async () => eventHubClient.getPartitionIds(),
       subscribe: (handlers, options) => eventHubClient.subscribe(handlers, options),
     }
   }
@@ -274,41 +275,6 @@ export function useEventHubReceiver({
     return snapshot
   }
 
-  function receiveEvents(events: readonly EventHubLogEvent[], partitionId: string) {
-    const acceptedEvents: EventHubLogEvent[] = []
-    const previousSequenceNumber = resumeFrom.get(partitionId)
-    let highestSequenceNumber = previousSequenceNumber
-    let checkpointEvent: EventHubLogEvent | null = null
-
-    for (const event of events) {
-      const sequenceNumber = getSequenceNumber(event)
-      if (sequenceNumber !== null) {
-        if (highestSequenceNumber !== undefined && sequenceNumber <= highestSequenceNumber) {
-          continue
-        }
-        highestSequenceNumber = sequenceNumber
-        checkpointEvent = event
-      }
-      acceptedEvents.push(event)
-    }
-
-    if (acceptedEvents.length === 0) {
-      return null
-    }
-
-    const result = eventsToFirewallLogs(acceptedEvents, partitionId, nextRecordIndex)
-    nextRecordIndex = result.nextIndex
-    batcher.pushMany(result.records)
-
-    if (
-      highestSequenceNumber !== undefined &&
-      (previousSequenceNumber === undefined || highestSequenceNumber > previousSequenceNumber)
-    ) {
-      resumeFrom.set(partitionId, highestSequenceNumber)
-    }
-    return checkpointEvent
-  }
-
   function updateUiFilterOptions(records: readonly FirewallLogRecord[], rebuild = false) {
     if (rebuild) {
       categoryOptions.value = []
@@ -331,15 +297,23 @@ export function useEventHubReceiver({
       protocolsChanged =
         addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged
     }
-    if (categoriesChanged) categoryOptions.value = sortFilterOptions(nextCategories)
-    if (actionsChanged) actionOptions.value = sortFilterOptions(nextActions)
-    if (protocolsChanged) protocolOptions.value = sortFilterOptions(nextProtocols)
+    if (categoriesChanged) {
+      categoryOptions.value = sortFilterOptions(nextCategories)
+    }
+    if (actionsChanged) {
+      actionOptions.value = sortFilterOptions(nextActions)
+    }
+    if (protocolsChanged) {
+      protocolOptions.value = sortFilterOptions(nextProtocols)
+    }
   }
 
   watch(
     uiActive,
     (active) => {
-      if (active) updateUiFilterOptions(buffer.getRawItems(), true)
+      if (active) {
+        updateUiFilterOptions(buffer.getRawItems(), true)
+      }
     },
     { flush: 'sync' },
   )
@@ -383,7 +357,9 @@ export function useEventHubReceiver({
       }
     }
     buffer.pushMany(records)
-    if (uiActive.value) updateUiFilterOptions(records)
+    if (uiActive.value) {
+      updateUiFilterOptions(records)
+    }
     receivedCount.value += records.length
     logHistoryPersistence.queueRecords(records)
   }
@@ -399,6 +375,41 @@ export function useEventHubReceiver({
     },
   })
 
+  function receiveEvents(events: readonly EventHubLogEvent[], partitionId: string) {
+    const acceptedEvents: EventHubLogEvent[] = []
+    const previousSequenceNumber = resumeFrom.get(partitionId)
+    let highestSequenceNumber = previousSequenceNumber
+    let checkpointEvent: EventHubLogEvent | null = null
+
+    for (const event of events) {
+      const sequenceNumber = getSequenceNumber(event)
+      if (sequenceNumber !== null) {
+        if (highestSequenceNumber !== undefined && sequenceNumber <= highestSequenceNumber) {
+          continue
+        }
+        highestSequenceNumber = sequenceNumber
+        checkpointEvent = event
+      }
+      acceptedEvents.push(event)
+    }
+
+    if (acceptedEvents.length === 0) {
+      return null
+    }
+
+    const result = eventsToFirewallLogs(acceptedEvents, partitionId, nextRecordIndex)
+    nextRecordIndex = result.nextIndex
+    batcher.pushMany(result.records)
+
+    if (
+      highestSequenceNumber !== undefined &&
+      (previousSequenceNumber === undefined || highestSequenceNumber > previousSequenceNumber)
+    ) {
+      resumeFrom.set(partitionId, highestSequenceNumber)
+    }
+    return checkpointEvent
+  }
+
   function cancelReconnect() {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
@@ -406,7 +417,7 @@ export function useEventHubReceiver({
     }
   }
 
-  function teardown(setIdle = true) {
+  async function teardown(setIdle = true) {
     if (setIdle) {
       status.value = 'idle'
     }
@@ -485,19 +496,20 @@ export function useEventHubReceiver({
       }
 
       if (failures.length > 0) {
-        const messages = failures.map(getErrorMessage)
+        const messages = failures.map((failure) => getErrorMessage(failure))
         errors.value = [...messages, ...errors.value].slice(0, 5)
         throw new AggregateError(failures, messages.join(' '))
       }
     })()
 
-    const serializedPromise = teardownPromise.finally(() => {
-      if (disconnectPromise === serializedPromise) {
+    disconnectPromise = teardownPromise
+    try {
+      await teardownPromise
+    } finally {
+      if (disconnectPromise === teardownPromise) {
         disconnectPromise = null
       }
-    })
-    disconnectPromise = serializedPromise
-    return serializedPromise
+    }
   }
 
   async function disconnect() {
@@ -598,7 +610,7 @@ export function useEventHubReceiver({
       }
 
       status.value = 'connected'
-      const streamPromise = consumeManagedEventHubStream(
+      const streamConsumption = consumeManagedEventHubStream(
         response.body,
         async (envelope) => {
           if (generation !== connectionGeneration) {
@@ -647,24 +659,25 @@ export function useEventHubReceiver({
         },
         controller.signal,
       )
-        .then(() => {
+      const streamPromise = (async () => {
+        try {
+          await streamConsumption
           if (generation === connectionGeneration && !controller.signal.aborted) {
             errors.value = ['Managed Event Hub stream ended', ...errors.value].slice(0, 5)
             scheduleReconnect(generation)
           }
-        })
-        .catch((error: unknown) => {
+        } catch (error: unknown) {
           if (generation === connectionGeneration && !controller.signal.aborted) {
             errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
             scheduleReconnect(generation)
           }
-        })
-        .finally(() => {
+        } finally {
           if (managedStreamController === controller) {
             managedStreamController = null
             managedStreamPromise = null
           }
-        })
+        }
+      })()
       managedStreamPromise = streamPromise
       return true
     }
@@ -730,6 +743,7 @@ export function useEventHubReceiver({
     let retryFailed = false
     try {
       await teardown(false)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- disconnect() can clear activeConnection while teardown() is awaited
       if (generation !== connectionGeneration || activeConnection === null) {
         return
       }
@@ -821,7 +835,11 @@ export function useEventHubReceiver({
 
       const connectionError = getErrorMessage(error)
 
-      await teardown(false).catch(() => undefined)
+      try {
+        await teardown(false)
+      } catch {
+        // Best-effort cleanup; teardown() records its own failures in errors.
+      }
 
       if (generation === connectionGeneration) {
         errors.value = [connectionError, ...errors.value].slice(0, 5)

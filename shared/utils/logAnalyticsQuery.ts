@@ -163,9 +163,9 @@ function isValidFilterObject(value: unknown) {
   }
 
   return (
-    Array.isArray(value.category) &&
-    value.category.length <= MAX_CATEGORY_FILTERS &&
-    value.category.every(
+    Array.isArray(value['category']) &&
+    value['category'].length <= MAX_CATEGORY_FILTERS &&
+    value['category'].every(
       (category) =>
         typeof category === 'string' &&
         category.trim().length > 0 &&
@@ -182,9 +182,9 @@ function isValidSortObject(value: unknown) {
   return (
     isRecord(value) &&
     hasExactKeys(value, ['key', 'direction']) &&
-    typeof value.key === 'string' &&
-    Object.hasOwn(SORT_COLUMNS, value.key) &&
-    (value.direction === 'asc' || value.direction === 'desc')
+    typeof value['key'] === 'string' &&
+    Object.hasOwn(SORT_COLUMNS, value['key']) &&
+    (value['direction'] === 'asc' || value['direction'] === 'desc')
   )
 }
 
@@ -196,7 +196,7 @@ export function isLogAnalyticsWorkspaceId(value: unknown): value is string {
   return typeof value === 'string' && WORKSPACE_ID_PATTERN.test(value)
 }
 
-function readRetryAfterSeconds(response: Response) {
+function readRetryAfterSeconds(response: Response): number | undefined {
   const value = response.headers.get('retry-after')
   if (value === null) {
     return undefined
@@ -261,23 +261,27 @@ function compareRecords(left: FirewallLogRecord, right: FirewallLogRecord, sort:
 }
 
 function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryId: string) {
-  if (!Array.isArray(table.columns) || !Array.isArray(table.rows)) {
+  if (!Array.isArray(table['columns']) || !Array.isArray(table['rows'])) {
     throw new LogAnalyticsQueryError('upstream')
   }
 
   const columnIndexes = new Map<string, number>()
-  for (const [columnIndex, column] of table.columns.entries()) {
-    if (!isRecord(column) || typeof column.name !== 'string' || columnIndexes.has(column.name)) {
+  for (const [columnIndex, column] of table['columns'].entries()) {
+    if (
+      !isRecord(column) ||
+      typeof column['name'] !== 'string' ||
+      columnIndexes.has(column['name'])
+    ) {
       throw new LogAnalyticsQueryError('upstream')
     }
-    columnIndexes.set(column.name, columnIndex)
+    columnIndexes.set(column['name'], columnIndex)
   }
   if (REQUIRED_RESULT_COLUMNS.some((columnName) => !columnIndexes.has(columnName))) {
     throw new LogAnalyticsQueryError('upstream')
   }
 
   const records: FirewallLogRecord[] = []
-  for (const [rowIndex, row] of table.rows.entries()) {
+  for (const [rowIndex, row] of table['rows'].entries()) {
     if (!Array.isArray(row)) {
       throw new LogAnalyticsQueryError('upstream')
     }
@@ -369,18 +373,18 @@ export function validateLogAnalyticsQueryRequest(
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['from', 'to', 'filters', 'limit', 'storage', 'sort']) ||
-    !isIsoTimestamp(value.from) ||
-    !isIsoTimestamp(value.to) ||
-    !isValidFilterObject(value.filters) ||
-    !isLogAnalyticsQueryLimit(value.limit) ||
-    !isLogAnalyticsStorageKind(value.storage) ||
-    !isValidSortObject(value.sort)
+    !isIsoTimestamp(value['from']) ||
+    !isIsoTimestamp(value['to']) ||
+    !isValidFilterObject(value['filters']) ||
+    !isLogAnalyticsQueryLimit(value['limit']) ||
+    !isLogAnalyticsStorageKind(value['storage']) ||
+    !isValidSortObject(value['sort'])
   ) {
     return false
   }
 
-  const from = Date.parse(value.from)
-  const to = Date.parse(value.to)
+  const from = Date.parse(value['from'])
+  const to = Date.parse(value['to'])
   return from < to && to - from <= MAX_RANGE_MS
 }
 
@@ -414,7 +418,9 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
     ),
   ].toSorted()
   if (categories.length > 0) {
-    clauses.push(`| where Category in~ (${categories.map(encodeKqlStringLiteral).join(', ')})`)
+    clauses.push(
+      `| where Category in~ (${categories.map((category) => encodeKqlStringLiteral(category)).join(', ')})`,
+    )
   }
 
   for (const key of ['search', 'action', 'protocol'] as const) {
@@ -432,8 +438,10 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
   }
 
   const limit = getLogAnalyticsResultLimit(request)
-  clauses.push(`| order by ${SORT_COLUMNS[request.sort.key]} ${request.sort.direction}`)
-  clauses.push(`| take ${limit + 1}`)
+  clauses.push(
+    `| order by ${SORT_COLUMNS[request.sort.key]} ${request.sort.direction}`,
+    `| take ${limit + 1}`,
+  )
 
   return { query: clauses.join('\n'), limit }
 }
@@ -452,12 +460,12 @@ export function mapLogAnalyticsResponse(
   queryId: string,
   limit: number,
 ): LogAnalyticsQueryResponse {
-  if (!isRecord(value) || value.error !== undefined || !Array.isArray(value.tables)) {
+  if (!isRecord(value) || value['error'] !== undefined || !Array.isArray(value['tables'])) {
     throw new LogAnalyticsQueryError('upstream')
   }
 
   const records: FirewallLogRecord[] = []
-  for (const [tableIndex, table] of value.tables.entries()) {
+  for (const [tableIndex, table] of value['tables'].entries()) {
     if (!isRecord(table)) {
       throw new LogAnalyticsQueryError('upstream')
     }
@@ -495,8 +503,11 @@ export async function executeLogAnalyticsRawQuery(
   }
   const fetchImplementation = options.fetchImplementation ?? globalThis.fetch
   const controller = new AbortController()
-  let timedOut = false
-  const handleIncomingAbort = () => controller.abort(options.signal?.reason)
+  // An object so the timer callback's mutation is visible to type narrowing.
+  const timeoutState = { timedOut: false }
+  const handleIncomingAbort = () => {
+    controller.abort(options.signal?.reason)
+  }
   if (options.signal?.aborted) {
     controller.abort()
   } else {
@@ -504,7 +515,7 @@ export async function executeLogAnalyticsRawQuery(
   }
 
   const timeout = setTimeout(() => {
-    timedOut = true
+    timeoutState.timedOut = true
     controller.abort()
   }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
 
@@ -525,12 +536,12 @@ export async function executeLogAnalyticsRawQuery(
         },
       )
     } catch {
-      if (!timedOut && options.signal?.aborted) {
+      if (!timeoutState.timedOut && options.signal?.aborted) {
         throw options.signal.reason instanceof Error
           ? options.signal.reason
           : new DOMException('The operation was aborted', 'AbortError')
       }
-      throw new LogAnalyticsQueryError(timedOut ? 'timeout' : 'upstream')
+      throw new LogAnalyticsQueryError(timeoutState.timedOut ? 'timeout' : 'upstream')
     }
 
     if (response.redirected) {
@@ -547,7 +558,8 @@ export async function executeLogAnalyticsRawQuery(
     }
 
     try {
-      return (await response.json()) as unknown
+      const payload: unknown = await response.json()
+      return payload
     } catch {
       throw new LogAnalyticsQueryError('upstream')
     }

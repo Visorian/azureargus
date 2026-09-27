@@ -2,6 +2,7 @@ import type {
   DeploymentCapabilities,
   DeploymentConfigurationError,
   DeploymentConfigurationErrorCode,
+  DeploymentMode,
 } from '../../shared/types/deploymentCapabilities'
 
 interface DeploymentEnvironment {
@@ -92,8 +93,10 @@ function isValidUrl(value: string) {
   }
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+
 function isUuid(value: string) {
-  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
+  return UUID_PATTERN.test(value)
 }
 
 function isValidTokenKey(value: string) {
@@ -124,10 +127,10 @@ export function parseDeploymentCapabilities(
   if (eventHubIntent) {
     if (!eventHubConnectionString) {
       addError(errors, 'event_hub_incomplete', 'Event Hub configuration is incomplete')
-    } else if (!isValidEventHubConnection(eventHubConnectionString, eventHubName)) {
-      addError(errors, 'event_hub_invalid', 'Event Hub configuration is invalid')
-    } else {
+    } else if (isValidEventHubConnection(eventHubConnectionString, eventHubName)) {
       eventHubAvailable = true
+    } else {
+      addError(errors, 'event_hub_invalid', 'Event Hub configuration is invalid')
     }
   }
 
@@ -140,13 +143,13 @@ export function parseDeploymentCapabilities(
     if (!hasAll(logAnalyticsValues)) {
       addError(errors, 'log_analytics_incomplete', 'Log Analytics configuration is incomplete')
     } else if (
-      ![logAnalyticsValues[0], logAnalyticsValues[1], logAnalyticsValues[3]].every(
+      [logAnalyticsValues[0], logAnalyticsValues[1], logAnalyticsValues[3]].every(
         (value) => typeof value === 'string' && isUuid(value),
       )
     ) {
-      addError(errors, 'log_analytics_invalid', 'Log Analytics configuration is invalid')
-    } else {
       predefinedLogAnalyticsAvailable = true
+    } else {
+      addError(errors, 'log_analytics_invalid', 'Log Analytics configuration is invalid')
     }
   }
 
@@ -154,14 +157,14 @@ export function parseDeploymentCapabilities(
   const delegatedIntent = delegatedClientId.length > 0
   let temporaryLogAnalyticsAuthAvailable = false
   if (delegatedIntent) {
-    if (!isUuid(delegatedClientId)) {
+    if (isUuid(delegatedClientId)) {
+      temporaryLogAnalyticsAuthAvailable = true
+    } else {
       addError(
         errors,
         'delegated_log_analytics_invalid',
         'Delegated Log Analytics configuration is invalid',
       )
-    } else {
-      temporaryLogAnalyticsAuthAvailable = true
     }
   }
 
@@ -193,7 +196,10 @@ export function parseDeploymentCapabilities(
     }
   }
 
-  const mode = errors.length > 0 ? 'invalid' : managedIntent ? 'managed' : 'anonymous'
+  let mode: DeploymentMode = managedIntent ? 'managed' : 'anonymous'
+  if (errors.length > 0) {
+    mode = 'invalid'
+  }
   if (mode === 'invalid') {
     eventHubAvailable = false
     temporaryLogAnalyticsAuthAvailable = false

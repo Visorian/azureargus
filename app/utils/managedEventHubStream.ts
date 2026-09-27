@@ -12,40 +12,40 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
     throw new Error('Managed Event Hub stream returned invalid JSON')
   }
 
-  if (!isRecord(parsed) || typeof parsed.type !== 'string') {
+  if (!isRecord(parsed) || typeof parsed['type'] !== 'string') {
     throw new Error('Managed Event Hub stream returned invalid message')
   }
-  if (parsed.type === 'heartbeat') {
+  if (parsed['type'] === 'heartbeat') {
     return { type: 'heartbeat' }
   }
-  if (parsed.type === 'caught-up') {
+  if (parsed['type'] === 'caught-up') {
     return { type: 'caught-up' }
   }
   if (
-    parsed.type === 'error' &&
-    (parsed.message === 'Event Hub receiver error' || parsed.message === 'Session expired')
+    parsed['type'] === 'error' &&
+    (parsed['message'] === 'Event Hub receiver error' || parsed['message'] === 'Session expired')
   ) {
-    return { type: 'error', message: parsed.message }
+    return { type: 'error', message: parsed['message'] }
   }
-  if (parsed.type === 'events' && Array.isArray(parsed.events)) {
-    const events = parsed.events.map((event) => {
+  if (parsed['type'] === 'events' && Array.isArray(parsed['events'])) {
+    const events = parsed['events'].map((event) => {
       if (
         !isRecord(event) ||
-        typeof event.enqueuedTimeUtc !== 'string' ||
-        typeof event.partitionId !== 'string' ||
-        typeof event.sequenceNumber !== 'number' ||
-        (event.offset !== undefined && typeof event.offset !== 'string') ||
-        (event.applicationProperties !== undefined && !isRecord(event.applicationProperties))
+        typeof event['enqueuedTimeUtc'] !== 'string' ||
+        typeof event['partitionId'] !== 'string' ||
+        typeof event['sequenceNumber'] !== 'number' ||
+        (event['offset'] !== undefined && typeof event['offset'] !== 'string') ||
+        (event['applicationProperties'] !== undefined && !isRecord(event['applicationProperties']))
       ) {
         throw new Error('Managed Event Hub stream returned invalid event')
       }
       return {
-        body: event.body,
-        enqueuedTimeUtc: event.enqueuedTimeUtc,
-        offset: event.offset,
-        partitionId: event.partitionId,
-        sequenceNumber: event.sequenceNumber,
-        applicationProperties: event.applicationProperties,
+        body: event['body'],
+        enqueuedTimeUtc: event['enqueuedTimeUtc'],
+        offset: event['offset'],
+        partitionId: event['partitionId'],
+        sequenceNumber: event['sequenceNumber'],
+        applicationProperties: event['applicationProperties'],
       }
     })
     return { type: 'events', events }

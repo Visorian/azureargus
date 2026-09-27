@@ -10,13 +10,13 @@ const STABLE_DNS_ID =
   'la:proxy-structured:d0ba28e4af71a583be012675e52199f7f9e5a16ce4807fd895139dd02a27aafa:1'
 
 function jsonResponse(value: unknown) {
-  return new Response(JSON.stringify(value), {
-    headers: { 'content-type': 'application/json' },
-  })
+  return Response.json(value)
 }
 
 function requestUrl(input: RequestInfo | URL) {
-  if (typeof input === 'string') return input
+  if (typeof input === 'string') {
+    return input
+  }
   return input instanceof URL ? input.href : input.url
 }
 
@@ -60,7 +60,9 @@ test('shared Azure discovery follows fixed-origin pagination in browser runtime'
     if (graphRequestCount === 1) {
       return jsonResponse({ $skipToken: 'next-workspace-page', data: [] })
     }
-    if (typeof init?.body !== 'string') throw new Error('Expected Resource Graph request body')
+    if (typeof init?.body !== 'string') {
+      throw new TypeError('Expected Resource Graph request body')
+    }
     expect(JSON.parse(init.body)).toMatchObject({
       options: { $skipToken: 'next-workspace-page' },
     })

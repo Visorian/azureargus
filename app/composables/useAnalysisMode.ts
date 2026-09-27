@@ -1,4 +1,5 @@
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
+import type { Ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 
 export type AnalysisMode = 'real-time-analysis' | 'log-analysis'
@@ -58,7 +59,9 @@ export function useAnalysisMode(options: UseAnalysisModeOptions) {
   }
 
   async function commitLogAnalysis() {
-    if (options.mode.value !== 'log-analysis' || logAnalysisCommitted) return false
+    if (options.mode.value !== 'log-analysis' || logAnalysisCommitted) {
+      return false
+    }
     logAnalysisCommitted = true
     try {
       await options.resetRealTime()

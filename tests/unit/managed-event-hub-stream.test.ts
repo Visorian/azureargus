@@ -5,24 +5,22 @@ import {
   createManagedEventHubStream,
   pipeManagedEventHubStream,
   validateManagedEventHubStreamRequest,
-  type ManagedEventHubClient,
 } from '../../server/utils/managedEventHubStream'
+import type { ManagedEventHubClient } from '../../server/utils/managedEventHubStream'
 
 type StreamHandlers = Parameters<ManagedEventHubClient['subscribe']>[0]
 
 function createPartitionContext(partitionId: string) {
   return {
     partitionId,
-    updateCheckpoint: vi.fn<(event: { sequenceNumber: number }) => Promise<void>>(
-      async () => undefined,
-    ),
+    updateCheckpoint: vi.fn<(event: { sequenceNumber: number }) => Promise<void>>(async () => {}),
   }
 }
 
 function createClient() {
   let handlers: StreamHandlers | undefined
-  const subscriptionClose = vi.fn(async () => undefined)
-  const clientClose = vi.fn(async () => undefined)
+  const subscriptionClose = vi.fn(async () => {})
+  const clientClose = vi.fn(async () => {})
   const subscribe = vi.fn<ManagedEventHubClient['subscribe']>((nextHandlers) => {
     handlers = nextHandlers
     return { close: subscriptionClose }
@@ -54,6 +52,29 @@ async function readEnvelope(reader: ReadableStreamDefaultReader<Uint8Array>) {
 afterEach(() => {
   vi.useRealTimers()
 })
+
+function createLargeEvent(sequenceNumber: number) {
+  return {
+    body: 'x'.repeat(100_000),
+    enqueuedTimeUtc: new Date('2026-07-12T12:00:00.000Z'),
+    sequenceNumber,
+  }
+}
+
+function createSequenceEvent(sequenceNumber: number) {
+  return {
+    body: { sequenceNumber },
+    enqueuedTimeUtc: new Date('2026-07-12T12:00:00.000Z'),
+    sequenceNumber,
+  }
+}
+
+async function pendingAfterMacrotask() {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0)
+  })
+  return 'pending'
+}
 
 describe('managed Event Hub stream', () => {
   it('accepts only the bounded public request DTO', () => {
@@ -191,21 +212,14 @@ describe('managed Event Hub stream', () => {
       now: () => 0,
     })
     const context = createPartitionContext('0')
-    const event = (sequenceNumber: number) => ({
-      body: 'x'.repeat(100_000),
-      enqueuedTimeUtc: new Date('2026-07-12T12:00:00.000Z'),
-      sequenceNumber,
-    })
 
-    await fixture.getHandlers().processEvents([event(1)], context)
-    await fixture.getHandlers().processEvents([event(2)], context)
+    await fixture.getHandlers().processEvents([createLargeEvent(1)], context)
+    await fixture.getHandlers().processEvents([createLargeEvent(2)], context)
     let thirdProcessed = false
-    const thirdBatch = fixture
-      .getHandlers()
-      .processEvents([event(3)], context)
-      .then(() => {
-        thirdProcessed = true
-      })
+    const thirdBatch = (async () => {
+      await fixture.getHandlers().processEvents([createLargeEvent(3)], context)
+      thirdProcessed = true
+    })()
     await Promise.resolve()
     expect(thirdProcessed).toBe(false)
 
@@ -236,11 +250,6 @@ describe('managed Event Hub stream', () => {
     })
     const reader = managed.stream.getReader()
     const context = createPartitionContext('0')
-    const event = (sequenceNumber: number) => ({
-      body: { sequenceNumber },
-      enqueuedTimeUtc: new Date('2026-07-12T12:00:00.000Z'),
-      sequenceNumber,
-    })
 
     expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toEqual({
       '0': { sequenceNumber: 40, isInclusive: false },
@@ -249,7 +258,10 @@ describe('managed Event Hub stream', () => {
 
     const firstBatch = fixture
       .getHandlers()
-      .processEvents([event(41), event(43), event(42)], context)
+      .processEvents(
+        [createSequenceEvent(41), createSequenceEvent(43), createSequenceEvent(42)],
+        context,
+      )
     await expect(readEnvelope(reader)).resolves.toMatchObject({
       type: 'events',
     })
@@ -259,14 +271,14 @@ describe('managed Event Hub stream', () => {
       expect.objectContaining({ sequenceNumber: 43 }),
     )
 
-    const replayedBatch = fixture.getHandlers().processEvents([event(42)], context)
+    const replayedBatch = fixture.getHandlers().processEvents([createSequenceEvent(42)], context)
     await expect(readEnvelope(reader)).resolves.toMatchObject({
       type: 'events',
     })
     await replayedBatch
     expect(context.updateCheckpoint).toHaveBeenCalledOnce()
 
-    const advancingBatch = fixture.getHandlers().processEvents([event(44)], context)
+    const advancingBatch = fixture.getHandlers().processEvents([createSequenceEvent(44)], context)
     await expect(readEnvelope(reader)).resolves.toMatchObject({
       type: 'events',
     })
@@ -309,18 +321,12 @@ describe('managed Event Hub stream', () => {
     const caughtUpRead = reader.read()
     await fixture.getHandlers().processEvents([], createPartitionContext('unknown'))
     await expect(
-      Promise.race([
-        caughtUpRead.then(() => 'envelope'),
-        new Promise<string>((resolve) => setTimeout(resolve, 0, 'pending')),
-      ]),
+      Promise.race([caughtUpRead.then(() => 'envelope'), pendingAfterMacrotask()]),
     ).resolves.toBe('pending')
 
     await fixture.getHandlers().processEvents([], createPartitionContext('1'))
     await expect(
-      Promise.race([
-        caughtUpRead.then(() => 'envelope'),
-        new Promise<string>((resolve) => setTimeout(resolve, 0, 'pending')),
-      ]),
+      Promise.race([caughtUpRead.then(() => 'envelope'), pendingAfterMacrotask()]),
     ).resolves.toBe('pending')
 
     const finalPartition = fixture.getHandlers().processEvents([], createPartitionContext('0'))
@@ -333,10 +339,7 @@ describe('managed Event Hub stream', () => {
     await fixture.getHandlers().processEvents([], createPartitionContext('0'))
     await fixture.getHandlers().processEvents([], createPartitionContext('1'))
     await expect(
-      Promise.race([
-        duplicateRead.then(() => 'envelope'),
-        new Promise<string>((resolve) => setTimeout(resolve, 0, 'pending')),
-      ]),
+      Promise.race([duplicateRead.then(() => 'envelope'), pendingAfterMacrotask()]),
     ).resolves.toBe('pending')
 
     await reader.cancel()
@@ -410,7 +413,9 @@ describe('managed Event Hub stream', () => {
     })
 
     const piping = pipeManagedEventHubStream(response, stream)
-    await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(write).toHaveBeenCalledOnce()
+    })
     expect(end).not.toHaveBeenCalled()
 
     response.emit('drain')
@@ -465,7 +470,9 @@ describe('managed Event Hub stream', () => {
         type: 'error',
         message: 'Session expired',
       })
-      await vi.waitFor(() => expect(fixture.clientClose).toHaveBeenCalledOnce())
+      await vi.waitFor(() => {
+        expect(fixture.clientClose).toHaveBeenCalledOnce()
+      })
       expect(fixture.subscriptionClose).toHaveBeenCalledOnce()
       await reader.cancel()
     }
@@ -495,7 +502,9 @@ describe('managed Event Hub stream', () => {
     )
 
     await vi.advanceTimersByTimeAsync(1_000)
-    await vi.waitFor(() => expect(fixture.clientClose).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(fixture.clientClose).toHaveBeenCalledOnce()
+    })
     expect(fixture.subscriptionClose).toHaveBeenCalledOnce()
     await processing
     await managed.cleanup()

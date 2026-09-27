@@ -1,7 +1,8 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 
 const runtimeConfig = {
   eventHub: {
@@ -24,13 +25,21 @@ const runtimeConfig = {
 
 let handler: (event: H3Event) => unknown
 
+function isEventHandler(value: unknown): value is (event: H3Event) => unknown {
+  return typeof value === 'function'
+}
+
 beforeAll(async () => {
   vi.stubEnv('NUXT_OIDC_AUTH_SESSION_SECRET', 'a'.repeat(32))
   vi.stubEnv('NUXT_OIDC_SESSION_SECRET', 's'.repeat(48))
   vi.stubEnv('NUXT_OIDC_TOKEN_KEY', Buffer.alloc(32).toString('base64'))
   vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
   vi.stubGlobal('useRuntimeConfig', () => runtimeConfig)
-  handler = (await import('../../server/api/capabilities.get')).default
+  const routeModule: { default: unknown } = await import('../../server/api/capabilities.get')
+  if (!isEventHandler(routeModule.default)) {
+    throw new TypeError('Capabilities route has no default event handler.')
+  }
+  handler = routeModule.default
 })
 
 afterAll(() => {

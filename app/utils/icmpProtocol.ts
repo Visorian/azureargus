@@ -35,8 +35,10 @@ const ICMP_TYPE_MEANINGS: Readonly<Record<number, string>> = {
   255: 'Reserved',
 }
 
+const ICMP_TYPE_PATTERN = /^ICMP Type=(0|[1-9]\d{0,2})(?=$|\s)/i
+
 export function formatIcmpProtocol(value: string) {
-  const match = /^ICMP Type=(0|[1-9]\d{0,2})(?=$|\s)/i.exec(value)
+  const match = ICMP_TYPE_PATTERN.exec(value)
   if (!match?.[1]) {
     return value
   }

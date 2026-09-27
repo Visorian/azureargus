@@ -5,6 +5,10 @@ import type {
 } from '@azure/msal-browser'
 
 import { isEntraId } from '~/utils/logAnalyticsOnboarding'
+import {
+  assertAuthenticationTenant,
+  UnexpectedTemporaryAuthTenant,
+} from '~/utils/temporaryAuthTenant'
 
 const LOG_ANALYTICS_SCOPES = ['https://api.loganalytics.io/Data.Read']
 const AZURE_MANAGEMENT_SCOPES = ['https://management.azure.com/user_impersonation']
@@ -19,17 +23,6 @@ let operationGeneration = 0
 let authorizationGeneration = 0
 
 class StaleTemporaryAuthOperation extends Error {}
-class UnexpectedTemporaryAuthTenant extends Error {}
-
-function assertAuthenticationTenant(
-  result: { account?: AccountInfo | null; tenantId?: string },
-  tenantId: string,
-) {
-  const resultTenantId = result.tenantId || result.account?.tenantId
-  if (resultTenantId !== tenantId) {
-    throw new UnexpectedTemporaryAuthTenant()
-  }
-}
 
 function hasPopupClosedState(value: unknown): value is { readonly closed: boolean } {
   return (
@@ -72,7 +65,7 @@ export function useTemporaryLogAnalyticsAuth() {
     const { BrowserCacheLocation, PublicClientApplication: MsalClient } =
       await import('@azure/msal-browser')
     const clientId = runtimeConfig.public.logAnalyticsDelegated.clientId
-    const redirectUri = `${window.location.origin}${REDIRECT_PATH}`
+    const redirectUri = `${globalThis.location.origin}${REDIRECT_PATH}`
     const initializingClient = (async () => {
       const client: PublicClientApplication = new MsalClient({
         auth: {
@@ -100,7 +93,7 @@ export function useTemporaryLogAnalyticsAuth() {
 
   async function connect() {
     const generation = ++operationGeneration
-    let popupClosed = false
+    const popupState = { closed: false }
     status.value = 'connecting'
     authorized.value = false
     lastError.value = null
@@ -108,17 +101,24 @@ export function useTemporaryLogAnalyticsAuth() {
       const client = await getClient()
       const { EventType } = await import('@azure/msal-browser')
       let closePoll: ReturnType<typeof setInterval> | null = null
+      const stopClosePoll = () => {
+        if (closePoll !== null) {
+          clearInterval(closePoll)
+          closePoll = null
+        }
+      }
       const eventCallbackId = client.addEventCallback(
         (event) => {
           const popupWindow = getPopupWindowState(event.payload)
-          if (!popupWindow) return
+          if (!popupWindow) {
+            return
+          }
           closePoll = setInterval(() => {
-            if (!popupWindow.closed) return
-            popupClosed = true
-            if (closePoll !== null) {
-              clearInterval(closePoll)
-              closePoll = null
+            if (!popupWindow.closed) {
+              return
             }
+            popupState.closed = true
+            stopClosePoll()
             if (generation === operationGeneration) {
               activeAccount = null
               activeTenantId = null
@@ -136,23 +136,25 @@ export function useTemporaryLogAnalyticsAuth() {
           authority: ORGANIZATIONS_AUTHORITY,
           overrideInteractionInProgress: true,
           prompt: 'select_account',
-          redirectUri: `${window.location.origin}${REDIRECT_PATH}`,
+          redirectUri: `${globalThis.location.origin}${REDIRECT_PATH}`,
           scopes: AZURE_MANAGEMENT_SCOPES,
         })
       } finally {
-        if (closePoll !== null) clearInterval(closePoll)
-        if (eventCallbackId !== null) client.removeEventCallback(eventCallbackId)
+        stopClosePoll()
+        if (eventCallbackId !== null) {
+          client.removeEventCallback(eventCallbackId)
+        }
       }
       if (generation !== operationGeneration) {
         const newerConnectionUsesSameAccount =
-          connected.value && activeAccount?.homeAccountId === result.account?.homeAccountId
+          connected.value && activeAccount?.homeAccountId === result.account.homeAccountId
         if (!newerConnectionUsesSameAccount) {
           await client.clearCache({ account: result.account })
         }
         return null
       }
-      const tenantId = result.tenantId || result.account?.tenantId
-      if (!result.account || !tenantId || !isEntraId(tenantId)) {
+      const tenantId = result.tenantId || result.account.tenantId
+      if (!tenantId || !isEntraId(tenantId)) {
         await client.clearCache({ account: result.account })
         throw new Error('Azure sign-in did not return a tenant.')
       }
@@ -169,7 +171,7 @@ export function useTemporaryLogAnalyticsAuth() {
       if (generation !== operationGeneration) {
         return null
       }
-      if (popupClosed) {
+      if (popupState.closed) {
         activeAccount = null
         activeTenantId = null
         connected.value = false
@@ -214,7 +216,7 @@ export function useTemporaryLogAnalyticsAuth() {
         throw new StaleTemporaryAuthOperation()
       }
       assertAuthenticationTenant(result, normalizedTenantId)
-      activeAccount = result.account ?? activeAccount
+      activeAccount = result.account
       return result.accessToken
     } catch (error: unknown) {
       if (
@@ -230,19 +232,16 @@ export function useTemporaryLogAnalyticsAuth() {
         (!(error instanceof InteractionRequiredAuthError) &&
           !(error instanceof UnexpectedTemporaryAuthTenant))
       ) {
-        throw new Error('Azure directory authentication failed.')
+        throw new Error('Azure directory authentication failed.', { cause: error })
       }
       const result = await client.acquireTokenPopup({
         account: activeAccount,
         authority,
-        redirectUri: `${window.location.origin}${REDIRECT_PATH}`,
+        redirectUri: `${globalThis.location.origin}${REDIRECT_PATH}`,
         scopes: AZURE_MANAGEMENT_SCOPES,
       })
       if (generation !== operationGeneration || activeTenantId !== normalizedTenantId) {
         throw new StaleTemporaryAuthOperation()
-      }
-      if (!result.account) {
-        throw new Error('Azure directory authentication failed.')
       }
       assertAuthenticationTenant(result, normalizedTenantId)
       activeAccount = result.account
@@ -282,7 +281,7 @@ export function useTemporaryLogAnalyticsAuth() {
         scopes: LOG_ANALYTICS_SCOPES,
       })
       assertCurrent()
-      activeAccount = result.account ?? activeAccount
+      activeAccount = result.account
       authorized.value = true
       lastError.value = null
       return result.accessToken
@@ -298,11 +297,11 @@ export function useTemporaryLogAnalyticsAuth() {
           const result = await client.acquireTokenPopup({
             account: activeAccount,
             authority: `https://login.microsoftonline.com/${encodeURIComponent(normalizedTenantId)}`,
-            redirectUri: `${window.location.origin}${REDIRECT_PATH}`,
+            redirectUri: `${globalThis.location.origin}${REDIRECT_PATH}`,
             scopes: LOG_ANALYTICS_SCOPES,
           })
           assertCurrent()
-          activeAccount = result.account ?? activeAccount
+          activeAccount = result.account
           authorized.value = true
           lastError.value = null
           return result.accessToken
@@ -315,7 +314,7 @@ export function useTemporaryLogAnalyticsAuth() {
           }
           authorized.value = false
           lastError.value = 'Log Analytics authorization failed. Try again.'
-          throw new Error(lastError.value)
+          throw new Error(lastError.value, { cause: popupError })
         }
       }
 
@@ -336,7 +335,7 @@ export function useTemporaryLogAnalyticsAuth() {
         error instanceof InteractionRequiredAuthError
           ? 'Azure authentication expired. Connect again.'
           : 'Azure token acquisition failed. Connect again.'
-      throw new Error(lastError.value)
+      throw new Error(lastError.value, { cause: error })
     }
   }
 
@@ -345,7 +344,9 @@ export function useTemporaryLogAnalyticsAuth() {
     try {
       return (await acquireLogAnalyticsAccessToken(tenantId, false, false)) !== null
     } catch (error: unknown) {
-      if (error instanceof StaleTemporaryAuthOperation) return false
+      if (error instanceof StaleTemporaryAuthOperation) {
+        return false
+      }
       return false
     }
   }

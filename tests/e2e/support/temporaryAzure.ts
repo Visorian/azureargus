@@ -123,7 +123,7 @@ function dnsResponse(query: string) {
 function record(request: Request): TemporaryAzureRequest {
   const url = new URL(request.url())
   return {
-    authorization: request.headers().authorization ?? null,
+    authorization: request.headers()['authorization'] ?? null,
     body: request.postData(),
     method: request.method(),
     origin: url.origin,
@@ -171,7 +171,9 @@ export async function mockTemporaryAzure(page: Page) {
     if (url.pathname.endsWith('/oauth2/v2.0/authorize')) {
       const redirectUri = url.searchParams.get('redirect_uri')
       const state = url.searchParams.get('state')
-      if (!redirectUri || !state) throw new Error('Expected MSAL authorization parameters')
+      if (!redirectUri || !state) {
+        throw new Error('Expected MSAL authorization parameters')
+      }
       const code = `temporary-code-${++authorizationCode}`
       nonces.set(code, url.searchParams.get('nonce') ?? '')
       const redirect = new URL(redirectUri)
@@ -204,7 +206,7 @@ export async function mockTemporaryAzure(page: Page) {
         token_type: 'Bearer',
       }
       if (code) {
-        response.id_token = jwt({
+        response['id_token'] = jwt({
           aud: temporaryAzureClientId,
           exp: now + 3_600,
           iat: now,
@@ -344,8 +346,11 @@ export async function mockTemporaryAzure(page: Page) {
       return
     }
     azureRequests.push(record(request))
-    const body = request.postDataJSON() as { query?: unknown }
-    const query = typeof body.query === 'string' ? body.query : ''
+    const body: unknown = request.postDataJSON()
+    const query =
+      typeof body === 'object' && body !== null && 'query' in body && typeof body.query === 'string'
+        ? body.query
+        : ''
     const response = query.includes('withsource=Category') ? firewallResponse() : dnsResponse(query)
     await route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: response })
   })

@@ -80,7 +80,9 @@ function createCorrelator(maxCandidates = 100) {
   const batches: FirewallLogRecord[][] = []
   const correlator = createNetworkRuleCorrelator({
     maxCandidates: () => maxCandidates,
-    onRecords: (records) => batches.push([...records]),
+    onRecords: (records) => {
+      batches.push([...records])
+    },
   })
   return { batches, correlator }
 }
@@ -254,7 +256,9 @@ describe('network rule correlator', () => {
     let maximum = 2
     const correlator = createNetworkRuleCorrelator({
       maxCandidates: () => maximum,
-      onRecords: (records) => batches.push([...records]),
+      onRecords: (records) => {
+        batches.push([...records])
+      },
     })
 
     correlator.push([first.legacy, second.structured])
@@ -297,12 +301,16 @@ describe('network rule correlator', () => {
     let scheduledCallback: (() => void) | undefined
     const correlator = createNetworkRuleCorrelator({
       maxCandidates: () => 100,
-      onRecords: (records) => batches.push([...records]),
+      onRecords: (records) => {
+        batches.push([...records])
+      },
       scheduler: {
-        clearTimeout: (handle) => clearTimeout(handle),
+        clearTimeout: (handle) => {
+          clearTimeout(handle)
+        },
         setTimeout: (callback, delayMs) => {
           scheduledCallback = callback
-          return setTimeout(() => undefined, delayMs)
+          return setTimeout(() => {}, delayMs)
         },
       },
     })

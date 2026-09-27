@@ -8,7 +8,6 @@ import azureDiagnosticsNetworkFixture from '../fixtures/dns/log-analytics-azured
 const workspaceId = '33333333-3333-4333-8333-333333333333'
 const STRUCTURED_QUERY_PATTERN = /^AZFWDnsQuery\n/
 const NETWORK_QUERY_PATTERN = /^AZFWNetworkRule\n/
-const AZURE_DIAGNOSTICS_QUERY_PATTERN = /^AzureDiagnostics\n/
 
 function normalizedAzureDiagnosticsNetworkFixture() {
   const table = azureDiagnosticsNetworkFixture.tables[0]!
@@ -54,12 +53,16 @@ function normalizedAzureDiagnosticsNetworkFixture() {
 }
 
 function readQuery(init?: RequestInit) {
-  if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
+  if (typeof init?.body !== 'string') {
+    throw new TypeError('Expected JSON request body')
+  }
   const value: unknown = JSON.parse(init.body)
   if (typeof value !== 'object' || value === null || !('query' in value)) {
     throw new Error('Expected query request')
   }
-  if (typeof value.query !== 'string') throw new Error('Expected query text')
+  if (typeof value.query !== 'string') {
+    throw new TypeError('Expected query text')
+  }
   return value.query
 }
 
@@ -84,10 +87,7 @@ function requestFor(
 }
 
 function response(payload: unknown) {
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })
+  return Response.json(payload)
 }
 
 describe('sanitized DNS Log Analytics fixtures', () => {
@@ -232,7 +232,7 @@ describe('sanitized DNS Log Analytics fixtures', () => {
   it('maps captured AzureDiagnostics network rows as storage-aware DNS transport', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
       const query = readQuery(init)
-      if (AZURE_DIAGNOSTICS_QUERY_PATTERN.test(query)) {
+      if (query.startsWith('AzureDiagnostics\n')) {
         return response(normalizedAzureDiagnosticsNetworkFixture())
       }
       return response({
@@ -278,7 +278,9 @@ describe('sanitized DNS Log Analytics fixtures', () => {
       source: 'network-rule',
       logAnalyticsStorage: 'azure-diagnostics',
     })
-    if (!selector) throw new Error('Expected Azure Diagnostics detail selector')
+    if (!selector) {
+      throw new Error('Expected Azure Diagnostics detail selector')
+    }
 
     const detail = await executeDnsDetailQuery({ workspaceId }, { selector }, 'access-token', {
       fetchImplementation,
@@ -298,7 +300,9 @@ describe('sanitized DNS Log Analytics fixtures', () => {
       (row) => row.networkSourceIp === '192.0.2.12',
     )
     const duplicateSelector = duplicate && createDnsDetailSelector(duplicate)
-    if (!duplicateSelector) throw new Error('Expected duplicate Azure Diagnostics selector')
+    if (!duplicateSelector) {
+      throw new Error('Expected duplicate Azure Diagnostics selector')
+    }
 
     const ambiguous = await executeDnsDetailQuery(
       { workspaceId },
@@ -335,7 +339,7 @@ describe('sanitized DNS Log Analytics fixtures', () => {
       { fetchImplementation: async () => response(reversedFixture) },
     )
     const idsByName = (entries: typeof initial.queriedEntries) =>
-      Object.fromEntries(entries.map(({ id, queryName }) => [queryName, id]))
+      new Map(entries.map(({ id, queryName }): [string | undefined, string] => [queryName, id]))
 
     expect(idsByName(reordered.queriedEntries)).toEqual(idsByName(initial.queriedEntries))
   })
@@ -389,8 +393,8 @@ describe('sanitized DNS Log Analytics fixtures', () => {
       clientPort: undefined,
       serverIp: undefined,
       serverPort: undefined,
-      warnings: expect.arrayContaining(['DNS transport direction is ambiguous']),
     })
+    expect(ambiguous?.warnings).toContain('DNS transport direction is ambiguous')
   })
 
   it('requeries network detail with raw direction fields and retains metadata', async () => {

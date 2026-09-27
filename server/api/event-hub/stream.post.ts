@@ -32,11 +32,14 @@ function requireSameOrigin(event: Parameters<typeof getRequestURL>[0]) {
 
 export default defineEventHandler(async (event) => {
   const controller = new AbortController()
-  const abort = () => controller.abort()
+  const abort = () => {
+    controller.abort()
+  }
   event.node.req.once('aborted', abort)
   event.node.res.once('close', abort)
   event.web?.request?.signal.addEventListener('abort', abort, { once: true })
   if (
+    // oxlint-disable-next-line typescript/no-deprecated -- pairs with the 'aborted' listener above; tests/unit/event-hub-stream-route.test.ts simulates an aborted request through this flag.
     event.node.req.aborted ||
     event.node.res.destroyed ||
     event.node.res.writableEnded ||
@@ -93,11 +96,10 @@ export default defineEventHandler(async (event) => {
 
     let expectedPartitionIds: string[]
     try {
-      if (controller.signal.aborted) {
-        throw new Error('Managed Event Hub request closed')
-      }
+      controller.signal.throwIfAborted()
       expectedPartitionIds = await client.getPartitionIds({ abortSignal: controller.signal })
-      if (expectedPartitionIds.length === 0 || controller.signal.aborted) {
+      controller.signal.throwIfAborted()
+      if (expectedPartitionIds.length === 0) {
         throw new Error('Managed Event Hub partitions unavailable')
       }
     } catch {
@@ -127,6 +129,7 @@ export default defineEventHandler(async (event) => {
     })
 
     try {
+      // oxlint-disable-next-line eslint/no-underscore-dangle -- h3 internal flag that stops h3 from writing its own response after we pipe the stream.
       event._handled = true
       await pipeManagedEventHubStream(event.node.res, managedStream.stream)
     } catch {

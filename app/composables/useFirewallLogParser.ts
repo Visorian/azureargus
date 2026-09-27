@@ -7,6 +7,15 @@ const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/i
 const LEGACY_ENDPOINTS_PATTERN = /\bfrom\s+(?<source>\S+)\s+to\s+(?<destination>\S+)/i
 const ENDPOINT_PORT_PATTERN = /^(?<address>.+):(?<port>\d{1,5})$/
 const TRAILING_ENDPOINT_PUNCTUATION_PATTERN = /[.,;]+$/
+const DNS_REQUEST_MESSAGE_PATTERN = /^\s*DNS Request\s*:/i
+const ACTION_FIELD_PATTERN = /\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/i
+const ACTION_KEYWORD_PATTERN = /\b(allow|allowed|deny|denied|dnat|snat)\b/i
+const PROTOCOL_FIELD_PATTERN = /\bprotocol\s*[:=]\s*([a-z0-9-]+)\b/i
+const PROTOCOL_KEYWORD_PATTERN = /\b(tcp|udp|icmp|http|https)\b/i
+const LEGACY_POLICY_PATTERN =
+  /\bPolicy\s*:\s*(.*?)(?=\.\s*(?:Rule Collection Group|Rule Collection|Rule)\s*:|$)/i
+const LEGACY_RULE_COLLECTION_GROUP_PATTERN =
+  /\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/i
 const ESCAPED_MESSAGE_PROPERTIES_PATTERN =
   /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g
 const utf8Decoder = new TextDecoder()
@@ -26,7 +35,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function readString(source: Record<string, unknown> | null, keys: string[]) {
+function readString(source: Record<string, unknown> | null, keys: string[]): string | undefined {
   if (source === null) {
     return undefined
   }
@@ -63,17 +72,17 @@ function extractActionFallback(message: string, category: string) {
   const normalizedCategory = category.toLowerCase()
   if (
     normalizedCategory === 'azfwdnsquery' ||
-    (normalizedCategory === 'azurefirewalldnsproxy' && /^\s*DNS Request\s*:/i.test(message))
+    (normalizedCategory === 'azurefirewalldnsproxy' && DNS_REQUEST_MESSAGE_PATTERN.test(message))
   ) {
     return 'DNS query'
   }
 
-  const actionMatch = message.match(/\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/i)
+  const actionMatch = ACTION_FIELD_PATTERN.exec(message)
   if (actionMatch?.[2]) {
     return actionMatch[2].toUpperCase()
   }
 
-  const keywordMatch = message.match(/\b(allow|allowed|deny|denied|dnat|snat)\b/i)
+  const keywordMatch = ACTION_KEYWORD_PATTERN.exec(message)
   if (!keywordMatch?.[1]) {
     return 'Unknown'
   }
@@ -90,52 +99,46 @@ function extractActionFallback(message: string, category: string) {
 }
 
 function extractLegacyProtocol(message: string) {
-  const explicitMatch = message.match(/\bprotocol\s*[:=]\s*([a-z0-9-]+)\b/i)
+  const explicitMatch = PROTOCOL_FIELD_PATTERN.exec(message)
   if (explicitMatch?.[1]) {
     return explicitMatch[1].toUpperCase()
   }
 
-  const keywordMatch = message.match(/\b(tcp|udp|icmp|http|https)\b/i)
+  const keywordMatch = PROTOCOL_KEYWORD_PATTERN.exec(message)
   return keywordMatch?.[1]?.toUpperCase() ?? 'Unknown'
 }
 
 function extractLegacyPolicy(message: string) {
-  return message
-    .match(
-      /\bPolicy\s*:\s*(.*?)(?=\.\s*(?:Rule Collection Group|Rule Collection|Rule)\s*:|$)/i,
-    )?.[1]
-    ?.trim()
+  return LEGACY_POLICY_PATTERN.exec(message)?.[1]?.trim()
 }
 
 function extractLegacyRuleCollectionGroup(message: string) {
-  return message
-    .match(/\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/i)?.[1]
-    ?.trim()
+  return LEGACY_RULE_COLLECTION_GROUP_PATTERN.exec(message)?.[1]?.trim()
 }
 
 function extractLegacyRuleCollection(message: string) {
-  return message.match(LEGACY_RULE_COLLECTION_PATTERN)?.[1]?.trim()
+  return LEGACY_RULE_COLLECTION_PATTERN.exec(message)?.[1]?.trim()
 }
 
 function extractLegacyRule(message: string) {
-  return message.match(LEGACY_RULE_PATTERN)?.[1]?.trim()
+  return LEGACY_RULE_PATTERN.exec(message)?.[1]?.trim()
 }
 
 function parseEndpoint(value: string) {
   const endpoint = value.replace(TRAILING_ENDPOINT_PUNCTUATION_PATTERN, '')
-  const match = endpoint.match(ENDPOINT_PORT_PATTERN)
-  const address = match?.groups?.address ?? endpoint
+  const match = ENDPOINT_PORT_PATTERN.exec(endpoint)
+  const address = match?.groups?.['address'] ?? endpoint
   return {
     address: address.startsWith('[') && address.endsWith(']') ? address.slice(1, -1) : address,
-    port: match?.groups?.port,
+    port: match?.groups?.['port'],
   }
 }
 
 function extractIpPorts(message: string) {
-  const endpoints = message.match(LEGACY_ENDPOINTS_PATTERN)?.groups
-  if (endpoints?.source && endpoints.destination) {
-    const source = parseEndpoint(endpoints.source)
-    const destination = parseEndpoint(endpoints.destination)
+  const endpoints = LEGACY_ENDPOINTS_PATTERN.exec(message)?.groups
+  if (endpoints?.['source'] && endpoints['destination']) {
+    const source = parseEndpoint(endpoints['source'])
+    const destination = parseEndpoint(endpoints['destination'])
     return {
       sourceIp: source.address,
       sourcePort: source.port,
@@ -149,10 +152,10 @@ function extractIpPorts(message: string) {
   const second = matches[1]?.groups
 
   return {
-    sourceIp: first?.ip,
-    sourcePort: first?.port,
-    destinationIp: second?.ip,
-    destinationPort: second?.port,
+    sourceIp: first?.['ip'],
+    sourcePort: first?.['port'],
+    destinationIp: second?.['ip'],
+    destinationPort: second?.['port'],
   }
 }
 
@@ -165,7 +168,7 @@ function safeJson(value: unknown) {
 }
 
 function repairEscapedMessageProperties(value: string) {
-  let changed = false
+  let repairedCount = 0
   const repaired = value.replace(
     ESCAPED_MESSAGE_PROPERTIES_PATTERN,
     (match, escapedMessage: string) => {
@@ -179,34 +182,39 @@ function repairEscapedMessageProperties(value: string) {
         return match
       }
 
-      changed = true
+      repairedCount += 1
       return `"properties":{"msg":${JSON.stringify(message)}}`
     },
   )
 
-  return changed ? repaired : undefined
+  return repairedCount > 0 ? repaired : undefined
 }
 
-function parseEventHubBody(body: unknown) {
-  const encoded =
-    typeof body === 'string'
-      ? body
-      : body instanceof Uint8Array
-        ? utf8Decoder.decode(body)
-        : undefined
+function decodeEventHubBody(body: unknown): string | undefined {
+  if (typeof body === 'string') {
+    return body
+  }
+  if (body instanceof Uint8Array) {
+    return utf8Decoder.decode(body)
+  }
+  return undefined
+}
+
+function parseEventHubBody(body: unknown): unknown {
+  const encoded = decodeEventHubBody(body)
   if (encoded === undefined) {
     return undefined
   }
 
   try {
-    return JSON.parse(encoded) as unknown
+    return JSON.parse(encoded)
   } catch {
     const repaired = repairEscapedMessageProperties(encoded)
     if (repaired === undefined) {
       return undefined
     }
     try {
-      return JSON.parse(repaired) as unknown
+      return JSON.parse(repaired)
     } catch {
       return undefined
     }
@@ -221,8 +229,8 @@ export function expandAzureMonitorRecords(body: unknown): unknown[] {
     return expandedBody
   }
 
-  if (isRecord(expandedBody) && Array.isArray(expandedBody.records)) {
-    return expandedBody.records
+  if (isRecord(expandedBody) && Array.isArray(expandedBody['records'])) {
+    return expandedBody['records']
   }
 
   return [expandedBody]
@@ -230,7 +238,7 @@ export function expandAzureMonitorRecords(body: unknown): unknown[] {
 
 export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLogRecord {
   const rawRecord = isRecord(input.raw) ? input.raw : null
-  const properties = rawRecord && isRecord(rawRecord.properties) ? rawRecord.properties : null
+  const properties = rawRecord && isRecord(rawRecord['properties']) ? rawRecord['properties'] : null
   const message =
     readString(properties, ['msg', 'message', 'Message']) ||
     readString(rawRecord, ['msg', 'message', 'Message']) ||

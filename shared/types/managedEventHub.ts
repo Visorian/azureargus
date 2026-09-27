@@ -10,14 +10,14 @@ export interface ManagedEventHubStreamRequest {
 
 export interface ManagedEventHubEventEnvelope {
   type: 'events'
-  events: Array<{
+  events: {
     body: unknown
     enqueuedTimeUtc: string
     partitionId: string
     sequenceNumber: number
     offset?: string
     applicationProperties?: Record<string, unknown>
-  }>
+  }[]
 }
 
 export interface ManagedEventHubErrorEnvelope {

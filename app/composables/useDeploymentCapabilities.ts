@@ -23,28 +23,32 @@ export function useDeploymentCapabilities() {
 
     status.value = 'loading'
     lastError.value = null
-    const current = requestFetch<DeploymentCapabilities>('/api/capabilities', {
-      headers: { accept: 'application/json' },
-    })
-      .then((value) => {
-        capabilities.value = value
-        status.value = 'ready'
-        return value
-      })
-      .catch((error: unknown) => {
-        capabilities.value = null
-        status.value = 'error'
-        lastError.value =
-          error instanceof Error ? error.message : 'Deployment configuration is unavailable'
-        throw error
-      })
-      .finally(() => {
-        if (pendingLoad === current) {
-          pendingLoad = null
-        }
-      })
+    const current = fetchCapabilities()
     pendingLoad = current
-    return current
+    try {
+      return await current
+    } finally {
+      if (pendingLoad === current) {
+        pendingLoad = null
+      }
+    }
+  }
+
+  async function fetchCapabilities() {
+    try {
+      const value = await requestFetch<DeploymentCapabilities>('/api/capabilities', {
+        headers: { accept: 'application/json' },
+      })
+      capabilities.value = value
+      status.value = 'ready'
+      return value
+    } catch (error: unknown) {
+      capabilities.value = null
+      status.value = 'error'
+      lastError.value =
+        error instanceof Error ? error.message : 'Deployment configuration is unavailable'
+      throw error
+    }
   }
 
   return {

@@ -1,26 +1,29 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
-import { createEvent, type H3Event } from 'h3'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
 import { getLogAnalyticsAccessToken } from '../../server/utils/logAnalyticsAuth'
+import type * as LogAnalyticsAuthModule from '../../server/utils/logAnalyticsAuth'
 import type { DnsDetailQueryRequest, DnsListQueryRequest } from '../../shared/types/dns'
 import {
   executeDnsDetailQuery,
   executeDnsListQuery,
   executeDnsReadinessQuery,
 } from '../../shared/utils/dnsLogAnalyticsQuery'
+import type * as DnsLogAnalyticsQueryModule from '../../shared/utils/dnsLogAnalyticsQuery'
 
 vi.mock('nuxt-oidc-auth/runtime/server/utils/session.js', () => ({
   requireUserSession: vi.fn<typeof requireUserSession>(),
 }))
 vi.mock('../../server/utils/logAnalyticsAuth', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../server/utils/logAnalyticsAuth')>()),
+  ...(await importOriginal<typeof LogAnalyticsAuthModule>()),
   getLogAnalyticsAccessToken: vi.fn<typeof getLogAnalyticsAccessToken>(),
 }))
 vi.mock('../../shared/utils/dnsLogAnalyticsQuery', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../shared/utils/dnsLogAnalyticsQuery')>()),
+  ...(await importOriginal<typeof DnsLogAnalyticsQueryModule>()),
   executeDnsDetailQuery: vi.fn<typeof executeDnsDetailQuery>(),
   executeDnsListQuery: vi.fn<typeof executeDnsListQuery>(),
   executeDnsReadinessQuery: vi.fn<typeof executeDnsReadinessQuery>(),
@@ -50,6 +53,20 @@ let runtimeConfig: Record<string, unknown>
 let managedDetailHandler: (event: H3Event) => Promise<unknown>
 let managedListHandler: (event: H3Event) => Promise<unknown>
 let managedReadinessHandler: (event: H3Event) => Promise<unknown>
+
+const anyAbortSignal: unknown = expect.any(AbortSignal)
+
+function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
+  return typeof value === 'function'
+}
+
+async function importEventHandler(routeModule: Promise<{ default: unknown }>) {
+  const { default: handler } = await routeModule
+  if (!isEventHandler(handler)) {
+    throw new TypeError('Route module has no default event handler.')
+  }
+  return handler
+}
 
 function createListRequest(): DnsListQueryRequest {
   return {
@@ -102,15 +119,15 @@ beforeAll(async () => {
   vi.stubEnv('NUXT_OIDC_TOKEN_KEY', Buffer.alloc(32).toString('base64'))
   vi.stubGlobal('defineEventHandler', <T>(handler: T) => handler)
   vi.stubGlobal('useRuntimeConfig', () => runtimeConfig)
-  managedDetailHandler = (await import('../../server/api/log-analytics/dns/detail.post')).default
-  managedListHandler = (await import('../../server/api/log-analytics/dns/list.post')).default
-  managedReadinessHandler = (await import('../../server/api/log-analytics/dns/readiness.get'))
-    .default
-})
-
-afterAll(() => {
-  vi.unstubAllEnvs()
-  vi.unstubAllGlobals()
+  managedDetailHandler = await importEventHandler(
+    import('../../server/api/log-analytics/dns/detail.post'),
+  )
+  managedListHandler = await importEventHandler(
+    import('../../server/api/log-analytics/dns/list.post'),
+  )
+  managedReadinessHandler = await importEventHandler(
+    import('../../server/api/log-analytics/dns/readiness.get'),
+  )
 })
 
 beforeEach(() => {
@@ -140,6 +157,11 @@ beforeEach(() => {
   })
 })
 
+afterAll(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+})
+
 describe('managed DNS readiness route', () => {
   it('queries configured workspace immediately without caller input', async () => {
     await expect(managedReadinessHandler(createTestEvent())).resolves.toEqual({ readiness: [] })
@@ -148,7 +170,7 @@ describe('managed DNS readiness route', () => {
     expect(executeDnsReadinessQuery).toHaveBeenCalledWith(
       managedConfig,
       'managed-token',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: anyAbortSignal }),
     )
   })
 })
@@ -169,12 +191,20 @@ describe('managed DNS list route', () => {
     let querySignal: AbortSignal | undefined
     vi.mocked(executeDnsListQuery).mockImplementationOnce(
       async (_target, _request, _token, options) => {
-        if (!options?.signal) throw new Error('Expected incoming request signal')
+        if (!options?.signal) {
+          throw new Error('Expected incoming request signal')
+        }
         const signal = options.signal
         querySignal = signal
-        await new Promise<void>((resolve) =>
-          signal.addEventListener('abort', () => resolve(), { once: true }),
-        )
+        await new Promise<void>((resolve) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              resolve()
+            },
+            { once: true },
+          )
+        })
         return {
           queriedEntries: [],
           transportObservations: [],
@@ -187,7 +217,9 @@ describe('managed DNS list route', () => {
     const request = createListRequest()
     const event = createTestEvent(request)
     const response = managedListHandler(event)
-    await vi.waitFor(() => expect(executeDnsListQuery).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(executeDnsListQuery).toHaveBeenCalledOnce()
+    })
 
     event.node.req.emit('aborted')
     await expect(response).resolves.toMatchObject({ queriedEntries: [] })
@@ -198,7 +230,7 @@ describe('managed DNS list route', () => {
       managedConfig,
       request,
       'managed-token',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: anyAbortSignal }),
     )
   })
 
@@ -234,7 +266,7 @@ describe('managed DNS detail route', () => {
       managedConfig,
       request,
       'managed-token',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({ signal: anyAbortSignal }),
     )
 
     await expect(

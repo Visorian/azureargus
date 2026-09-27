@@ -31,9 +31,7 @@ export type DnsCorrelationConfidence = 'explicit' | 'exact-derived' | 'likely' |
 
 export type DnsSourceAvailability = 'available' | 'forbidden' | 'failed'
 
-export interface DnsRawProjection {
-  [key: string]: boolean | number | string | null | undefined
-}
+export type DnsRawProjection = Record<string, boolean | number | string | null | undefined>
 
 export interface DnsObservation {
   id: string

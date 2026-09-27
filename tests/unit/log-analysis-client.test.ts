@@ -36,13 +36,7 @@ function response(id: string): LogAnalyticsQueryResponse {
 }
 
 function createDeferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, reject, resolve }
+  return Promise.withResolvers<T>()
 }
 
 function createStorage(value: LogAnalyticsStorageKind = 'resource-specific') {
@@ -72,7 +66,7 @@ describe('Log analysis client', () => {
     const queryLimit = ref(1_000)
     const sort = reactive(createDefaultLogSort())
     const storage = createStorage()
-    const onBeforeReplace = vi.fn()
+    const onBeforeReplace = vi.fn<() => void>()
     const scope = effectScope()
     const query = scope.run(() =>
       useLogAnalyticsQuery({
@@ -246,7 +240,7 @@ describe('Log analysis client', () => {
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
         queryLimit: ref(1_000),
-        request: () => requests[requestIndex++]!.promise,
+        request: async () => requests[requestIndex++]!.promise,
         sort: reactive(createDefaultLogSort()),
         storage: createStorage(),
       }),
@@ -318,12 +312,12 @@ describe('Log analysis client', () => {
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
         queryLimit: ref(1_000),
-        request: (_body, signal) => {
+        request: async (_body, signal) => {
           requestSignal = signal
           return new Promise<LogAnalyticsQueryResponse>((_resolve, reject) => {
-            signal.addEventListener('abort', () =>
-              reject(new DOMException('Aborted', 'AbortError')),
-            )
+            signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'))
+            })
           })
         },
         sort: reactive(createDefaultLogSort()),
@@ -412,7 +406,7 @@ describe('Log analysis client', () => {
   it('preserves prior records when refinement fails and allows immediate retry', async () => {
     vi.useFakeTimers()
     const filters = reactive(createDefaultLogFilters())
-    const onError = vi.fn()
+    const onError = vi.fn<(message: string) => void>()
     let requestCount = 0
     const scope = effectScope()
     const query = scope.run(() =>
@@ -467,15 +461,15 @@ describe('Log analysis client', () => {
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
         queryLimit: ref(1_000),
-        request: (_body, signal) => {
+        request: async (_body, signal) => {
           requestCount += 1
           if (requestCount === 1) {
-            return Promise.resolve(response('initial'))
+            return response('initial')
           }
           secondSignal = signal
-          signal.addEventListener('abort', () =>
-            secondRequest.reject(new DOMException('Aborted', 'AbortError')),
-          )
+          signal.addEventListener('abort', () => {
+            secondRequest.reject(new DOMException('Aborted', 'AbortError'))
+          })
           return secondRequest.promise
         },
         sort: reactive(createDefaultLogSort()),

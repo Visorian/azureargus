@@ -1,18 +1,37 @@
-import { computed, shallowRef, type Ref } from 'vue'
+import type { Mock } from 'vitest'
+import { computed, shallowRef } from 'vue'
+import type { Ref } from 'vue'
 
-import {
-  createInitialEventHubConnectionForm,
-  type EventHubConnectionForm,
-} from '../../app/composables/useEventHubConnection'
-import {
-  eventsToFirewallLogs,
-  type CreateEventHubReceiverClient,
-  type EventHubLogEvent,
-  type EventHubReceiverClient,
+import { createInitialEventHubConnectionForm } from '../../app/composables/useEventHubConnection'
+import type { EventHubConnectionForm } from '../../app/composables/useEventHubConnection'
+import { eventsToFirewallLogs } from '../../app/composables/useEventHubReceiver'
+import type {
+  CreateEventHubReceiverClient,
+  EventHubLogEvent,
+  EventHubReceiverClient,
 } from '../../app/composables/useEventHubReceiver'
 import type { FirewallLogRecord } from '../../shared/types/firewall'
 
 type ReceiverHandlers = Parameters<EventHubReceiverClient['subscribe']>[0]
+
+const anyDate: unknown = expect.any(Date)
+const networkRuleDnsMatcher: unknown = expect.objectContaining({
+  source: 'network-rule',
+  protocol: 'TCP',
+  clientIp: '10.0.0.4',
+  serverIp: '168.63.129.16',
+  policy: 'hub-policy',
+  ruleCollectionGroup: 'hub-group',
+  ruleCollection: 'dns-rules',
+  rule: 'allow-dns',
+})
+
+function requestBody(init: RequestInit | undefined) {
+  if (typeof init?.body !== 'string') {
+    throw new TypeError('Expected string request body')
+  }
+  return init.body
+}
 
 function createDeferred<T>() {
   let resolvePromise!: (value: T | PromiseLike<T>) => void
@@ -83,9 +102,11 @@ function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unk
   })
   const queueRecords = vi.fn()
 
-  vi.stubGlobal('useState', <T>(key: string, initializer: () => T): Ref<T> => {
+  vi.stubGlobal('useState', (key: string, initializer: () => unknown): Ref<unknown> => {
     const existing = stateCache?.get(key)
-    if (existing) return existing as Ref<T>
+    if (existing) {
+      return existing
+    }
 
     const state = shallowRef(initializer())
     stateCache?.set(key, state)
@@ -119,6 +140,28 @@ function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unk
   }
 }
 
+async function expireManagedSession(sessionRecovered: boolean) {
+  vi.useFakeTimers()
+  installNuxtMocks()
+  const encoder = new TextEncoder()
+  let streamController!: ReadableStreamDefaultController<Uint8Array>
+  const managedFetch = vi.fn<typeof fetch>(async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+      },
+    })
+    return new Response(body, { status: 200 })
+  })
+  const revalidateManagedSession = vi.fn<() => Promise<boolean>>(async () => sessionRecovered)
+  const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
+  const receiver = useEventHubReceiver({ managedFetch, revalidateManagedSession })
+  await receiver.connect(createInitialEventHubConnectionForm(), 'managed')
+
+  streamController.enqueue(encoder.encode('{"type":"error","message":"Session expired"}\n'))
+  return { managedFetch, receiver, revalidateManagedSession }
+}
+
 function requireHandlers(handlers: ReceiverHandlers | undefined) {
   if (!handlers) {
     throw new Error('Receiver handlers were not registered.')
@@ -141,7 +184,9 @@ describe('Event Hub receiver helpers', () => {
     let closeStream!: () => void
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        closeStream = () => controller.close()
+        closeStream = () => {
+          controller.close()
+        }
         controller.enqueue(encoder.encode('{"type":"heartbeat"}\n'))
       },
     })
@@ -166,8 +211,8 @@ describe('Event Hub receiver helpers', () => {
       },
       body: JSON.stringify({ consumerGroup: 'managed-consumer', lookbackMinutes: 3 }),
     })
-    expect(String(options?.body)).not.toContain('connectionString')
-    expect(String(options?.body)).not.toContain('eventHubName')
+    expect(requestBody(options)).not.toContain('connectionString')
+    expect(requestBody(options)).not.toContain('eventHubName')
     expect(loadClientFactory).not.toHaveBeenCalled()
     expect(receiver.status.value).toBe('connected')
 
@@ -177,7 +222,9 @@ describe('Event Hub receiver helpers', () => {
     expect(receiver.status.value).toBe('connected')
 
     closeStream()
-    await vi.waitFor(() => expect(receiver.status.value).toBe('reconnecting'))
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('reconnecting')
+    })
     expect(receiver.errors.value).toContain('Managed Event Hub stream ended')
     await receiver.disconnect()
   })
@@ -206,7 +253,9 @@ describe('Event Hub receiver helpers', () => {
         '{"type":"events","events":[{"body":{"msg":"managed"},"enqueuedTimeUtc":"2026-07-12T12:00:00.000Z","partitionId":"0","sequenceNumber":1}]}\n',
       ),
     )
-    await vi.waitFor(() => expect(receiver.receivedCount.value).toBe(1))
+    await vi.waitFor(() => {
+      expect(receiver.receivedCount.value).toBe(1)
+    })
     mocks.historyFlush.mockRejectedValueOnce(new Error('history flush failed'))
 
     await expect(receiver.reset()).rejects.toThrow('history flush failed')
@@ -243,13 +292,19 @@ describe('Event Hub receiver helpers', () => {
         '{"type":"events","events":[{"body":{"msg":"first"},"enqueuedTimeUtc":"2026-07-12T12:00:00.000Z","partitionId":"0","sequenceNumber":42}]}\n',
       ),
     )
-    await vi.waitFor(() => expect(receiver.getResumeFrom()).toEqual({ '0': 42 }))
+    await vi.waitFor(() => {
+      expect(receiver.getResumeFrom()).toEqual({ '0': 42 })
+    })
 
     controllers[0]!.close()
-    await vi.waitFor(() => expect(receiver.status.value).toBe('reconnecting'))
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('reconnecting')
+    })
     await vi.advanceTimersByTimeAsync(1_000)
-    await vi.waitFor(() => expect(managedFetch).toHaveBeenCalledTimes(2))
-    expect(JSON.parse(String(managedFetch.mock.calls[1]?.[1]?.body))).toEqual({
+    await vi.waitFor(() => {
+      expect(managedFetch).toHaveBeenCalledTimes(2)
+    })
+    expect(JSON.parse(requestBody(managedFetch.mock.calls[1]?.[1]))).toEqual({
       consumerGroup: '$Default',
       lookbackMinutes: 15,
       resumeFrom: { '0': 42 },
@@ -261,53 +316,49 @@ describe('Event Hub receiver helpers', () => {
         '{"type":"events","events":[{"body":{"msg":"duplicate"},"enqueuedTimeUtc":"2026-07-12T12:00:01.000Z","partitionId":"0","sequenceNumber":42},{"body":{"msg":"fresh"},"enqueuedTimeUtc":"2026-07-12T12:00:02.000Z","partitionId":"0","sequenceNumber":43}]}\n',
       ),
     )
-    await vi.waitFor(() => expect(receiver.getResumeFrom()).toEqual({ '0': 43 }))
+    await vi.waitFor(() => {
+      expect(receiver.getResumeFrom()).toEqual({ '0': 43 })
+    })
     controllers[1]!.close()
-    await vi.waitFor(() => expect(receiver.status.value).toBe('reconnecting'))
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('reconnecting')
+    })
     await vi.advanceTimersByTimeAsync(1_000)
-    await vi.waitFor(() => expect(managedFetch).toHaveBeenCalledTimes(3))
+    await vi.waitFor(() => {
+      expect(managedFetch).toHaveBeenCalledTimes(3)
+    })
 
     await receiver.disconnect()
   })
 
-  it.each([
-    [true, 'reconnecting'],
-    [false, 'error'],
-  ] as const)(
-    'revalidates an expired managed session once (recoverable: %s)',
-    async (sessionRecovered, expectedStatus) => {
-      vi.useFakeTimers()
-      installNuxtMocks()
-      const encoder = new TextEncoder()
-      let streamController!: ReadableStreamDefaultController<Uint8Array>
-      const managedFetch = vi.fn<typeof fetch>(async () => {
-        const body = new ReadableStream<Uint8Array>({
-          start(controller) {
-            streamController = controller
-          },
-        })
-        return new Response(body, { status: 200 })
-      })
-      const revalidateManagedSession = vi.fn<() => Promise<boolean>>(async () => sessionRecovered)
-      const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
-      const receiver = useEventHubReceiver({ managedFetch, revalidateManagedSession })
-      await receiver.connect(createInitialEventHubConnectionForm(), 'managed')
+  it('reconnects after revalidating an expired managed session once', async () => {
+    const { managedFetch, receiver, revalidateManagedSession } = await expireManagedSession(true)
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('reconnecting')
+    })
+    expect(revalidateManagedSession).toHaveBeenCalledOnce()
 
-      streamController.enqueue(encoder.encode('{"type":"error","message":"Session expired"}\n'))
-      await vi.waitFor(() => expect(receiver.status.value).toBe(expectedStatus))
-      expect(revalidateManagedSession).toHaveBeenCalledOnce()
-      if (sessionRecovered) {
-        await vi.advanceTimersByTimeAsync(1_000)
-        await vi.waitFor(() => expect(managedFetch).toHaveBeenCalledTimes(2))
-      } else {
-        await vi.advanceTimersByTimeAsync(30_000)
-        expect(managedFetch).toHaveBeenCalledOnce()
-        expect(receiver.errors.value[0]).toContain('Sign in again')
-      }
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => {
+      expect(managedFetch).toHaveBeenCalledTimes(2)
+    })
 
-      await receiver.disconnect()
-    },
-  )
+    await receiver.disconnect()
+  })
+
+  it('stops after an expired managed session cannot be revalidated', async () => {
+    const { managedFetch, receiver, revalidateManagedSession } = await expireManagedSession(false)
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('error')
+    })
+    expect(revalidateManagedSession).toHaveBeenCalledOnce()
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(managedFetch).toHaveBeenCalledOnce()
+    expect(receiver.errors.value[0]).toContain('Sign in again')
+
+    await receiver.disconnect()
+  })
 
   it('stops managed reconnects after the finite attempt budget', async () => {
     vi.useFakeTimers()
@@ -323,7 +374,9 @@ describe('Event Hub receiver helpers', () => {
     )
     expect(receiver.status.value).toBe('reconnecting')
     await vi.advanceTimersByTimeAsync(30_000)
-    await vi.waitFor(() => expect(receiver.status.value).toBe('error'))
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('error')
+    })
     expect(managedFetch).toHaveBeenCalledTimes(6)
     expect(receiver.errors.value[0]).toBe('Event Hub reconnect attempts exhausted')
 
@@ -333,15 +386,15 @@ describe('Event Hub receiver helpers', () => {
   it('coalesces manual errors and resumes exclusively after the high-water mark', async () => {
     vi.useFakeTimers()
     installNuxtMocks()
-    const clients: Array<{
+    const clients: {
       close: ReturnType<typeof vi.fn<() => Promise<void>>>
       handlers: ReceiverHandlers
       options: Parameters<EventHubReceiverClient['subscribe']>[1]
       subscriptionClose: ReturnType<typeof vi.fn<() => Promise<void>>>
-    }> = []
+    }[] = []
     const createClient: CreateEventHubReceiverClient = () => {
-      const close = vi.fn<() => Promise<void>>(async () => undefined)
-      const subscriptionClose = vi.fn<() => Promise<void>>(async () => undefined)
+      const close = vi.fn<() => Promise<void>>(async () => {})
+      const subscriptionClose = vi.fn<() => Promise<void>>(async () => {})
       const nextClient: EventHubReceiverClient = {
         close,
         getPartitionIds: async () => ['0', '1'],
@@ -363,19 +416,21 @@ describe('Event Hub receiver helpers', () => {
     const first = clients[0]!
     await first.handlers.processEvents([{ body: { msg: 'first' }, sequenceNumber: 10 }], {
       partitionId: '0',
-      updateCheckpoint: async () => undefined,
+      updateCheckpoint: async () => {},
     })
 
     await first.handlers.processError(new Error('first failure'))
     await first.handlers.processError(new Error('concurrent failure'))
     expect(receiver.status.value).toBe('reconnecting')
     await vi.advanceTimersByTimeAsync(1_000)
-    await vi.waitFor(() => expect(clients).toHaveLength(2))
+    await vi.waitFor(() => {
+      expect(clients).toHaveLength(2)
+    })
     expect(first.subscriptionClose).toHaveBeenCalledOnce()
     expect(first.close).toHaveBeenCalledOnce()
     expect(clients[1]!.options.startPosition).toEqual({
       '0': { sequenceNumber: 10, isInclusive: false },
-      '1': { enqueuedOn: expect.any(Date) },
+      '1': { enqueuedOn: anyDate },
     })
 
     await clients[1]!.handlers.processEvents(
@@ -383,7 +438,7 @@ describe('Event Hub receiver helpers', () => {
         { body: { msg: 'duplicate' }, sequenceNumber: 10 },
         { body: { msg: 'fresh' }, sequenceNumber: 11 },
       ],
-      { partitionId: '0', updateCheckpoint: async () => undefined },
+      { partitionId: '0', updateCheckpoint: async () => {} },
     )
     await vi.advanceTimersByTimeAsync(100)
     expect(receiver.receivedCount.value).toBe(2)
@@ -420,7 +475,9 @@ describe('Event Hub receiver helpers', () => {
 
       streamController.enqueue(encoder.encode('{"type":"caught-up"}\n'))
 
-      await vi.waitFor(() => expect(receiver.caughtUp.value).toBe(true))
+      await vi.waitFor(() => {
+        expect(receiver.caughtUp.value).toBe(true)
+      })
       expect(receiver.status.value).toBe(expectedStatus)
       expect(receiver.receivedCount.value).toBe(0)
       expect(receiver.errors.value).toEqual([])
@@ -477,22 +534,15 @@ describe('Event Hub receiver helpers', () => {
     receiver.addNormalizedBatchSink({ onRecords })
 
     await receiver.connect(createInitialEventHubConnectionForm(), 'managed')
-    await vi.waitFor(() => expect(receiver.status.value).toBe('connected'))
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('connected')
+    })
     vi.advanceTimersByTime(100)
 
     expect(onRecords).toHaveBeenCalledOnce()
     expect(onRecords.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
-        dns: expect.objectContaining({
-          source: 'network-rule',
-          protocol: 'TCP',
-          clientIp: '10.0.0.4',
-          serverIp: '168.63.129.16',
-          policy: 'hub-policy',
-          ruleCollectionGroup: 'hub-group',
-          ruleCollection: 'dns-rules',
-          rule: 'allow-dns',
-        }),
+        dns: networkRuleDnsMatcher,
         enqueuedTimeUtc: '2026-07-12T12:00:01.000Z',
         applicationProperties: { schemaVersion: '1', source: 'managed' },
         offset: '123',
@@ -542,7 +592,9 @@ describe('Event Hub receiver helpers', () => {
     receiver.addNormalizedBatchSink({ onRecords })
 
     await receiver.connect(createInitialEventHubConnectionForm(), 'managed')
-    await vi.waitFor(() => expect(receiver.status.value).toBe('connected'))
+    await vi.waitFor(() => {
+      expect(receiver.status.value).toBe('connected')
+    })
     vi.advanceTimersByTime(100)
 
     expect(onRecords).toHaveBeenCalledOnce()
@@ -613,7 +665,9 @@ describe('Event Hub receiver helpers', () => {
     const receiver = useEventHubReceiver({ managedFetch })
 
     await receiver.connect(createInitialEventHubConnectionForm(), 'managed')
-    await vi.waitFor(() => expect(receiver.getResumeFrom()).toEqual({ '0': 5, '1': 3 }))
+    await vi.waitFor(() => {
+      expect(receiver.getResumeFrom()).toEqual({ '0': 5, '1': 3 })
+    })
     vi.advanceTimersByTime(100)
 
     expect(receiver.receivedCount.value).toBe(3)
@@ -736,10 +790,10 @@ describe('Event Hub receiver helpers', () => {
     const bodies = createDuplicateNetworkRuleBodies()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -781,10 +835,10 @@ describe('Event Hub receiver helpers', () => {
     const bodies = createDuplicateNetworkRuleBodies()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -818,10 +872,10 @@ describe('Event Hub receiver helpers', () => {
     const bodies = createDuplicateNetworkRuleBodies()
     let handlers: ReceiverHandlers | undefined
     const createClient: CreateEventHubReceiverClient = () => ({
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     })
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -858,10 +912,10 @@ describe('Event Hub receiver helpers', () => {
     const bodies = createDuplicateNetworkRuleBodies()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -904,10 +958,10 @@ describe('Event Hub receiver helpers', () => {
     const bodies = createDuplicateNetworkRuleBodies()
     let handlers: ReceiverHandlers | undefined
     const createClient: CreateEventHubReceiverClient = () => ({
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     })
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -943,17 +997,18 @@ describe('Event Hub receiver helpers', () => {
     vi.useFakeTimers()
     const mocks = installNuxtMocks()
     const handlers: ReceiverHandlers[] = []
-    const clients: EventHubReceiverClient[] = []
+    const clientCloses: Mock<() => Promise<void>>[] = []
     const createClient: CreateEventHubReceiverClient = () => {
+      const close = vi.fn<() => Promise<void>>(async () => {})
+      clientCloses.push(close)
       const client: EventHubReceiverClient = {
-        close: vi.fn<() => Promise<void>>(async () => undefined),
+        close,
         getPartitionIds: vi.fn<() => Promise<string[]>>(async () => ['0']),
         subscribe: (nextHandlers) => {
           handlers.push(nextHandlers)
-          return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+          return { close: vi.fn<() => Promise<void>>(async () => {}) }
         },
       }
-      clients.push(client)
       return client
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -986,7 +1041,7 @@ describe('Event Hub receiver helpers', () => {
 
     await receiver.connect(createValidForm())
 
-    expect(clients[0]?.close).toHaveBeenCalledOnce()
+    expect(clientCloses[0]).toHaveBeenCalledOnce()
     expect(mocks.logs.value).toEqual([])
     expect(receiver.receivedCount.value).toBe(0)
     expect(receiver.categoryOptions.value).toEqual([])
@@ -1091,12 +1146,14 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     const factory = createDeferred<CreateEventHubReceiverClient>()
     const createClient = vi.fn<CreateEventHubReceiverClient>()
-    const loadClientFactory = vi.fn(() => factory.promise)
+    const loadClientFactory = vi.fn(async () => factory.promise)
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
     const receiver = useEventHubReceiver({ loadClientFactory })
 
     const connectPromise = receiver.connect(createValidForm())
-    await vi.waitFor(() => expect(loadClientFactory).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(loadClientFactory).toHaveBeenCalledOnce()
+    })
 
     await receiver.disconnect()
     factory.resolve(createClient)
@@ -1110,9 +1167,9 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     const firstFactory = createDeferred<CreateEventHubReceiverClient>()
     const firstCreateClient = vi.fn<CreateEventHubReceiverClient>()
-    const secondSubscribe = vi.fn(() => ({ close: vi.fn(async () => undefined) }))
+    const secondSubscribe = vi.fn(() => ({ close: vi.fn(async () => {}) }))
     const secondClient: EventHubReceiverClient = {
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {}),
       subscribe: secondSubscribe,
     }
     const secondCreateClient = vi.fn(() => secondClient)
@@ -1124,7 +1181,9 @@ describe('Event Hub receiver helpers', () => {
     const receiver = useEventHubReceiver({ loadClientFactory })
 
     const firstConnect = receiver.connect(createValidForm())
-    await vi.waitFor(() => expect(loadClientFactory).toHaveBeenCalledOnce())
+    await vi.waitFor(() => {
+      expect(loadClientFactory).toHaveBeenCalledOnce()
+    })
     const secondConnect = receiver.connect(createValidForm())
 
     await expect(secondConnect).resolves.toBe(true)
@@ -1144,10 +1203,10 @@ describe('Event Hub receiver helpers', () => {
     vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'))
     installNuxtMocks()
     const subscribe = vi.fn<EventHubReceiverClient['subscribe']>(() => ({
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {}),
     }))
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {}),
       subscribe,
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1173,15 +1232,13 @@ describe('Event Hub receiver helpers', () => {
     vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'))
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
-    const updateCheckpoint = vi.fn<(event: EventHubLogEvent) => Promise<void>>(
-      async () => undefined,
-    )
+    const updateCheckpoint = vi.fn<(event: EventHubLogEvent) => Promise<void>>(async () => {})
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       getPartitionIds: vi.fn<() => Promise<string[]>>(async () => ['0', '1']),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { getManualEventHubStartPosition, useEventHubReceiver } =
@@ -1224,10 +1281,10 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1284,10 +1341,10 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1324,10 +1381,10 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn(async () => undefined) }
+        return { close: vi.fn(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1389,10 +1446,10 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn(async () => undefined) }
+        return { close: vi.fn(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1439,16 +1496,7 @@ describe('Event Hub receiver helpers', () => {
     expect(onRecords.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
         category: 'AZFWNetworkRule',
-        dns: expect.objectContaining({
-          source: 'network-rule',
-          protocol: 'TCP',
-          clientIp: '10.0.0.4',
-          serverIp: '168.63.129.16',
-          policy: 'hub-policy',
-          ruleCollectionGroup: 'hub-group',
-          ruleCollection: 'dns-rules',
-          rule: 'allow-dns',
-        }),
+        dns: networkRuleDnsMatcher,
         enqueuedTimeUtc: '2026-07-12T12:00:01.000Z',
         applicationProperties: { schemaVersion: '1', source: 'manual' },
         partitionId: '0',
@@ -1468,10 +1516,10 @@ describe('Event Hub receiver helpers', () => {
     const uiPublishingEnabled = shallowRef(false)
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => undefined),
+      close: vi.fn(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn(async () => undefined) }
+        return { close: vi.fn(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1512,12 +1560,12 @@ describe('Event Hub receiver helpers', () => {
     let handlers: ReceiverHandlers | undefined
     const startPositions: unknown[] = []
     const client: EventHubReceiverClient = {
-      close: vi.fn<() => Promise<void>>(async () => undefined),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       getPartitionIds: vi.fn<() => Promise<string[]>>(async () => ['0']),
       subscribe: (nextHandlers, options) => {
         handlers = nextHandlers
         startPositions.push(options.startPosition)
-        return { close: vi.fn<() => Promise<void>>(async () => undefined) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1653,8 +1701,8 @@ describe('Event Hub receiver helpers', () => {
     vi.useFakeTimers()
     const mocks = installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
-    const subscriptionClose = vi.fn<() => Promise<void>>(async () => undefined)
-    const clientClose = vi.fn<() => Promise<void>>(async () => undefined)
+    const subscriptionClose = vi.fn<() => Promise<void>>(async () => {})
+    const clientClose = vi.fn<() => Promise<void>>(async () => {})
     const client: EventHubReceiverClient = {
       close: clientClose,
       subscribe: (nextHandlers) => {
@@ -1705,9 +1753,9 @@ describe('Event Hub receiver helpers', () => {
 
   it('shares one teardown across overlapping disconnect calls', async () => {
     installNuxtMocks()
-    const closeBarrier = createDeferred<void>()
-    const subscriptionClose = vi.fn(() => closeBarrier.promise)
-    const clientClose = vi.fn(async () => undefined)
+    const closeBarrier: PromiseWithResolvers<void> = Promise.withResolvers()
+    const subscriptionClose = vi.fn(async () => closeBarrier.promise)
+    const clientClose = vi.fn(async () => {})
     const client: EventHubReceiverClient = {
       close: clientClose,
       subscribe: () => ({ close: subscriptionClose }),
