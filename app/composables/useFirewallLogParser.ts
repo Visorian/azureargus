@@ -1,102 +1,102 @@
-import type { FirewallLogRecord } from "#shared/types/firewall";
-import { parseDnsObservation } from "#shared/utils/dns";
+import type { FirewallLogRecord } from '#shared/types/firewall'
+import { parseDnsObservation } from '#shared/utils/dns'
 
-const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i;
-const LEGACY_RULE_COLLECTION_PATTERN = /\bRule Collection\s*:\s*(.*?)(?=\.\s*Rule\s*:|$)/i;
-const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/i;
-const LEGACY_ENDPOINTS_PATTERN = /\bfrom\s+(?<source>\S+)\s+to\s+(?<destination>\S+)/i;
-const ENDPOINT_PORT_PATTERN = /^(?<address>.+):(?<port>\d{1,5})$/;
-const TRAILING_ENDPOINT_PUNCTUATION_PATTERN = /[.,;]+$/;
+const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i
+const LEGACY_RULE_COLLECTION_PATTERN = /\bRule Collection\s*:\s*(.*?)(?=\.\s*Rule\s*:|$)/i
+const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/i
+const LEGACY_ENDPOINTS_PATTERN = /\bfrom\s+(?<source>\S+)\s+to\s+(?<destination>\S+)/i
+const ENDPOINT_PORT_PATTERN = /^(?<address>.+):(?<port>\d{1,5})$/
+const TRAILING_ENDPOINT_PUNCTUATION_PATTERN = /[.,;]+$/
 const ESCAPED_MESSAGE_PROPERTIES_PATTERN =
-  /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g;
-const utf8Decoder = new TextDecoder();
+  /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g
+const utf8Decoder = new TextDecoder()
 
 export interface FirewallLogInput {
-  raw: unknown;
-  enqueuedTimeUtc?: Date | string;
-  partitionId?: string;
-  sequenceNumber?: number | string;
-  offset?: number | string;
-  index?: number;
-  eventRecordIndex?: number;
-  applicationProperties?: Record<string, unknown>;
+  raw: unknown
+  enqueuedTimeUtc?: Date | string
+  partitionId?: string
+  sequenceNumber?: number | string
+  offset?: number | string
+  index?: number
+  eventRecordIndex?: number
+  applicationProperties?: Record<string, unknown>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function readString(source: Record<string, unknown> | null, keys: string[]) {
   if (source === null) {
-    return undefined;
+    return undefined
   }
 
   for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
+    const value = source[key]
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim()
     }
-    if (typeof value === "number") {
-      return String(value);
+    if (typeof value === 'number') {
+      return String(value)
     }
   }
 
-  return undefined;
+  return undefined
 }
 
 function normalizeTimestamp(value: string | Date | undefined) {
   if (value instanceof Date) {
-    return value.toISOString();
+    return value.toISOString()
   }
 
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = new Date(value);
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = new Date(value)
     if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
+      return parsed.toISOString()
     }
   }
 
-  return new Date(0).toISOString();
+  return new Date(0).toISOString()
 }
 
 function extractActionFallback(message: string, category: string) {
-  const normalizedCategory = category.toLowerCase();
+  const normalizedCategory = category.toLowerCase()
   if (
-    normalizedCategory === "azfwdnsquery" ||
-    (normalizedCategory === "azurefirewalldnsproxy" && /^\s*DNS Request\s*:/i.test(message))
+    normalizedCategory === 'azfwdnsquery' ||
+    (normalizedCategory === 'azurefirewalldnsproxy' && /^\s*DNS Request\s*:/i.test(message))
   ) {
-    return "DNS query";
+    return 'DNS query'
   }
 
-  const actionMatch = message.match(/\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/i);
+  const actionMatch = message.match(/\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/i)
   if (actionMatch?.[2]) {
-    return actionMatch[2].toUpperCase();
+    return actionMatch[2].toUpperCase()
   }
 
-  const keywordMatch = message.match(/\b(allow|allowed|deny|denied|dnat|snat)\b/i);
+  const keywordMatch = message.match(/\b(allow|allowed|deny|denied|dnat|snat)\b/i)
   if (!keywordMatch?.[1]) {
-    return "Unknown";
+    return 'Unknown'
   }
 
-  const value = keywordMatch[1].toLowerCase();
-  if (value === "allowed") {
-    return "ALLOW";
+  const value = keywordMatch[1].toLowerCase()
+  if (value === 'allowed') {
+    return 'ALLOW'
   }
-  if (value === "denied") {
-    return "DENY";
+  if (value === 'denied') {
+    return 'DENY'
   }
 
-  return value.toUpperCase();
+  return value.toUpperCase()
 }
 
 function extractLegacyProtocol(message: string) {
-  const explicitMatch = message.match(/\bprotocol\s*[:=]\s*([a-z0-9-]+)\b/i);
+  const explicitMatch = message.match(/\bprotocol\s*[:=]\s*([a-z0-9-]+)\b/i)
   if (explicitMatch?.[1]) {
-    return explicitMatch[1].toUpperCase();
+    return explicitMatch[1].toUpperCase()
   }
 
-  const keywordMatch = message.match(/\b(tcp|udp|icmp|http|https)\b/i);
-  return keywordMatch?.[1]?.toUpperCase() ?? "Unknown";
+  const keywordMatch = message.match(/\b(tcp|udp|icmp|http|https)\b/i)
+  return keywordMatch?.[1]?.toUpperCase() ?? 'Unknown'
 }
 
 function extractLegacyPolicy(message: string) {
@@ -104,242 +104,240 @@ function extractLegacyPolicy(message: string) {
     .match(
       /\bPolicy\s*:\s*(.*?)(?=\.\s*(?:Rule Collection Group|Rule Collection|Rule)\s*:|$)/i,
     )?.[1]
-    ?.trim();
+    ?.trim()
 }
 
 function extractLegacyRuleCollectionGroup(message: string) {
   return message
     .match(/\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/i)?.[1]
-    ?.trim();
+    ?.trim()
 }
 
 function extractLegacyRuleCollection(message: string) {
-  return message.match(LEGACY_RULE_COLLECTION_PATTERN)?.[1]?.trim();
+  return message.match(LEGACY_RULE_COLLECTION_PATTERN)?.[1]?.trim()
 }
 
 function extractLegacyRule(message: string) {
-  return message.match(LEGACY_RULE_PATTERN)?.[1]?.trim();
+  return message.match(LEGACY_RULE_PATTERN)?.[1]?.trim()
 }
 
 function parseEndpoint(value: string) {
-  const endpoint = value.replace(TRAILING_ENDPOINT_PUNCTUATION_PATTERN, "");
-  const match = endpoint.match(ENDPOINT_PORT_PATTERN);
-  const address = match?.groups?.address ?? endpoint;
+  const endpoint = value.replace(TRAILING_ENDPOINT_PUNCTUATION_PATTERN, '')
+  const match = endpoint.match(ENDPOINT_PORT_PATTERN)
+  const address = match?.groups?.address ?? endpoint
   return {
-    address: address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address,
+    address: address.startsWith('[') && address.endsWith(']') ? address.slice(1, -1) : address,
     port: match?.groups?.port,
-  };
+  }
 }
 
 function extractIpPorts(message: string) {
-  const endpoints = message.match(LEGACY_ENDPOINTS_PATTERN)?.groups;
+  const endpoints = message.match(LEGACY_ENDPOINTS_PATTERN)?.groups
   if (endpoints?.source && endpoints.destination) {
-    const source = parseEndpoint(endpoints.source);
-    const destination = parseEndpoint(endpoints.destination);
+    const source = parseEndpoint(endpoints.source)
+    const destination = parseEndpoint(endpoints.destination)
     return {
       sourceIp: source.address,
       sourcePort: source.port,
       destinationIp: destination.address,
       destinationPort: destination.port,
-    };
+    }
   }
 
-  const matches = [
-    ...message.matchAll(/\b(?<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?<port>\d{1,5}))?\b/g),
-  ];
-  const first = matches[0]?.groups;
-  const second = matches[1]?.groups;
+  const matches = [...message.matchAll(/\b(?<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?<port>\d{1,5}))?\b/g)]
+  const first = matches[0]?.groups
+  const second = matches[1]?.groups
 
   return {
     sourceIp: first?.ip,
     sourcePort: first?.port,
     destinationIp: second?.ip,
     destinationPort: second?.port,
-  };
+  }
 }
 
 function safeJson(value: unknown) {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value)
   } catch {
-    return "";
+    return ''
   }
 }
 
 function repairEscapedMessageProperties(value: string) {
-  let changed = false;
+  let changed = false
   const repaired = value.replace(
     ESCAPED_MESSAGE_PROPERTIES_PATTERN,
     (match, escapedMessage: string) => {
-      let message: unknown;
+      let message: unknown
       try {
-        message = JSON.parse(`"${escapedMessage}"`);
+        message = JSON.parse(`"${escapedMessage}"`)
       } catch {
-        return match;
+        return match
       }
-      if (typeof message !== "string") {
-        return match;
+      if (typeof message !== 'string') {
+        return match
       }
 
-      changed = true;
-      return `"properties":{"msg":${JSON.stringify(message)}}`;
+      changed = true
+      return `"properties":{"msg":${JSON.stringify(message)}}`
     },
-  );
+  )
 
-  return changed ? repaired : undefined;
+  return changed ? repaired : undefined
 }
 
 function parseEventHubBody(body: unknown) {
   const encoded =
-    typeof body === "string"
+    typeof body === 'string'
       ? body
       : body instanceof Uint8Array
         ? utf8Decoder.decode(body)
-        : undefined;
+        : undefined
   if (encoded === undefined) {
-    return undefined;
+    return undefined
   }
 
   try {
-    return JSON.parse(encoded) as unknown;
+    return JSON.parse(encoded) as unknown
   } catch {
-    const repaired = repairEscapedMessageProperties(encoded);
+    const repaired = repairEscapedMessageProperties(encoded)
     if (repaired === undefined) {
-      return undefined;
+      return undefined
     }
     try {
-      return JSON.parse(repaired) as unknown;
+      return JSON.parse(repaired) as unknown
     } catch {
-      return undefined;
+      return undefined
     }
   }
 }
 
 export function expandAzureMonitorRecords(body: unknown): unknown[] {
-  const parsedBody = parseEventHubBody(body);
-  const expandedBody = parsedBody === undefined ? body : parsedBody;
+  const parsedBody = parseEventHubBody(body)
+  const expandedBody = parsedBody === undefined ? body : parsedBody
 
   if (Array.isArray(expandedBody)) {
-    return expandedBody;
+    return expandedBody
   }
 
   if (isRecord(expandedBody) && Array.isArray(expandedBody.records)) {
-    return expandedBody.records;
+    return expandedBody.records
   }
 
-  return [expandedBody];
+  return [expandedBody]
 }
 
 export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLogRecord {
-  const rawRecord = isRecord(input.raw) ? input.raw : null;
-  const properties = rawRecord && isRecord(rawRecord.properties) ? rawRecord.properties : null;
+  const rawRecord = isRecord(input.raw) ? input.raw : null
+  const properties = rawRecord && isRecord(rawRecord.properties) ? rawRecord.properties : null
   const message =
-    readString(properties, ["msg", "message", "Message"]) ||
-    readString(rawRecord, ["msg", "message", "Message"]) ||
-    safeJson(input.raw);
+    readString(properties, ['msg', 'message', 'Message']) ||
+    readString(rawRecord, ['msg', 'message', 'Message']) ||
+    safeJson(input.raw)
 
-  const legacyAddressParts = extractIpPorts(message);
+  const legacyAddressParts = extractIpPorts(message)
   const timestamp = normalizeTimestamp(
-    readString(rawRecord, ["time", "TimeGenerated", "timestamp"]) ||
-      readString(properties, ["time", "TimeGenerated", "timestamp"]) ||
+    readString(rawRecord, ['time', 'TimeGenerated', 'timestamp']) ||
+      readString(properties, ['time', 'TimeGenerated', 'timestamp']) ||
       input.enqueuedTimeUtc,
-  );
+  )
   const category =
-    readString(rawRecord, ["category", "Category"]) ||
-    readString(properties, ["category", "Category"]) ||
-    "Unknown";
+    readString(rawRecord, ['category', 'Category']) ||
+    readString(properties, ['category', 'Category']) ||
+    'Unknown'
   const action =
-    readString(properties, ["action", "Action"]) ||
-    readString(rawRecord, ["action", "Action"]) ||
-    extractActionFallback(message, category);
+    readString(properties, ['action', 'Action']) ||
+    readString(rawRecord, ['action', 'Action']) ||
+    extractActionFallback(message, category)
   const protocol =
-    readString(properties, ["protocol", "Protocol"]) ||
-    readString(rawRecord, ["protocol", "Protocol"]) ||
-    extractLegacyProtocol(message);
+    readString(properties, ['protocol', 'Protocol']) ||
+    readString(rawRecord, ['protocol', 'Protocol']) ||
+    extractLegacyProtocol(message)
   const sourceIp =
-    readString(properties, ["sourceIp", "sourceIP", "SourceIp", "SourceIP"]) ||
-    readString(rawRecord, ["sourceIp", "sourceIP", "SourceIp", "SourceIP"]) ||
-    legacyAddressParts.sourceIp;
+    readString(properties, ['sourceIp', 'sourceIP', 'SourceIp', 'SourceIP']) ||
+    readString(rawRecord, ['sourceIp', 'sourceIP', 'SourceIp', 'SourceIP']) ||
+    legacyAddressParts.sourceIp
   const destinationIp =
     readString(properties, [
-      "destinationIp",
-      "destinationIP",
-      "DestinationIp",
-      "DestinationIP",
-      "fqdn",
-      "Fqdn",
-      "FQDN",
-      "destinationFqdn",
-      "DestinationFqdn",
+      'destinationIp',
+      'destinationIP',
+      'DestinationIp',
+      'DestinationIP',
+      'fqdn',
+      'Fqdn',
+      'FQDN',
+      'destinationFqdn',
+      'DestinationFqdn',
     ]) ||
     readString(rawRecord, [
-      "destinationIp",
-      "destinationIP",
-      "DestinationIp",
-      "DestinationIP",
-      "fqdn",
-      "Fqdn",
-      "FQDN",
-      "destinationFqdn",
-      "DestinationFqdn",
+      'destinationIp',
+      'destinationIP',
+      'DestinationIp',
+      'DestinationIP',
+      'fqdn',
+      'Fqdn',
+      'FQDN',
+      'destinationFqdn',
+      'DestinationFqdn',
     ]) ||
-    legacyAddressParts.destinationIp;
+    legacyAddressParts.destinationIp
   const sourcePort =
-    readString(properties, ["sourcePort", "SourcePort"]) ||
-    readString(rawRecord, ["sourcePort", "SourcePort"]) ||
-    legacyAddressParts.sourcePort;
+    readString(properties, ['sourcePort', 'SourcePort']) ||
+    readString(rawRecord, ['sourcePort', 'SourcePort']) ||
+    legacyAddressParts.sourcePort
   const destinationPort =
-    readString(properties, ["destinationPort", "DestinationPort"]) ||
-    readString(rawRecord, ["destinationPort", "DestinationPort"]) ||
-    legacyAddressParts.destinationPort;
+    readString(properties, ['destinationPort', 'DestinationPort']) ||
+    readString(rawRecord, ['destinationPort', 'DestinationPort']) ||
+    legacyAddressParts.destinationPort
   const policy =
-    readString(properties, ["policy", "Policy", "policyName"]) ||
-    readString(rawRecord, ["policy", "Policy", "policyName"]) ||
-    extractLegacyPolicy(message);
+    readString(properties, ['policy', 'Policy', 'policyName']) ||
+    readString(rawRecord, ['policy', 'Policy', 'policyName']) ||
+    extractLegacyPolicy(message)
   const ruleCollectionGroup =
     readString(properties, [
-      "ruleCollectionGroup",
-      "RuleCollectionGroup",
-      "ruleCollectionGroupName",
+      'ruleCollectionGroup',
+      'RuleCollectionGroup',
+      'ruleCollectionGroupName',
     ]) ||
     readString(rawRecord, [
-      "ruleCollectionGroup",
-      "RuleCollectionGroup",
-      "ruleCollectionGroupName",
+      'ruleCollectionGroup',
+      'RuleCollectionGroup',
+      'ruleCollectionGroupName',
     ]) ||
-    extractLegacyRuleCollectionGroup(message);
+    extractLegacyRuleCollectionGroup(message)
   const ruleCollection =
-    readString(properties, ["ruleCollection", "RuleCollection", "ruleCollectionName"]) ||
-    readString(rawRecord, ["ruleCollection", "RuleCollection", "ruleCollectionName"]) ||
-    extractLegacyRuleCollection(message);
+    readString(properties, ['ruleCollection', 'RuleCollection', 'ruleCollectionName']) ||
+    readString(rawRecord, ['ruleCollection', 'RuleCollection', 'ruleCollectionName']) ||
+    extractLegacyRuleCollection(message)
   const explicitRule =
-    readString(properties, ["rule", "Rule", "ruleName"]) ||
-    readString(rawRecord, ["rule", "Rule", "ruleName"]) ||
-    extractLegacyRule(message);
+    readString(properties, ['rule', 'Rule', 'ruleName']) ||
+    readString(rawRecord, ['rule', 'Rule', 'ruleName']) ||
+    extractLegacyRule(message)
   const actionReason =
-    readString(properties, ["actionReason", "ActionReason"]) ||
-    readString(rawRecord, ["actionReason", "ActionReason"]);
+    readString(properties, ['actionReason', 'ActionReason']) ||
+    readString(rawRecord, ['actionReason', 'ActionReason'])
   const usesDefaultAction =
-    DEFAULT_ACTION_REASON_PATTERN.test(actionReason ?? "") ||
-    DEFAULT_ACTION_REASON_PATTERN.test(message);
-  const rule = explicitRule ?? (usesDefaultAction ? "Default" : undefined);
+    DEFAULT_ACTION_REASON_PATTERN.test(actionReason ?? '') ||
+    DEFAULT_ACTION_REASON_PATTERN.test(message)
+  const rule = explicitRule ?? (usesDefaultAction ? 'Default' : undefined)
   const sequenceNumber =
-    input.sequenceNumber === undefined ? undefined : String(input.sequenceNumber);
-  const offset = input.offset === undefined ? undefined : String(input.offset);
+    input.sequenceNumber === undefined ? undefined : String(input.sequenceNumber)
+  const offset = input.offset === undefined ? undefined : String(input.offset)
   const enqueuedTimeUtc =
-    input.enqueuedTimeUtc === undefined ? undefined : normalizeTimestamp(input.enqueuedTimeUtc);
-  const eventRecordIndex = input.eventRecordIndex ?? input.index ?? 0;
+    input.enqueuedTimeUtc === undefined ? undefined : normalizeTimestamp(input.enqueuedTimeUtc)
+  const eventRecordIndex = input.eventRecordIndex ?? input.index ?? 0
   const resourceId =
-    readString(rawRecord, ["resourceId", "ResourceId", "_ResourceId"]) ||
-    readString(properties, ["resourceId", "ResourceId", "_ResourceId"]);
+    readString(rawRecord, ['resourceId', 'ResourceId', '_ResourceId']) ||
+    readString(properties, ['resourceId', 'ResourceId', '_ResourceId'])
   const id = [
-    input.partitionId ?? "partition",
+    input.partitionId ?? 'partition',
     offset ?? sequenceNumber ?? `index-${input.index ?? 0}`,
     eventRecordIndex,
     timestamp,
-    resourceId?.toLowerCase() ?? "resource",
+    resourceId?.toLowerCase() ?? 'resource',
     category.toLowerCase(),
-  ].join(":");
+  ].join(':')
   const searchableText = [
     timestamp,
     category,
@@ -356,8 +354,8 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     message,
   ]
     .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+    .join(' ')
+    .toLowerCase()
 
   return {
     id,
@@ -400,8 +398,8 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
       resourceId,
       message,
       raw: input.raw,
-      origin: "event-hub",
+      origin: 'event-hub',
     }),
     searchableText,
-  };
+  }
 }

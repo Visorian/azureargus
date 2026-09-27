@@ -1,34 +1,34 @@
-import type { FirewallLogRecord, FirewallLogSortDirection, FirewallLogSortKey } from "./firewall";
+import type { FirewallLogRecord, FirewallLogSortDirection, FirewallLogSortKey } from './firewall'
 
 export interface LogAnalyticsFilters {
-  search: string;
-  category: string[];
-  action: string;
-  protocol: string;
-  source: string;
-  sourcePort: string;
-  destination: string;
-  destinationPort: string;
+  search: string
+  category: string[]
+  action: string
+  protocol: string
+  source: string
+  sourcePort: string
+  destination: string
+  destinationPort: string
 }
 
 export interface LogAnalyticsSort {
-  key: FirewallLogSortKey;
-  direction: FirewallLogSortDirection;
+  key: FirewallLogSortKey
+  direction: FirewallLogSortDirection
 }
 
-export type LogAnalyticsStorageKind = "resource-specific" | "azure-diagnostics";
+export type LogAnalyticsStorageKind = 'resource-specific' | 'azure-diagnostics'
 
 export interface LogAnalyticsQueryRequest {
-  from: string;
-  to: string;
-  filters: LogAnalyticsFilters;
-  limit: number;
-  storage: LogAnalyticsStorageKind;
-  sort: LogAnalyticsSort;
+  from: string
+  to: string
+  filters: LogAnalyticsFilters
+  limit: number
+  storage: LogAnalyticsStorageKind
+  sort: LogAnalyticsSort
 }
 
 export interface LogAnalyticsQueryResponse {
-  records: FirewallLogRecord[];
-  truncated: boolean;
-  limit: number;
+  records: FirewallLogRecord[]
+  truncated: boolean
+  limit: number
 }

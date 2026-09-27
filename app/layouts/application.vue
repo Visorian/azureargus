@@ -1,41 +1,41 @@
 <script setup lang="ts">
-const runtimeConfig = useRuntimeConfig();
-const anonymousMode = useAnonymousMode();
-const deployment = useDeploymentCapabilities();
-const { loggedIn, logout, user } = useOidcAuth();
+const runtimeConfig = useRuntimeConfig()
+const anonymousMode = useAnonymousMode()
+const deployment = useDeploymentCapabilities()
+const { loggedIn, logout, user } = useOidcAuth()
 
 const identityLabel = computed(() => {
   if (anonymousMode.enabled.value) {
-    return "Temporary session";
+    return 'Temporary session'
   }
 
-  const profile = user.value;
-  if (profile && typeof profile === "object") {
-    const claims = profile as unknown as Record<string, unknown>;
-    const preferredUsername = claims.preferred_username;
-    const email = claims.email;
-    const name = claims.name;
+  const profile = user.value
+  if (profile && typeof profile === 'object') {
+    const claims = profile as unknown as Record<string, unknown>
+    const preferredUsername = claims.preferred_username
+    const email = claims.email
+    const name = claims.name
 
-    if (typeof preferredUsername === "string") {
-      return preferredUsername;
+    if (typeof preferredUsername === 'string') {
+      return preferredUsername
     }
-    if (typeof email === "string") {
-      return email;
+    if (typeof email === 'string') {
+      return email
     }
-    if (typeof name === "string") {
-      return name;
+    if (typeof name === 'string') {
+      return name
     }
   }
 
-  return loggedIn.value ? "Authenticated" : "Not signed in";
-});
+  return loggedIn.value ? 'Authenticated' : 'Not signed in'
+})
 
 async function leave() {
-  if (deployment.capabilities.value?.mode !== "managed") {
-    return;
+  if (deployment.capabilities.value?.mode !== 'managed') {
+    return
   }
 
-  await logout("entra", "/login");
+  await logout('entra', '/login')
 }
 </script>
 
@@ -59,7 +59,7 @@ async function leave() {
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <span class="hidden text-xs text-brand-gray-600 dark:text-brand-gray-300 sm:inline">
+          <span class="hidden text-xs text-brand-gray-600 sm:inline dark:text-brand-gray-300">
             {{ identityLabel }}
           </span>
           <UColorModeButton />

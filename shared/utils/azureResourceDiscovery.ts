@@ -2,53 +2,53 @@ import type {
   AzureAccessibleTenant,
   AzureAccessibleWorkspace,
   AzureLogAnalyticsAccess,
-} from "../types/azureAccess";
+} from '../types/azureAccess'
 
-const MANAGEMENT_ORIGIN = "https://management.azure.com";
-const SUBSCRIPTIONS_API_VERSION = "2022-12-01";
-const RESOURCE_GRAPH_API_VERSION = "2024-04-01";
+const MANAGEMENT_ORIGIN = 'https://management.azure.com'
+const SUBSCRIPTIONS_API_VERSION = '2022-12-01'
+const RESOURCE_GRAPH_API_VERSION = '2024-04-01'
 const WORKSPACE_QUERY =
-  "Resources | where type =~ 'microsoft.operationalinsights/workspaces' | project name, location, subscriptionId, resourceGroup, workspaceId=tostring(properties.customerId)";
-const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+  "Resources | where type =~ 'microsoft.operationalinsights/workspaces' | project name, location, subscriptionId, resourceGroup, workspaceId=tostring(properties.customerId)"
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 
 interface AzurePage {
-  value: unknown[];
-  nextLink?: string;
+  value: unknown[]
+  nextLink?: string
 }
 
 interface AzureSubscription {
-  subscriptionId: string;
-  displayName: string;
+  subscriptionId: string
+  displayName: string
 }
 
 export class AzureResourceDiscoveryError extends Error {
   constructor(readonly status: number) {
-    super("Azure resource discovery failed");
+    super('Azure resource discovery failed')
   }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === 'object' && value !== null
 }
 
 function readString(value: unknown) {
-  return typeof value === "string" ? value : null;
+  return typeof value === 'string' ? value : null
 }
 
 function validateManagementUrl(value: string) {
-  const url = new URL(value);
-  if (url.origin !== MANAGEMENT_ORIGIN || url.protocol !== "https:") {
-    throw new AzureResourceDiscoveryError(502);
+  const url = new URL(value)
+  if (url.origin !== MANAGEMENT_ORIGIN || url.protocol !== 'https:') {
+    throw new AzureResourceDiscoveryError(502)
   }
-  return url.toString();
+  return url.toString()
 }
 
 function validateManagementResponse(response: Response) {
   if (response.redirected) {
-    throw new AzureResourceDiscoveryError(502);
+    throw new AzureResourceDiscoveryError(502)
   }
   if (response.url) {
-    validateManagementUrl(response.url);
+    validateManagementUrl(response.url)
   }
 }
 
@@ -60,20 +60,20 @@ async function readPage(
 ) {
   const response = await fetchImplementation(validateManagementUrl(url), {
     headers: { authorization: `Bearer ${accessToken}` },
-    redirect: "error",
+    redirect: 'error',
     signal,
-  });
-  validateManagementResponse(response);
+  })
+  validateManagementResponse(response)
   if (!response.ok) {
-    throw new AzureResourceDiscoveryError(response.status);
+    throw new AzureResourceDiscoveryError(response.status)
   }
 
-  const value: unknown = await response.json();
+  const value: unknown = await response.json()
   if (!isRecord(value) || !Array.isArray(value.value)) {
-    throw new AzureResourceDiscoveryError(502);
+    throw new AzureResourceDiscoveryError(502)
   }
-  const nextLink = readString(value.nextLink) ?? undefined;
-  return { nextLink, value: value.value } satisfies AzurePage;
+  const nextLink = readString(value.nextLink) ?? undefined
+  return { nextLink, value: value.value } satisfies AzurePage
 }
 
 async function readAllPages(
@@ -82,70 +82,70 @@ async function readAllPages(
   signal: AbortSignal,
   fetchImplementation: typeof fetch,
 ) {
-  const values: unknown[] = [];
-  const seenUrls = new Set<string>();
-  let url: string | undefined = initialUrl;
+  const values: unknown[] = []
+  const seenUrls = new Set<string>()
+  let url: string | undefined = initialUrl
   while (url !== undefined) {
     if (seenUrls.has(url)) {
-      throw new AzureResourceDiscoveryError(502);
+      throw new AzureResourceDiscoveryError(502)
     }
-    seenUrls.add(url);
-    const page = await readPage(url, accessToken, signal, fetchImplementation);
-    values.push(...page.value);
-    url = page.nextLink;
+    seenUrls.add(url)
+    const page = await readPage(url, accessToken, signal, fetchImplementation)
+    values.push(...page.value)
+    url = page.nextLink
   }
-  return values;
+  return values
 }
 
 function parseTenants(values: unknown[]) {
-  const tenants = new Map<string, AzureAccessibleTenant>();
+  const tenants = new Map<string, AzureAccessibleTenant>()
   for (const value of values) {
     if (!isRecord(value)) {
-      continue;
+      continue
     }
-    const tenantId = readString(value.tenantId);
+    const tenantId = readString(value.tenantId)
     if (!tenantId || !UUID_PATTERN.test(tenantId)) {
-      continue;
+      continue
     }
-    const displayName = readString(value.displayName)?.trim() || tenantId;
+    const displayName = readString(value.displayName)?.trim() || tenantId
     tenants.set(tenantId, {
       defaultDomain: readString(value.defaultDomain),
       displayName,
       tenantId,
-    });
+    })
   }
   return [...tenants.values()].toSorted((left, right) =>
     left.displayName.localeCompare(right.displayName),
-  );
+  )
 }
 
 function parseSubscriptions(values: unknown[]) {
-  const subscriptions = new Map<string, AzureSubscription>();
+  const subscriptions = new Map<string, AzureSubscription>()
   for (const value of values) {
     if (!isRecord(value)) {
-      continue;
+      continue
     }
-    const subscriptionId = readString(value.subscriptionId);
+    const subscriptionId = readString(value.subscriptionId)
     if (!subscriptionId || !UUID_PATTERN.test(subscriptionId)) {
-      continue;
+      continue
     }
     subscriptions.set(subscriptionId, {
       displayName: readString(value.displayName)?.trim() || subscriptionId,
       subscriptionId,
-    });
+    })
   }
-  return [...subscriptions.values()];
+  return [...subscriptions.values()]
 }
 
 function parseWorkspaces(values: unknown[], subscriptions: ReadonlyMap<string, AzureSubscription>) {
-  const workspaces: AzureAccessibleWorkspace[] = [];
+  const workspaces: AzureAccessibleWorkspace[] = []
   for (const value of values) {
     if (!isRecord(value)) {
-      continue;
+      continue
     }
-    const workspaceId = readString(value.workspaceId);
-    const name = readString(value.name);
-    const subscriptionId = readString(value.subscriptionId);
+    const workspaceId = readString(value.workspaceId)
+    const name = readString(value.name)
+    const subscriptionId = readString(value.subscriptionId)
     if (
       !workspaceId ||
       !UUID_PATTERN.test(workspaceId) ||
@@ -153,19 +153,19 @@ function parseWorkspaces(values: unknown[], subscriptions: ReadonlyMap<string, A
       !subscriptionId ||
       !UUID_PATTERN.test(subscriptionId)
     ) {
-      continue;
+      continue
     }
-    const subscription = subscriptions.get(subscriptionId);
+    const subscription = subscriptions.get(subscriptionId)
     workspaces.push({
-      location: readString(value.location) ?? "",
+      location: readString(value.location) ?? '',
       name,
-      resourceGroup: readString(value.resourceGroup) ?? "",
+      resourceGroup: readString(value.resourceGroup) ?? '',
       subscriptionId,
       subscriptionName: subscription?.displayName ?? subscriptionId,
       workspaceId,
-    });
+    })
   }
-  return workspaces;
+  return workspaces
 }
 
 async function readWorkspaceGraph(
@@ -175,15 +175,15 @@ async function readWorkspaceGraph(
   fetchImplementation: typeof fetch,
 ) {
   if (subscriptions.length === 0) {
-    return [];
+    return []
   }
-  const subscriptionIds = subscriptions.map((subscription) => subscription.subscriptionId);
+  const subscriptionIds = subscriptions.map((subscription) => subscription.subscriptionId)
   const subscriptionMap = new Map(
     subscriptions.map((subscription) => [subscription.subscriptionId, subscription]),
-  );
-  const values: unknown[] = [];
-  const seenSkipTokens = new Set<string>();
-  let skipToken: string | undefined;
+  )
+  const values: unknown[] = []
+  const seenSkipTokens = new Set<string>()
+  let skipToken: string | undefined
   do {
     const response = await fetchImplementation(
       `${MANAGEMENT_ORIGIN}/providers/Microsoft.ResourceGraph/resources?api-version=${RESOURCE_GRAPH_API_VERSION}`,
@@ -195,32 +195,32 @@ async function readWorkspaceGraph(
         }),
         headers: {
           authorization: `Bearer ${accessToken}`,
-          "content-type": "application/json",
+          'content-type': 'application/json',
         },
-        method: "POST",
-        redirect: "error",
+        method: 'POST',
+        redirect: 'error',
         signal,
       },
-    );
-    validateManagementResponse(response);
+    )
+    validateManagementResponse(response)
     if (!response.ok) {
-      throw new AzureResourceDiscoveryError(response.status);
+      throw new AzureResourceDiscoveryError(response.status)
     }
-    const value: unknown = await response.json();
+    const value: unknown = await response.json()
     if (!isRecord(value) || !Array.isArray(value.data)) {
-      throw new AzureResourceDiscoveryError(502);
+      throw new AzureResourceDiscoveryError(502)
     }
-    values.push(...value.data);
-    skipToken = readString(value.$skipToken) ?? undefined;
+    values.push(...value.data)
+    skipToken = readString(value.$skipToken) ?? undefined
     if (skipToken && seenSkipTokens.has(skipToken)) {
-      throw new AzureResourceDiscoveryError(502);
+      throw new AzureResourceDiscoveryError(502)
     }
     if (skipToken) {
-      seenSkipTokens.add(skipToken);
+      seenSkipTokens.add(skipToken)
     }
-  } while (skipToken !== undefined);
+  } while (skipToken !== undefined)
 
-  return parseWorkspaces(values, subscriptionMap);
+  return parseWorkspaces(values, subscriptionMap)
 }
 
 export async function discoverAzureLogAnalyticsAccess(
@@ -241,17 +241,17 @@ export async function discoverAzureLogAnalyticsAccess(
       signal,
       fetchImplementation,
     ),
-  ]);
-  const subscriptions = parseSubscriptions(subscriptionValues);
+  ])
+  const subscriptions = parseSubscriptions(subscriptionValues)
   const discoveredWorkspaces = await readWorkspaceGraph(
     subscriptions,
     accessToken,
     signal,
     fetchImplementation,
-  );
-  const workspaces = new Map<string, AzureAccessibleWorkspace>();
+  )
+  const workspaces = new Map<string, AzureAccessibleWorkspace>()
   for (const workspace of discoveredWorkspaces) {
-    workspaces.set(workspace.workspaceId, workspace);
+    workspaces.set(workspace.workspaceId, workspace)
   }
 
   return {
@@ -259,5 +259,5 @@ export async function discoverAzureLogAnalyticsAccess(
     workspaces: [...workspaces.values()].toSorted((left, right) =>
       left.name.localeCompare(right.name),
     ),
-  };
+  }
 }

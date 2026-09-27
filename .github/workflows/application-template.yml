@@ -3,14 +3,14 @@ name: Validate application deployment template
 on:
   pull_request:
     paths:
-      - "infrastructure/application/**"
-      - ".github/workflows/application-template.yml"
+      - 'infrastructure/application/**'
+      - '.github/workflows/application-template.yml'
   push:
     branches:
       - main
     paths:
-      - "infrastructure/application/**"
-      - ".github/workflows/application-template.yml"
+      - 'infrastructure/application/**'
+      - '.github/workflows/application-template.yml'
 
 permissions:
   contents: read

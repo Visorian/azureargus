@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "semi": false,
+  "ignorePatterns": ["CHANGELOG.md", "infrastructure/**/azuredeploy*.json"],
+  "sortImports": {},
+  "sortPackageJson": true,
+  "sortTailwindcss": {
+    "stylesheet": "./app/assets/css/main.css"
+  }
+}

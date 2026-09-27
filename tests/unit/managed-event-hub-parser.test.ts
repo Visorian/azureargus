@@ -1,55 +1,55 @@
-import { consumeManagedEventHubStream } from "../../app/utils/managedEventHubStream";
-import type { ManagedEventHubStreamEnvelope } from "../../shared/types/managedEventHub";
+import { consumeManagedEventHubStream } from '../../app/utils/managedEventHubStream'
+import type { ManagedEventHubStreamEnvelope } from '../../shared/types/managedEventHub'
 
-describe("managed Event Hub NDJSON parser", () => {
-  it("reassembles split chunks and parses multiple envelopes per chunk", async () => {
-    const encoder = new TextEncoder();
+describe('managed Event Hub NDJSON parser', () => {
+  it('reassembles split chunks and parses multiple envelopes per chunk', async () => {
+    const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('{"type":"heart'));
+        controller.enqueue(encoder.encode('{"type":"heart'))
         controller.enqueue(
           encoder.encode(
             'beat"}\n{"type":"caught-up"}\n{"type":"events","events":[{"body":{"msg":"allow"},"enqueuedTimeUtc":"2026-07-12T12:00:00.000Z",',
           ),
-        );
+        )
         controller.enqueue(
           encoder.encode(
             '"offset":"123","partitionId":"0","sequenceNumber":7,"applicationProperties":{"schemaVersion":"1","diagnosticCategory":"network"}}]}\n{"type":"error","message":"Session expired"}',
           ),
-        );
-        controller.close();
+        )
+        controller.close()
       },
-    });
-    const envelopes: ManagedEventHubStreamEnvelope[] = [];
+    })
+    const envelopes: ManagedEventHubStreamEnvelope[] = []
 
     await consumeManagedEventHubStream(
       stream,
       (envelope) => {
-        envelopes.push(envelope);
+        envelopes.push(envelope)
       },
       new AbortController().signal,
-    );
+    )
 
     expect(envelopes).toEqual([
-      { type: "heartbeat" },
-      { type: "caught-up" },
+      { type: 'heartbeat' },
+      { type: 'caught-up' },
       {
-        type: "events",
+        type: 'events',
         events: [
           {
-            body: { msg: "allow" },
-            enqueuedTimeUtc: "2026-07-12T12:00:00.000Z",
-            offset: "123",
-            partitionId: "0",
+            body: { msg: 'allow' },
+            enqueuedTimeUtc: '2026-07-12T12:00:00.000Z',
+            offset: '123',
+            partitionId: '0',
             sequenceNumber: 7,
             applicationProperties: {
-              schemaVersion: "1",
-              diagnosticCategory: "network",
+              schemaVersion: '1',
+              diagnosticCategory: 'network',
             },
           },
         ],
       },
-      { type: "error", message: "Session expired" },
-    ]);
-  });
-});
+      { type: 'error', message: 'Session expired' },
+    ])
+  })
+})

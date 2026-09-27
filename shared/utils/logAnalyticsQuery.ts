@@ -1,60 +1,58 @@
-import type { FirewallLogRecord } from "../types/firewall";
-
+import type { FirewallLogRecord } from '../types/firewall'
 import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
   LogAnalyticsSort,
   LogAnalyticsStorageKind,
-} from "../types/logAnalytics";
-import { isLogAnalyticsQueryLimit } from "./logAnalytics";
-import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from "./azureDiagnosticsLogAnalytics";
+} from '../types/logAnalytics'
+import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from './azureDiagnosticsLogAnalytics'
+import { isLogAnalyticsQueryLimit } from './logAnalytics'
 
-const MAX_RANGE_MS = 24 * 60 * 60 * 1000;
-const MAX_FILTER_LENGTH = 256;
-const MAX_CATEGORY_FILTERS = 32;
-const DEFAULT_TIMEOUT_MS = 15_000;
-const ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_RANGE_MS = 24 * 60 * 60 * 1000
+const MAX_FILTER_LENGTH = 256
+const MAX_CATEGORY_FILTERS = 32
+const DEFAULT_TIMEOUT_MS = 15_000
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TEXT_FILTER_KEYS = [
-  "search",
-  "action",
-  "protocol",
-  "source",
-  "sourcePort",
-  "destination",
-  "destinationPort",
-] as const;
-const FILTER_KEYS = [...TEXT_FILTER_KEYS, "category"] as const;
-const SORT_COLUMNS: Record<LogAnalyticsSort["key"], string> = {
-  timestamp: "TimeGenerated",
-  category: "tolower(Category)",
-  action: "tolower(Action)",
-  protocol: "tolower(Protocol)",
-  sourceIp: "tolower(SourceIp)",
-  sourcePort: "tolower(SourcePort)",
-  destinationIp: "tolower(DestinationIp)",
-  destinationPort: "tolower(DestinationPort)",
-  ruleCollection: "tolower(RuleCollection)",
-  rule: "tolower(Rule)",
-  message: "tolower(Message)",
-};
+  'search',
+  'action',
+  'protocol',
+  'source',
+  'sourcePort',
+  'destination',
+  'destinationPort',
+] as const
+const FILTER_KEYS = [...TEXT_FILTER_KEYS, 'category'] as const
+const SORT_COLUMNS: Record<LogAnalyticsSort['key'], string> = {
+  timestamp: 'TimeGenerated',
+  category: 'tolower(Category)',
+  action: 'tolower(Action)',
+  protocol: 'tolower(Protocol)',
+  sourceIp: 'tolower(SourceIp)',
+  sourcePort: 'tolower(SourcePort)',
+  destinationIp: 'tolower(DestinationIp)',
+  destinationPort: 'tolower(DestinationPort)',
+  ruleCollection: 'tolower(RuleCollection)',
+  rule: 'tolower(Rule)',
+  message: 'tolower(Message)',
+}
 const REQUIRED_RESULT_COLUMNS = [
-  "TimeGenerated",
-  "Category",
-  "Action",
-  "Protocol",
-  "SourceIp",
-  "SourcePort",
-  "DestinationIp",
-  "DestinationFqdn",
-  "DestinationPort",
-  "Policy",
-  "RuleCollectionGroup",
-  "RuleCollection",
-  "Rule",
-  "Message",
-] as const;
+  'TimeGenerated',
+  'Category',
+  'Action',
+  'Protocol',
+  'SourceIp',
+  'SourcePort',
+  'DestinationIp',
+  'DestinationFqdn',
+  'DestinationPort',
+  'Policy',
+  'RuleCollectionGroup',
+  'RuleCollection',
+  'Rule',
+  'Message',
+] as const
 
 const RESOURCE_SPECIFIC_BASE_QUERY = `union isfuzzy=true withsource=Category AZFWNetworkRule, AZFWApplicationRule, AZFWNatRule
 | project
@@ -71,7 +69,7 @@ const RESOURCE_SPECIFIC_BASE_QUERY = `union isfuzzy=true withsource=Category AZF
     RuleCollectionGroup = tostring(column_ifexists("RuleCollectionGroup", "")),
     RuleCollection = tostring(column_ifexists("RuleCollection", "")),
     Rule = tostring(column_ifexists("Rule", "")),
-    ActionReason = tostring(column_ifexists("ActionReason", ""))`;
+    ActionReason = tostring(column_ifexists("ActionReason", ""))`
 
 const CANONICAL_QUERY_SUFFIX = `| extend Rule = iff(
     isempty(Rule) and ActionReason contains "default action",
@@ -123,45 +121,45 @@ const CANONICAL_QUERY_SUFFIX = `| extend Rule = iff(
     RuleCollection, " ",
     Rule, " ",
     Message
-  )`;
+  )`
 
-export type LogAnalyticsQueryErrorKind = "authorization" | "throttled" | "timeout" | "upstream";
+export type LogAnalyticsQueryErrorKind = 'authorization' | 'throttled' | 'timeout' | 'upstream'
 
 export class LogAnalyticsQueryError extends Error {
-  readonly kind: LogAnalyticsQueryErrorKind;
-  readonly retryAfterSeconds?: number;
+  readonly kind: LogAnalyticsQueryErrorKind
+  readonly retryAfterSeconds?: number
 
   constructor(kind: LogAnalyticsQueryErrorKind, retryAfterSeconds?: number) {
-    super("Log Analytics query failed");
-    this.name = "LogAnalyticsQueryError";
-    this.kind = kind;
-    this.retryAfterSeconds = retryAfterSeconds;
+    super('Log Analytics query failed')
+    this.name = 'LogAnalyticsQueryError'
+    this.kind = kind
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly string[]) {
-  const actualKeys = Object.keys(value);
+  const actualKeys = Object.keys(value)
   return (
     actualKeys.length === expectedKeys.length &&
     actualKeys.every((key) => expectedKeys.includes(key))
-  );
+  )
 }
 
 function isIsoTimestamp(value: unknown): value is string {
   return (
-    typeof value === "string" &&
+    typeof value === 'string' &&
     ISO_TIMESTAMP_PATTERN.test(value) &&
     Number.isFinite(Date.parse(value))
-  );
+  )
 }
 
 function isValidFilterObject(value: unknown) {
   if (!isRecord(value) || !hasExactKeys(value, FILTER_KEYS)) {
-    return false;
+    return false
   }
 
   return (
@@ -169,144 +167,144 @@ function isValidFilterObject(value: unknown) {
     value.category.length <= MAX_CATEGORY_FILTERS &&
     value.category.every(
       (category) =>
-        typeof category === "string" &&
+        typeof category === 'string' &&
         category.trim().length > 0 &&
         category.length <= MAX_FILTER_LENGTH,
     ) &&
     TEXT_FILTER_KEYS.every((key) => {
-      const filterValue = value[key];
-      return typeof filterValue === "string" && filterValue.length <= MAX_FILTER_LENGTH;
+      const filterValue = value[key]
+      return typeof filterValue === 'string' && filterValue.length <= MAX_FILTER_LENGTH
     })
-  );
+  )
 }
 
 function isValidSortObject(value: unknown) {
   return (
     isRecord(value) &&
-    hasExactKeys(value, ["key", "direction"]) &&
-    typeof value.key === "string" &&
+    hasExactKeys(value, ['key', 'direction']) &&
+    typeof value.key === 'string' &&
     Object.hasOwn(SORT_COLUMNS, value.key) &&
-    (value.direction === "asc" || value.direction === "desc")
-  );
+    (value.direction === 'asc' || value.direction === 'desc')
+  )
 }
 
 function isLogAnalyticsStorageKind(value: unknown): value is LogAnalyticsStorageKind {
-  return value === "resource-specific" || value === "azure-diagnostics";
+  return value === 'resource-specific' || value === 'azure-diagnostics'
 }
 
 export function isLogAnalyticsWorkspaceId(value: unknown): value is string {
-  return typeof value === "string" && WORKSPACE_ID_PATTERN.test(value);
+  return typeof value === 'string' && WORKSPACE_ID_PATTERN.test(value)
 }
 
 function readRetryAfterSeconds(response: Response) {
-  const value = response.headers.get("retry-after");
+  const value = response.headers.get('retry-after')
   if (value === null) {
-    return undefined;
+    return undefined
   }
 
-  const seconds = Number(value);
-  return Number.isInteger(seconds) && seconds >= 0 ? seconds : undefined;
+  const seconds = Number(value)
+  return Number.isInteger(seconds) && seconds >= 0 ? seconds : undefined
 }
 
 function errorForResponse(response: Response) {
   if (response.status === 401 || response.status === 403) {
-    return new LogAnalyticsQueryError("authorization");
+    return new LogAnalyticsQueryError('authorization')
   }
   if (response.status === 429) {
-    return new LogAnalyticsQueryError("throttled", readRetryAfterSeconds(response));
+    return new LogAnalyticsQueryError('throttled', readRetryAfterSeconds(response))
   }
 
-  return new LogAnalyticsQueryError("upstream");
+  return new LogAnalyticsQueryError('upstream')
 }
 
 function readCell(row: unknown[], columnIndexes: Map<string, number>, columnName: string) {
-  const index = columnIndexes.get(columnName);
+  const index = columnIndexes.get(columnName)
   if (index === undefined) {
-    throw new LogAnalyticsQueryError("upstream");
+    throw new LogAnalyticsQueryError('upstream')
   }
 
-  return row[index];
+  return row[index]
 }
 
 function readTextCell(row: unknown[], columnIndexes: Map<string, number>, columnName: string) {
-  const value = readCell(row, columnIndexes, columnName);
+  const value = readCell(row, columnIndexes, columnName)
   if (value === null || value === undefined) {
-    return "";
+    return ''
   }
-  if (typeof value !== "string") {
-    throw new LogAnalyticsQueryError("upstream");
+  if (typeof value !== 'string') {
+    throw new LogAnalyticsQueryError('upstream')
   }
 
-  return value;
+  return value
 }
 
 function optionalText(value: string) {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
 }
 
 function compareRecords(left: FirewallLogRecord, right: FirewallLogRecord, sort: LogAnalyticsSort) {
-  let result: number;
-  if (sort.key === "timestamp") {
-    result = Date.parse(left.timestamp) - Date.parse(right.timestamp);
+  let result: number
+  if (sort.key === 'timestamp') {
+    result = Date.parse(left.timestamp) - Date.parse(right.timestamp)
   } else {
-    result = (left[sort.key] ?? "")
+    result = (left[sort.key] ?? '')
       .toLowerCase()
-      .localeCompare((right[sort.key] ?? "").toLowerCase());
+      .localeCompare((right[sort.key] ?? '').toLowerCase())
   }
 
   if (result === 0) {
-    result = left.id.localeCompare(right.id);
+    result = left.id.localeCompare(right.id)
   }
 
-  return sort.direction === "asc" ? result : -result;
+  return sort.direction === 'asc' ? result : -result
 }
 
 function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryId: string) {
   if (!Array.isArray(table.columns) || !Array.isArray(table.rows)) {
-    throw new LogAnalyticsQueryError("upstream");
+    throw new LogAnalyticsQueryError('upstream')
   }
 
-  const columnIndexes = new Map<string, number>();
+  const columnIndexes = new Map<string, number>()
   for (const [columnIndex, column] of table.columns.entries()) {
-    if (!isRecord(column) || typeof column.name !== "string" || columnIndexes.has(column.name)) {
-      throw new LogAnalyticsQueryError("upstream");
+    if (!isRecord(column) || typeof column.name !== 'string' || columnIndexes.has(column.name)) {
+      throw new LogAnalyticsQueryError('upstream')
     }
-    columnIndexes.set(column.name, columnIndex);
+    columnIndexes.set(column.name, columnIndex)
   }
   if (REQUIRED_RESULT_COLUMNS.some((columnName) => !columnIndexes.has(columnName))) {
-    throw new LogAnalyticsQueryError("upstream");
+    throw new LogAnalyticsQueryError('upstream')
   }
 
-  const records: FirewallLogRecord[] = [];
+  const records: FirewallLogRecord[] = []
   for (const [rowIndex, row] of table.rows.entries()) {
     if (!Array.isArray(row)) {
-      throw new LogAnalyticsQueryError("upstream");
+      throw new LogAnalyticsQueryError('upstream')
     }
 
-    const timestampValue = readTextCell(row, columnIndexes, "TimeGenerated");
-    const timestampMs = Date.parse(timestampValue);
+    const timestampValue = readTextCell(row, columnIndexes, 'TimeGenerated')
+    const timestampMs = Date.parse(timestampValue)
     if (!Number.isFinite(timestampMs)) {
-      throw new LogAnalyticsQueryError("upstream");
+      throw new LogAnalyticsQueryError('upstream')
     }
 
-    const timestamp = new Date(timestampMs).toISOString();
-    const category = readTextCell(row, columnIndexes, "Category");
-    const action = readTextCell(row, columnIndexes, "Action");
-    const protocol = readTextCell(row, columnIndexes, "Protocol");
-    const sourceIp = optionalText(readTextCell(row, columnIndexes, "SourceIp"));
-    const sourcePort = optionalText(readTextCell(row, columnIndexes, "SourcePort"));
-    const projectedDestination = optionalText(readTextCell(row, columnIndexes, "DestinationIp"));
-    const destinationFqdn = optionalText(readTextCell(row, columnIndexes, "DestinationFqdn"));
-    const destinationIp = projectedDestination ?? destinationFqdn;
-    const destinationPort = optionalText(readTextCell(row, columnIndexes, "DestinationPort"));
-    const policy = optionalText(readTextCell(row, columnIndexes, "Policy"));
+    const timestamp = new Date(timestampMs).toISOString()
+    const category = readTextCell(row, columnIndexes, 'Category')
+    const action = readTextCell(row, columnIndexes, 'Action')
+    const protocol = readTextCell(row, columnIndexes, 'Protocol')
+    const sourceIp = optionalText(readTextCell(row, columnIndexes, 'SourceIp'))
+    const sourcePort = optionalText(readTextCell(row, columnIndexes, 'SourcePort'))
+    const projectedDestination = optionalText(readTextCell(row, columnIndexes, 'DestinationIp'))
+    const destinationFqdn = optionalText(readTextCell(row, columnIndexes, 'DestinationFqdn'))
+    const destinationIp = projectedDestination ?? destinationFqdn
+    const destinationPort = optionalText(readTextCell(row, columnIndexes, 'DestinationPort'))
+    const policy = optionalText(readTextCell(row, columnIndexes, 'Policy'))
     const ruleCollectionGroup = optionalText(
-      readTextCell(row, columnIndexes, "RuleCollectionGroup"),
-    );
-    const ruleCollection = optionalText(readTextCell(row, columnIndexes, "RuleCollection"));
-    const rule = optionalText(readTextCell(row, columnIndexes, "Rule"));
-    const message = readTextCell(row, columnIndexes, "Message");
+      readTextCell(row, columnIndexes, 'RuleCollectionGroup'),
+    )
+    const ruleCollection = optionalText(readTextCell(row, columnIndexes, 'RuleCollection'))
+    const rule = optionalText(readTextCell(row, columnIndexes, 'Rule'))
+    const message = readTextCell(row, columnIndexes, 'Message')
     const raw = {
       TimeGenerated: timestamp,
       Category: category,
@@ -322,7 +320,7 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
       RuleCollection: ruleCollection,
       Rule: rule,
       Message: message,
-    };
+    }
     const searchableText = [
       timestamp,
       category,
@@ -339,8 +337,8 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
       message,
     ]
       .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+      .join(' ')
+      .toLowerCase()
 
     records.push({
       id: `${queryId}:${tableIndex}:${rowIndex}`,
@@ -359,10 +357,10 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
       message,
       raw,
       searchableText,
-    });
+    })
   }
 
-  return records;
+  return records
 }
 
 export function validateLogAnalyticsQueryRequest(
@@ -370,7 +368,7 @@ export function validateLogAnalyticsQueryRequest(
 ): value is LogAnalyticsQueryRequest {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["from", "to", "filters", "limit", "storage", "sort"]) ||
+    !hasExactKeys(value, ['from', 'to', 'filters', 'limit', 'storage', 'sort']) ||
     !isIsoTimestamp(value.from) ||
     !isIsoTimestamp(value.to) ||
     !isValidFilterObject(value.filters) ||
@@ -378,35 +376,35 @@ export function validateLogAnalyticsQueryRequest(
     !isLogAnalyticsStorageKind(value.storage) ||
     !isValidSortObject(value.sort)
   ) {
-    return false;
+    return false
   }
 
-  const from = Date.parse(value.from);
-  const to = Date.parse(value.to);
-  return from < to && to - from <= MAX_RANGE_MS;
+  const from = Date.parse(value.from)
+  const to = Date.parse(value.to)
+  return from < to && to - from <= MAX_RANGE_MS
 }
 
 export function encodeKqlStringLiteral(value: string) {
-  return JSON.stringify(value);
+  return JSON.stringify(value)
 }
 
 export function getLogAnalyticsResultLimit(request: LogAnalyticsQueryRequest) {
-  return request.limit;
+  return request.limit
 }
 
 function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, baseQuery: string) {
-  const clauses = [baseQuery, CANONICAL_QUERY_SUFFIX];
+  const clauses = [baseQuery, CANONICAL_QUERY_SUFFIX]
   const filters = {
-    search: "SearchableText",
-    action: "Action",
-    protocol: "Protocol",
-  } as const;
+    search: 'SearchableText',
+    action: 'Action',
+    protocol: 'Protocol',
+  } as const
   const exactFilters = {
-    source: "SourceIp",
-    sourcePort: "SourcePort",
-    destination: "DestinationIp",
-    destinationPort: "DestinationPort",
-  } as const;
+    source: 'SourceIp',
+    sourcePort: 'SourcePort',
+    destination: 'DestinationIp',
+    destinationPort: 'DestinationPort',
+  } as const
 
   const categories = [
     ...new Set(
@@ -414,38 +412,38 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
         .map((value) => value.trim().toLowerCase())
         .filter((value) => value.length > 0),
     ),
-  ].toSorted();
+  ].toSorted()
   if (categories.length > 0) {
-    clauses.push(`| where Category in~ (${categories.map(encodeKqlStringLiteral).join(", ")})`);
+    clauses.push(`| where Category in~ (${categories.map(encodeKqlStringLiteral).join(', ')})`)
   }
 
-  for (const key of ["search", "action", "protocol"] as const) {
-    const value = request.filters[key].trim().toLowerCase();
+  for (const key of ['search', 'action', 'protocol'] as const) {
+    const value = request.filters[key].trim().toLowerCase()
     if (value.length > 0) {
-      clauses.push(`| where ${filters[key]} contains ${encodeKqlStringLiteral(value)}`);
+      clauses.push(`| where ${filters[key]} contains ${encodeKqlStringLiteral(value)}`)
     }
   }
 
-  for (const key of ["source", "sourcePort", "destination", "destinationPort"] as const) {
-    const value = request.filters[key].trim().toLowerCase();
+  for (const key of ['source', 'sourcePort', 'destination', 'destinationPort'] as const) {
+    const value = request.filters[key].trim().toLowerCase()
     if (value.length > 0) {
-      clauses.push(`| where ${exactFilters[key]} =~ ${encodeKqlStringLiteral(value)}`);
+      clauses.push(`| where ${exactFilters[key]} =~ ${encodeKqlStringLiteral(value)}`)
     }
   }
 
-  const limit = getLogAnalyticsResultLimit(request);
-  clauses.push(`| order by ${SORT_COLUMNS[request.sort.key]} ${request.sort.direction}`);
-  clauses.push(`| take ${limit + 1}`);
+  const limit = getLogAnalyticsResultLimit(request)
+  clauses.push(`| order by ${SORT_COLUMNS[request.sort.key]} ${request.sort.direction}`)
+  clauses.push(`| take ${limit + 1}`)
 
-  return { query: clauses.join("\n"), limit };
+  return { query: clauses.join('\n'), limit }
 }
 
 export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
-  return buildLogAnalyticsQueryForSource(request, RESOURCE_SPECIFIC_BASE_QUERY);
+  return buildLogAnalyticsQueryForSource(request, RESOURCE_SPECIFIC_BASE_QUERY)
 }
 
 export function buildAzureDiagnosticsLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
-  return buildLogAnalyticsQueryForSource(request, AZURE_DIAGNOSTICS_NETWORK_PROJECTION);
+  return buildLogAnalyticsQueryForSource(request, AZURE_DIAGNOSTICS_NETWORK_PROJECTION)
 }
 
 export function mapLogAnalyticsResponse(
@@ -455,34 +453,34 @@ export function mapLogAnalyticsResponse(
   limit: number,
 ): LogAnalyticsQueryResponse {
   if (!isRecord(value) || value.error !== undefined || !Array.isArray(value.tables)) {
-    throw new LogAnalyticsQueryError("upstream");
+    throw new LogAnalyticsQueryError('upstream')
   }
 
-  const records: FirewallLogRecord[] = [];
+  const records: FirewallLogRecord[] = []
   for (const [tableIndex, table] of value.tables.entries()) {
     if (!isRecord(table)) {
-      throw new LogAnalyticsQueryError("upstream");
+      throw new LogAnalyticsQueryError('upstream')
     }
-    records.push(...mapTableRows(table, tableIndex, queryId));
+    records.push(...mapTableRows(table, tableIndex, queryId))
   }
 
-  records.sort((left, right) => compareRecords(left, right, sort));
+  records.sort((left, right) => compareRecords(left, right, sort))
   return {
     records: records.slice(0, limit),
     truncated: records.length > limit,
     limit,
-  };
+  }
 }
 
 export interface ExecuteLogAnalyticsQueryOptions {
-  fetchImplementation?: typeof fetch;
-  signal?: AbortSignal;
-  timeoutMs?: number;
-  queryId?: string;
+  fetchImplementation?: typeof fetch
+  signal?: AbortSignal
+  timeoutMs?: number
+  queryId?: string
 }
 
 export interface LogAnalyticsQueryTarget {
-  workspaceId: string;
+  workspaceId: string
 }
 
 export async function executeLogAnalyticsRawQuery(
@@ -493,69 +491,69 @@ export async function executeLogAnalyticsRawQuery(
   options: ExecuteLogAnalyticsQueryOptions = {},
 ) {
   if (!isLogAnalyticsWorkspaceId(target.workspaceId)) {
-    throw new LogAnalyticsQueryError("upstream");
+    throw new LogAnalyticsQueryError('upstream')
   }
-  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
-  const controller = new AbortController();
-  let timedOut = false;
-  const handleIncomingAbort = () => controller.abort(options.signal?.reason);
+  const fetchImplementation = options.fetchImplementation ?? globalThis.fetch
+  const controller = new AbortController()
+  let timedOut = false
+  const handleIncomingAbort = () => controller.abort(options.signal?.reason)
   if (options.signal?.aborted) {
-    controller.abort();
+    controller.abort()
   } else {
-    options.signal?.addEventListener("abort", handleIncomingAbort, { once: true });
+    options.signal?.addEventListener('abort', handleIncomingAbort, { once: true })
   }
 
   const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    timedOut = true
+    controller.abort()
+  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
 
   try {
-    let response: Response;
+    let response: Response
     try {
       response = await fetchImplementation(
         `https://api.loganalytics.azure.com/v1/workspaces/${encodeURIComponent(target.workspaceId)}/query`,
         {
-          method: "POST",
+          method: 'POST',
           headers: {
             authorization: `Bearer ${accessToken}`,
-            "content-type": "application/json",
+            'content-type': 'application/json',
           },
           body: JSON.stringify(timespan === undefined ? { query } : { query, timespan }),
-          redirect: "error",
+          redirect: 'error',
           signal: controller.signal,
         },
-      );
+      )
     } catch {
       if (!timedOut && options.signal?.aborted) {
         throw options.signal.reason instanceof Error
           ? options.signal.reason
-          : new DOMException("The operation was aborted", "AbortError");
+          : new DOMException('The operation was aborted', 'AbortError')
       }
-      throw new LogAnalyticsQueryError(timedOut ? "timeout" : "upstream");
+      throw new LogAnalyticsQueryError(timedOut ? 'timeout' : 'upstream')
     }
 
     if (response.redirected) {
-      throw new LogAnalyticsQueryError("upstream");
+      throw new LogAnalyticsQueryError('upstream')
     }
     if (response.url) {
-      const responseUrl = new URL(response.url);
-      if (responseUrl.origin !== "https://api.loganalytics.azure.com") {
-        throw new LogAnalyticsQueryError("upstream");
+      const responseUrl = new URL(response.url)
+      if (responseUrl.origin !== 'https://api.loganalytics.azure.com') {
+        throw new LogAnalyticsQueryError('upstream')
       }
     }
     if (!response.ok) {
-      throw errorForResponse(response);
+      throw errorForResponse(response)
     }
 
     try {
-      return (await response.json()) as unknown;
+      return (await response.json()) as unknown
     } catch {
-      throw new LogAnalyticsQueryError("upstream");
+      throw new LogAnalyticsQueryError('upstream')
     }
   } finally {
-    clearTimeout(timeout);
-    options.signal?.removeEventListener("abort", handleIncomingAbort);
+    clearTimeout(timeout)
+    options.signal?.removeEventListener('abort', handleIncomingAbort)
   }
 }
 
@@ -566,17 +564,17 @@ export async function executeLogAnalyticsQuery(
   options: ExecuteLogAnalyticsQueryOptions = {},
 ) {
   const selectedQuery =
-    request.storage === "azure-diagnostics"
+    request.storage === 'azure-diagnostics'
       ? buildAzureDiagnosticsLogAnalyticsQuery(request)
-      : buildLogAnalyticsQuery(request);
-  const timespan = `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`;
-  const queryId = options.queryId ?? crypto.randomUUID();
+      : buildLogAnalyticsQuery(request)
+  const timespan = `${new Date(request.from).toISOString()}/${new Date(request.to).toISOString()}`
+  const queryId = options.queryId ?? crypto.randomUUID()
   const sourceQueryId =
-    request.storage === "azure-diagnostics" ? `${queryId}:azure-diagnostics` : queryId;
+    request.storage === 'azure-diagnostics' ? `${queryId}:azure-diagnostics` : queryId
   return mapLogAnalyticsResponse(
     await executeLogAnalyticsRawQuery(target, selectedQuery.query, timespan, accessToken, options),
     request.sort,
     sourceQueryId,
     selectedQuery.limit,
-  );
+  )
 }

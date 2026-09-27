@@ -1,40 +1,40 @@
-export const MANAGED_EVENT_HUB_LOOKBACK_MINUTES = [1, 3, 5, 10, 15] as const;
+export const MANAGED_EVENT_HUB_LOOKBACK_MINUTES = [1, 3, 5, 10, 15] as const
 
-export type ManagedEventHubLookbackMinutes = (typeof MANAGED_EVENT_HUB_LOOKBACK_MINUTES)[number];
+export type ManagedEventHubLookbackMinutes = (typeof MANAGED_EVENT_HUB_LOOKBACK_MINUTES)[number]
 
 export interface ManagedEventHubStreamRequest {
-  consumerGroup: string;
-  lookbackMinutes: ManagedEventHubLookbackMinutes;
-  resumeFrom?: Record<string, number>;
+  consumerGroup: string
+  lookbackMinutes: ManagedEventHubLookbackMinutes
+  resumeFrom?: Record<string, number>
 }
 
 export interface ManagedEventHubEventEnvelope {
-  type: "events";
+  type: 'events'
   events: Array<{
-    body: unknown;
-    enqueuedTimeUtc: string;
-    partitionId: string;
-    sequenceNumber: number;
-    offset?: string;
-    applicationProperties?: Record<string, unknown>;
-  }>;
+    body: unknown
+    enqueuedTimeUtc: string
+    partitionId: string
+    sequenceNumber: number
+    offset?: string
+    applicationProperties?: Record<string, unknown>
+  }>
 }
 
 export interface ManagedEventHubErrorEnvelope {
-  type: "error";
-  message: "Event Hub receiver error" | "Session expired";
+  type: 'error'
+  message: 'Event Hub receiver error' | 'Session expired'
 }
 
 export interface ManagedEventHubHeartbeatEnvelope {
-  type: "heartbeat";
+  type: 'heartbeat'
 }
 
 export interface ManagedEventHubCaughtUpEnvelope {
-  type: "caught-up";
+  type: 'caught-up'
 }
 
 export type ManagedEventHubStreamEnvelope =
   | ManagedEventHubEventEnvelope
   | ManagedEventHubErrorEnvelope
   | ManagedEventHubHeartbeatEnvelope
-  | ManagedEventHubCaughtUpEnvelope;
+  | ManagedEventHubCaughtUpEnvelope

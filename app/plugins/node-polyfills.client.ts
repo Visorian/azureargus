@@ -1,15 +1,15 @@
-import { Buffer } from "buffer";
-import process from "process";
+import { Buffer } from 'buffer'
+import process from 'process'
 
 const globals = globalThis as typeof globalThis & {
-  Buffer?: typeof Buffer;
-  process?: Partial<typeof process>;
-};
+  Buffer?: typeof Buffer
+  process?: Partial<typeof process>
+}
 
 export default defineNuxtPlugin(() => {
-  const existingProcess = globals.process;
+  const existingProcess = globals.process
 
-  globals.Buffer ??= Buffer;
+  globals.Buffer ??= Buffer
   globals.process = {
     ...process,
     ...existingProcess,
@@ -18,5 +18,5 @@ export default defineNuxtPlugin(() => {
       ...existingProcess?.env,
     },
     nextTick: process.nextTick,
-  };
-});
+  }
+})

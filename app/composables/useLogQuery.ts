@@ -1,69 +1,69 @@
-import { computed, reactive, shallowRef, watch } from "vue";
-import type { Ref } from "vue";
+import { computed, reactive, shallowRef, watch } from 'vue'
+import type { Ref } from 'vue'
 
-import type { FirewallLogFilters, FirewallLogRecord } from "#shared/types/firewall";
+import type { FirewallLogFilters, FirewallLogRecord } from '#shared/types/firewall'
 
-import { trimToBufferSize } from "./useBoundedLogBuffer";
+import { trimToBufferSize } from './useBoundedLogBuffer'
 
 interface LogQueryRawSource {
-  getRecords(): readonly FirewallLogRecord[];
-  version: Readonly<Ref<number>>;
+  getRecords(): readonly FirewallLogRecord[]
+  version: Readonly<Ref<number>>
 }
 
 interface UseLogQueryOptions {
-  active?: Readonly<Ref<boolean>>;
-  datasetKey?: Readonly<Ref<number | string>>;
-  filters?: FirewallLogFilters;
-  rawSource?: LogQueryRawSource;
-  visibleLimit?: Readonly<Ref<number>>;
+  active?: Readonly<Ref<boolean>>
+  datasetKey?: Readonly<Ref<number | string>>
+  filters?: FirewallLogFilters
+  rawSource?: LogQueryRawSource
+  visibleLimit?: Readonly<Ref<number>>
 }
 
 export function createDefaultLogFilters(): FirewallLogFilters {
   return {
-    search: "",
+    search: '',
     category: [],
-    action: "",
-    protocol: "",
-    source: "",
-    sourcePort: "",
-    destination: "",
-    destinationPort: "",
-  };
+    action: '',
+    protocol: '',
+    source: '',
+    sourcePort: '',
+    destination: '',
+    destinationPort: '',
+  }
 }
 
 export function createCaseInsensitiveFilterOptions(
   values: readonly (string | undefined)[],
   formatValue: (value: string) => string = (value) => value,
 ) {
-  const seen = new Set<string>();
-  const options: string[] = [];
+  const seen = new Set<string>()
+  const options: string[] = []
 
   for (const value of values) {
-    const trimmed = value?.trim();
+    const trimmed = value?.trim()
     if (!trimmed) {
-      continue;
+      continue
     }
 
-    const key = trimmed.toLowerCase();
+    const key = trimmed.toLowerCase()
     if (seen.has(key)) {
-      continue;
+      continue
     }
 
-    seen.add(key);
-    options.push(formatValue(trimmed));
+    seen.add(key)
+    options.push(formatValue(trimmed))
   }
 
   return options.sort((left, right) =>
-    left.localeCompare(right, undefined, { sensitivity: "base" }),
-  );
+    left.localeCompare(right, undefined, { sensitivity: 'base' }),
+  )
 }
 
 function includes(value: string | undefined, query: string) {
-  return query.length === 0 || (value ?? "").toLowerCase().includes(query);
+  return query.length === 0 || (value ?? '').toLowerCase().includes(query)
 }
 
 function equals(value: string | undefined, query: string) {
-  return query.length === 0 || (value ?? "").trim().toLowerCase() === query;
+  return query.length === 0 || (value ?? '').trim().toLowerCase() === query
 }
 
 export function filterFirewallLogs(
@@ -71,25 +71,25 @@ export function filterFirewallLogs(
   filters: FirewallLogFilters,
   limit?: number,
 ) {
-  const search = filters.search.trim().toLowerCase();
+  const search = filters.search.trim().toLowerCase()
   const categories = new Set(
     filters.category.map((value) => value.trim().toLowerCase()).filter(Boolean),
-  );
-  const action = filters.action.trim().toLowerCase();
-  const protocol = filters.protocol.trim().toLowerCase();
-  const source = filters.source.trim().toLowerCase();
-  const sourcePort = filters.sourcePort.trim().toLowerCase();
-  const destination = filters.destination.trim().toLowerCase();
-  const destinationPort = filters.destinationPort.trim().toLowerCase();
+  )
+  const action = filters.action.trim().toLowerCase()
+  const protocol = filters.protocol.trim().toLowerCase()
+  const source = filters.source.trim().toLowerCase()
+  const sourcePort = filters.sourcePort.trim().toLowerCase()
+  const destination = filters.destination.trim().toLowerCase()
+  const destinationPort = filters.destinationPort.trim().toLowerCase()
   const maxMatches =
     limit === undefined
       ? Number.POSITIVE_INFINITY
       : Number.isFinite(limit)
         ? Math.max(0, Math.floor(limit))
-        : 0;
-  const matches: FirewallLogRecord[] = [];
+        : 0
+  const matches: FirewallLogRecord[] = []
   if (maxMatches === 0) {
-    return matches;
+    return matches
   }
 
   for (const log of logs) {
@@ -103,62 +103,62 @@ export function filterFirewallLogs(
       equals(log.destinationIp, destination) &&
       equals(log.destinationPort, destinationPort)
     ) {
-      matches.push(log);
+      matches.push(log)
       if (matches.length >= maxMatches) {
-        break;
+        break
       }
     }
   }
 
-  return matches;
+  return matches
 }
 
 export function hasActiveLogFilters(filters: FirewallLogFilters) {
   return Object.values(filters).some((value) =>
     Array.isArray(value) ? value.some((item) => item.trim().length > 0) : value.trim().length > 0,
-  );
+  )
 }
 
 export function isLogCategoryFilterValueActive(
   currentValues: readonly string[],
   candidateValue: string | undefined,
 ) {
-  const candidate = candidateValue?.trim().toLowerCase();
+  const candidate = candidateValue?.trim().toLowerCase()
   return Boolean(
     candidate && currentValues.some((value) => value.trim().toLowerCase() === candidate),
-  );
+  )
 }
 
 export function toggleLogCategoryFilterValue(
   currentValues: readonly string[],
   candidateValue: string | undefined,
 ) {
-  const nextValue = candidateValue?.trim();
+  const nextValue = candidateValue?.trim()
   if (!nextValue) {
-    return [...currentValues];
+    return [...currentValues]
   }
 
   if (isLogCategoryFilterValueActive(currentValues, nextValue)) {
-    const normalizedValue = nextValue.toLowerCase();
-    return currentValues.filter((value) => value.trim().toLowerCase() !== normalizedValue);
+    const normalizedValue = nextValue.toLowerCase()
+    return currentValues.filter((value) => value.trim().toLowerCase() !== normalizedValue)
   }
 
-  return [...currentValues, nextValue];
+  return [...currentValues, nextValue]
 }
 
 export function isLogFilterValueActive(currentValue: string, candidateValue: string | undefined) {
   return Boolean(
     candidateValue && currentValue.trim().toLowerCase() === candidateValue.trim().toLowerCase(),
-  );
+  )
 }
 
 export function toggleLogFilterValue(currentValue: string, candidateValue: string | undefined) {
-  const nextValue = candidateValue?.trim();
+  const nextValue = candidateValue?.trim()
   if (!nextValue) {
-    return currentValue;
+    return currentValue
   }
 
-  return isLogFilterValueActive(currentValue, nextValue) ? "" : nextValue;
+  return isLogFilterValueActive(currentValue, nextValue) ? '' : nextValue
 }
 
 export function getLogFiltersKey(filters: FirewallLogFilters) {
@@ -168,7 +168,7 @@ export function getLogFiltersKey(filters: FirewallLogFilters) {
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean)
       .toSorted()
-      .join("\u001E"),
+      .join('\u001E'),
     filters.action,
     filters.protocol,
     filters.source,
@@ -177,7 +177,7 @@ export function getLogFiltersKey(filters: FirewallLogFilters) {
     filters.destinationPort,
   ]
     .map((value) => value.trim().toLowerCase())
-    .join("\u001F");
+    .join('\u001F')
 }
 
 export function queryFirewallLogs(
@@ -186,10 +186,10 @@ export function queryFirewallLogs(
   visibleLimit: number,
 ) {
   if (!hasActiveLogFilters(filters)) {
-    return trimToBufferSize(logs, visibleLimit);
+    return trimToBufferSize(logs, visibleLimit)
   }
 
-  return filterFirewallLogs(logs, filters, visibleLimit);
+  return filterFirewallLogs(logs, filters, visibleLimit)
 }
 
 export function mergeFilteredLogCache(
@@ -197,86 +197,86 @@ export function mergeFilteredLogCache(
   cachedMatches: readonly FirewallLogRecord[],
   visibleLimit: number,
 ) {
-  const seen = new Set<string>();
-  const merged: FirewallLogRecord[] = [];
+  const seen = new Set<string>()
+  const merged: FirewallLogRecord[] = []
 
   for (const log of [...currentMatches, ...cachedMatches]) {
     if (seen.has(log.id)) {
-      continue;
+      continue
     }
 
-    seen.add(log.id);
-    merged.push(log);
+    seen.add(log.id)
+    merged.push(log)
   }
 
-  return trimToBufferSize(merged, visibleLimit);
+  return trimToBufferSize(merged, visibleLimit)
 }
 
 export function useLogQuery(
   logs: Ref<FirewallLogRecord[]>,
   {
     active = computed(() => true),
-    datasetKey = computed(() => "default"),
+    datasetKey = computed(() => 'default'),
     filters: providedFilters,
     rawSource,
     visibleLimit = computed(() => logs.value.length),
   }: UseLogQueryOptions = {},
 ) {
-  const filters = providedFilters ?? reactive(createDefaultLogFilters());
-  const filterKey = computed(() => getLogFiltersKey(filters));
-  const filteredLogs = shallowRef<FirewallLogRecord[]>([]);
-  let retainedCandidates: FirewallLogRecord[] = [];
-  let previousDatasetKey = datasetKey.value;
-  const rawSourceVersion = rawSource?.version ?? computed(() => 0);
+  const filters = providedFilters ?? reactive(createDefaultLogFilters())
+  const filterKey = computed(() => getLogFiltersKey(filters))
+  const filteredLogs = shallowRef<FirewallLogRecord[]>([])
+  let retainedCandidates: FirewallLogRecord[] = []
+  let previousDatasetKey = datasetKey.value
+  const rawSourceVersion = rawSource?.version ?? computed(() => 0)
 
   watch(
     [active, logs, visibleLimit, datasetKey, rawSourceVersion, filterKey],
     ([isActive, publishedLogs, nextVisibleLimit, nextDatasetKey]) => {
       if (!isActive) {
         if (publishedLogs.length === 0) {
-          filteredLogs.value = [];
-          retainedCandidates = [];
-          previousDatasetKey = nextDatasetKey;
+          filteredLogs.value = []
+          retainedCandidates = []
+          previousDatasetKey = nextDatasetKey
         }
-        return;
+        return
       }
-      const filtersActive = hasActiveLogFilters(filters);
-      const nextLogs = filtersActive ? (rawSource?.getRecords() ?? publishedLogs) : publishedLogs;
+      const filtersActive = hasActiveLogFilters(filters)
+      const nextLogs = filtersActive ? (rawSource?.getRecords() ?? publishedLogs) : publishedLogs
       if (nextDatasetKey !== previousDatasetKey) {
-        retainedCandidates = [];
+        retainedCandidates = []
       }
       if (nextLogs.length === 0) {
-        filteredLogs.value = [];
-        retainedCandidates = [];
-        previousDatasetKey = nextDatasetKey;
-        return;
+        filteredLogs.value = []
+        retainedCandidates = []
+        previousDatasetKey = nextDatasetKey
+        return
       }
 
-      retainedCandidates = trimToBufferSize(retainedCandidates, nextVisibleLimit);
+      retainedCandidates = trimToBufferSize(retainedCandidates, nextVisibleLimit)
       if (!filtersActive) {
-        filteredLogs.value = trimToBufferSize(publishedLogs, nextVisibleLimit);
-        previousDatasetKey = nextDatasetKey;
-        return;
+        filteredLogs.value = trimToBufferSize(publishedLogs, nextVisibleLimit)
+        previousDatasetKey = nextDatasetKey
+        return
       }
 
       retainedCandidates = mergeFilteredLogCache(
         filterFirewallLogs(nextLogs, filters, nextVisibleLimit),
         retainedCandidates,
         nextVisibleLimit,
-      );
-      filteredLogs.value = filterFirewallLogs(retainedCandidates, filters, nextVisibleLimit);
-      previousDatasetKey = nextDatasetKey;
+      )
+      filteredLogs.value = filterFirewallLogs(retainedCandidates, filters, nextVisibleLimit)
+      previousDatasetKey = nextDatasetKey
     },
     { immediate: true },
-  );
+  )
 
   function resetFilters() {
-    Object.assign(filters, createDefaultLogFilters());
+    Object.assign(filters, createDefaultLogFilters())
   }
 
   return {
     filters,
     filteredLogs,
     resetFilters,
-  };
+  }
 }

@@ -1,146 +1,146 @@
-import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from "vue";
+import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 
+import type {
+  FirewallLogFilters,
+  FirewallLogRecord,
+  FirewallLogSortState,
+} from '#shared/types/firewall'
 import type {
   LogAnalyticsQueryRequest,
   LogAnalyticsQueryResponse,
   LogAnalyticsStorageKind,
-} from "#shared/types/logAnalytics";
+} from '#shared/types/logAnalytics'
 import {
   createDefaultLogAnalysisDateRange,
   getLogAnalysisCriteriaKey,
   LOG_ANALYSIS_ACTIONS,
   LOG_ANALYSIS_PROTOCOLS,
   parseLogAnalysisDateRange,
-} from "~/utils/logAnalysis";
-import type {
-  FirewallLogFilters,
-  FirewallLogRecord,
-  FirewallLogSortState,
-} from "#shared/types/firewall";
+} from '~/utils/logAnalysis'
 
-export type LogAnalyticsQueryStatus = "idle" | "loading" | "success" | "refreshing" | "error";
+export type LogAnalyticsQueryStatus = 'idle' | 'loading' | 'success' | 'refreshing' | 'error'
 type QueryRequest = (
   body: LogAnalyticsQueryRequest,
   signal: AbortSignal,
-) => Promise<LogAnalyticsQueryResponse>;
+) => Promise<LogAnalyticsQueryResponse>
 
 interface UseLogAnalyticsQueryOptions {
-  active: Readonly<Ref<boolean>>;
-  filters: FirewallLogFilters;
-  queryLimit: Readonly<Ref<number>>;
-  onBeforeReplace?: () => void;
-  onError?: (message: string) => void;
-  request?: QueryRequest;
-  sort: FirewallLogSortState;
-  storage: Readonly<Ref<LogAnalyticsStorageKind>>;
-  draftRange?: LogAnalysisDateRange;
+  active: Readonly<Ref<boolean>>
+  filters: FirewallLogFilters
+  queryLimit: Readonly<Ref<number>>
+  onBeforeReplace?: () => void
+  onError?: (message: string) => void
+  request?: QueryRequest
+  sort: FirewallLogSortState
+  storage: Readonly<Ref<LogAnalyticsStorageKind>>
+  draftRange?: LogAnalysisDateRange
 }
 
 function getErrorMessage(error: unknown) {
-  if (typeof error === "object" && error !== null && "data" in error) {
-    const data = error.data;
-    if (typeof data === "object" && data !== null && "message" in data) {
-      const message = data.message;
-      if (typeof message === "string" && message.length > 0) {
-        return message;
+  if (typeof error === 'object' && error !== null && 'data' in error) {
+    const data = error.data
+    if (typeof data === 'object' && data !== null && 'message' in data) {
+      const message = data.message
+      if (typeof message === 'string' && message.length > 0) {
+        return message
       }
     }
   }
 
-  return error instanceof Error ? error.message : "Log Analytics query failed.";
+  return error instanceof Error ? error.message : 'Log Analytics query failed.'
 }
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException
-    ? error.name === "AbortError"
-    : error instanceof Error && error.name === "AbortError";
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError'
 }
 
 function mergeOptions(current: readonly string[], values: readonly (string | undefined)[]) {
-  const options = new Map(current.map((value) => [value.toLowerCase(), value]));
+  const options = new Map(current.map((value) => [value.toLowerCase(), value]))
   for (const value of values) {
-    const trimmed = value?.trim();
+    const trimmed = value?.trim()
     if (trimmed) {
-      options.set(trimmed.toLowerCase(), trimmed);
+      options.set(trimmed.toLowerCase(), trimmed)
     }
   }
-  return [...options.values()].toSorted((left, right) => left.localeCompare(right));
+  return [...options.values()].toSorted((left, right) => left.localeCompare(right))
 }
 
 export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
-  let request: QueryRequest;
+  let request: QueryRequest
   if (options.request === undefined) {
-    const requestFetch = useRequestFetch();
+    const requestFetch = useRequestFetch()
     request = (body: LogAnalyticsQueryRequest, signal: AbortSignal) =>
-      requestFetch<LogAnalyticsQueryResponse>("/api/log-analytics/query", {
+      requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
         body,
-        method: "POST",
+        method: 'POST',
         signal,
-      });
+      })
   } else {
-    request = options.request;
+    request = options.request
   }
-  const records = shallowRef<FirewallLogRecord[]>([]);
-  const status = ref<LogAnalyticsQueryStatus>("idle");
-  const lastError = ref<string | null>(null);
-  const truncated = ref(false);
-  const limit = ref<number | null>(null);
-  const hasRun = ref(false);
-  const datasetVersion = ref(0);
-  const ownsDraftRange = options.draftRange === undefined;
-  const draftRange = options.draftRange ?? reactive(createDefaultLogAnalysisDateRange());
-  const appliedRange = ref<{ from: string; to: string } | null>(null);
-  const rangeError = ref<string | null>(null);
-  const refinementPending = ref(false);
-  const actionOptions = ref<string[]>([...LOG_ANALYSIS_ACTIONS]);
-  const protocolOptions = ref<string[]>([...LOG_ANALYSIS_PROTOCOLS]);
-  const criteriaKey = computed(() => getLogAnalysisCriteriaKey(options.filters, options.sort));
+  const records = shallowRef<FirewallLogRecord[]>([])
+  const status = ref<LogAnalyticsQueryStatus>('idle')
+  const lastError = ref<string | null>(null)
+  const truncated = ref(false)
+  const limit = ref<number | null>(null)
+  const hasRun = ref(false)
+  const datasetVersion = ref(0)
+  const ownsDraftRange = options.draftRange === undefined
+  const draftRange = options.draftRange ?? reactive(createDefaultLogAnalysisDateRange())
+  const appliedRange = ref<{ from: string; to: string } | null>(null)
+  const rangeError = ref<string | null>(null)
+  const refinementPending = ref(false)
+  const actionOptions = ref<string[]>([...LOG_ANALYSIS_ACTIONS])
+  const protocolOptions = ref<string[]>([...LOG_ANALYSIS_PROTOCOLS])
+  const criteriaKey = computed(() => getLogAnalysisCriteriaKey(options.filters, options.sort))
   const rangeDirty = computed(() => {
     if (appliedRange.value === null) {
-      return false;
+      return false
     }
 
-    const parsed = parseLogAnalysisDateRange(draftRange);
+    const parsed = parseLogAnalysisDateRange(draftRange)
     return (
       !parsed.ok ||
       parsed.value.from !== appliedRange.value.from ||
       parsed.value.to !== appliedRange.value.to
-    );
-  });
-  const visibleLimit = computed(() => limit.value ?? 1_000);
+    )
+  })
+  const visibleLimit = computed(() => limit.value ?? 1_000)
   const canApplyFilters = computed(
     () =>
       refinementPending.value || (hasRun.value && lastError.value !== null && !rangeDirty.value),
-  );
-  let activeController: AbortController | null = null;
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let requestGeneration = 0;
-  let criteriaChangedDuringInitialLoad = false;
-  let rangeInitialized = options.active.value || !ownsDraftRange;
+  )
+  let activeController: AbortController | null = null
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let requestGeneration = 0
+  let criteriaChangedDuringInitialLoad = false
+  let rangeInitialized = options.active.value || !ownsDraftRange
 
   function clearDebounce() {
     if (debounceTimer !== null) {
-      clearTimeout(debounceTimer);
-      debounceTimer = null;
+      clearTimeout(debounceTimer)
+      debounceTimer = null
     }
-    refinementPending.value = false;
+    refinementPending.value = false
   }
 
   function abortActiveRequest() {
-    requestGeneration += 1;
-    activeController?.abort();
-    activeController = null;
+    requestGeneration += 1
+    activeController?.abort()
+    activeController = null
 
-    if (status.value === "refreshing") {
-      status.value = "success";
-    } else if (status.value === "loading" && !hasRun.value) {
-      status.value = "idle";
+    if (status.value === 'refreshing') {
+      status.value = 'success'
+    } else if (status.value === 'loading' && !hasRun.value) {
+      status.value = 'idle'
     }
   }
 
   function abort() {
-    clearDebounce();
-    abortActiveRequest();
+    clearDebounce()
+    abortActiveRequest()
   }
 
   function createRequestBody(range: { from: string; to: string }): LogAnalyticsQueryRequest {
@@ -163,7 +163,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
         key: options.sort.key,
       },
       to: range.to,
-    };
+    }
   }
 
   async function execute(
@@ -171,159 +171,159 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     initial: boolean,
     requestForExecution: QueryRequest = request,
   ) {
-    clearDebounce();
-    abortActiveRequest();
-    const controller = new AbortController();
-    const generation = requestGeneration + 1;
-    requestGeneration = generation;
-    activeController = controller;
-    const requestedCriteriaKey = criteriaKey.value;
-    status.value = initial && records.value.length === 0 ? "loading" : "refreshing";
-    lastError.value = null;
+    clearDebounce()
+    abortActiveRequest()
+    const controller = new AbortController()
+    const generation = requestGeneration + 1
+    requestGeneration = generation
+    activeController = controller
+    const requestedCriteriaKey = criteriaKey.value
+    status.value = initial && records.value.length === 0 ? 'loading' : 'refreshing'
+    lastError.value = null
 
     try {
-      const response = await requestForExecution(createRequestBody(range), controller.signal);
+      const response = await requestForExecution(createRequestBody(range), controller.signal)
       if (generation !== requestGeneration || !options.active.value) {
-        return false;
+        return false
       }
 
-      options.onBeforeReplace?.();
-      records.value = response.records;
-      truncated.value = response.truncated;
-      limit.value = response.limit;
-      appliedRange.value = range;
-      hasRun.value = true;
-      status.value = "success";
-      datasetVersion.value += 1;
+      options.onBeforeReplace?.()
+      records.value = response.records
+      truncated.value = response.truncated
+      limit.value = response.limit
+      appliedRange.value = range
+      hasRun.value = true
+      status.value = 'success'
+      datasetVersion.value += 1
       actionOptions.value = mergeOptions(
         actionOptions.value,
         response.records.map((record) => record.action),
-      );
+      )
       protocolOptions.value = mergeOptions(
         protocolOptions.value,
         response.records.map((record) => record.protocol),
-      );
+      )
 
       if (requestedCriteriaKey !== criteriaKey.value || criteriaChangedDuringInitialLoad) {
-        criteriaChangedDuringInitialLoad = false;
-        scheduleRefinement();
+        criteriaChangedDuringInitialLoad = false
+        scheduleRefinement()
       }
-      return true;
+      return true
     } catch (error: unknown) {
       if (generation !== requestGeneration || isAbortError(error)) {
-        return false;
+        return false
       }
 
-      const message = getErrorMessage(error);
-      lastError.value = message;
-      status.value = records.value.length > 0 ? "success" : "error";
-      options.onError?.(message);
-      return false;
+      const message = getErrorMessage(error)
+      lastError.value = message
+      status.value = records.value.length > 0 ? 'success' : 'error'
+      options.onError?.(message)
+      return false
     } finally {
       if (generation === requestGeneration) {
-        activeController = null;
+        activeController = null
       }
     }
   }
 
   async function run(requestForExecution?: QueryRequest) {
-    const parsed = parseLogAnalysisDateRange(draftRange);
+    const parsed = parseLogAnalysisDateRange(draftRange)
     if (!parsed.ok) {
-      rangeError.value = parsed.error;
-      return false;
+      rangeError.value = parsed.error
+      return false
     }
 
-    rangeError.value = null;
-    criteriaChangedDuringInitialLoad = false;
-    return execute(parsed.value, !hasRun.value, requestForExecution);
+    rangeError.value = null
+    criteriaChangedDuringInitialLoad = false
+    return execute(parsed.value, !hasRun.value, requestForExecution)
   }
 
   function scheduleRefinement(immediate = false) {
     if (!options.active.value || !hasRun.value || appliedRange.value === null || rangeDirty.value) {
-      return;
+      return
     }
     if (immediate && !refinementPending.value && lastError.value === null) {
-      return;
+      return
     }
 
-    clearDebounce();
-    abortActiveRequest();
-    refinementPending.value = true;
+    clearDebounce()
+    abortActiveRequest()
+    refinementPending.value = true
 
     const trigger = () => {
-      debounceTimer = null;
-      refinementPending.value = false;
+      debounceTimer = null
+      refinementPending.value = false
       if (appliedRange.value !== null) {
-        void execute(appliedRange.value, false);
+        void execute(appliedRange.value, false)
       }
-    };
-
-    if (immediate) {
-      trigger();
-      return;
     }
 
-    debounceTimer = setTimeout(trigger, 500);
+    if (immediate) {
+      trigger()
+      return
+    }
+
+    debounceTimer = setTimeout(trigger, 500)
   }
 
   function clear() {
-    abort();
-    options.onBeforeReplace?.();
-    records.value = [];
-    status.value = "idle";
-    lastError.value = null;
-    truncated.value = false;
-    limit.value = null;
-    hasRun.value = false;
-    appliedRange.value = null;
-    rangeError.value = null;
-    criteriaChangedDuringInitialLoad = false;
-    actionOptions.value = [...LOG_ANALYSIS_ACTIONS];
-    protocolOptions.value = [...LOG_ANALYSIS_PROTOCOLS];
-    datasetVersion.value += 1;
+    abort()
+    options.onBeforeReplace?.()
+    records.value = []
+    status.value = 'idle'
+    lastError.value = null
+    truncated.value = false
+    limit.value = null
+    hasRun.value = false
+    appliedRange.value = null
+    rangeError.value = null
+    criteriaChangedDuringInitialLoad = false
+    actionOptions.value = [...LOG_ANALYSIS_ACTIONS]
+    protocolOptions.value = [...LOG_ANALYSIS_PROTOCOLS]
+    datasetVersion.value += 1
   }
 
   function addActionOption(value: string) {
-    actionOptions.value = mergeOptions(actionOptions.value, [value]);
+    actionOptions.value = mergeOptions(actionOptions.value, [value])
   }
 
   function addProtocolOption(value: string) {
-    protocolOptions.value = mergeOptions(protocolOptions.value, [value]);
+    protocolOptions.value = mergeOptions(protocolOptions.value, [value])
   }
 
   watch(criteriaKey, () => {
     if (!options.active.value) {
-      return;
+      return
     }
-    if (status.value === "loading" && !hasRun.value) {
-      criteriaChangedDuringInitialLoad = true;
-      return;
+    if (status.value === 'loading' && !hasRun.value) {
+      criteriaChangedDuringInitialLoad = true
+      return
     }
-    scheduleRefinement();
-  });
+    scheduleRefinement()
+  })
 
   watch(
     () => [draftRange.from, draftRange.to],
     () => {
-      rangeError.value = null;
-      if (status.value === "loading" || status.value === "refreshing") {
-        abort();
+      rangeError.value = null
+      if (status.value === 'loading' || status.value === 'refreshing') {
+        abort()
       }
     },
-  );
+  )
 
   watch(options.active, (active) => {
     if (active && ownsDraftRange && !rangeInitialized) {
-      Object.assign(draftRange, createDefaultLogAnalysisDateRange());
-      rangeInitialized = true;
+      Object.assign(draftRange, createDefaultLogAnalysisDateRange())
+      rangeInitialized = true
     } else if (!active) {
-      abort();
+      abort()
     }
-  });
+  })
 
-  watch(options.storage, clear);
+  watch(options.storage, clear)
 
-  onScopeDispose(abort);
+  onScopeDispose(abort)
 
   return {
     addActionOption,
@@ -348,5 +348,5 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
     status,
     truncated,
     visibleLimit,
-  };
+  }
 }

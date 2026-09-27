@@ -1,48 +1,48 @@
-import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.js";
-import { createError, readValidatedBody } from "h3";
+import { createError, readValidatedBody } from 'h3'
+import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
-import type { DnsDetailQueryRequest } from "../../../../shared/types/dns";
-import { parseDeploymentCapabilities } from "../../../utils/deploymentCapabilities";
+import type { DnsDetailQueryRequest } from '../../../../shared/types/dns'
 import {
   executeDnsDetailQuery,
   validateDnsDetailQueryRequest,
-} from "../../../../shared/utils/dnsLogAnalyticsQuery";
+} from '../../../../shared/utils/dnsLogAnalyticsQuery'
+import { parseDeploymentCapabilities } from '../../../utils/deploymentCapabilities'
 import {
   getLogAnalyticsAccessToken,
   parseLogAnalyticsRuntimeConfig,
-} from "../../../utils/logAnalyticsAuth";
+} from '../../../utils/logAnalyticsAuth'
 import {
   createIncomingRequestSignal,
   throwLogAnalyticsUpstreamError,
-} from "../../../utils/logAnalyticsRoute";
+} from '../../../utils/logAnalyticsRoute'
 
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event, { errorBehavior: "throw" });
-  const runtimeConfig = useRuntimeConfig(event);
-  const capabilities = parseDeploymentCapabilities(runtimeConfig, process.env);
-  if (capabilities.mode !== "managed" || !capabilities.predefinedLogAnalyticsAvailable) {
+  await requireUserSession(event, { errorBehavior: 'throw' })
+  const runtimeConfig = useRuntimeConfig(event)
+  const capabilities = parseDeploymentCapabilities(runtimeConfig, process.env)
+  if (capabilities.mode !== 'managed' || !capabilities.predefinedLogAnalyticsAvailable) {
     throw createError({
-      statusCode: capabilities.mode === "invalid" ? 503 : 403,
-      message: "Managed Log Analytics is unavailable",
-    });
+      statusCode: capabilities.mode === 'invalid' ? 503 : 403,
+      message: 'Managed Log Analytics is unavailable',
+    })
   }
 
-  let config;
+  let config
   try {
-    config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics);
+    config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics)
   } catch (error) {
-    throwLogAnalyticsUpstreamError(event, error);
+    throwLogAnalyticsUpstreamError(event, error)
   }
   const request = await readValidatedBody<DnsDetailQueryRequest>(event, (body) =>
     validateDnsDetailQueryRequest(body) ? body : false,
-  );
-  const incoming = createIncomingRequestSignal(event);
+  )
+  const incoming = createIncomingRequestSignal(event)
   try {
-    const token = await getLogAnalyticsAccessToken(config, incoming.signal);
-    return await executeDnsDetailQuery(config, request, token, { signal: incoming.signal });
+    const token = await getLogAnalyticsAccessToken(config, incoming.signal)
+    return await executeDnsDetailQuery(config, request, token, { signal: incoming.signal })
   } catch (error) {
-    throwLogAnalyticsUpstreamError(event, error);
+    throwLogAnalyticsUpstreamError(event, error)
   } finally {
-    incoming.cleanup();
+    incoming.cleanup()
   }
-});
+})

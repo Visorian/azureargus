@@ -1,33 +1,33 @@
 <script setup lang="ts">
-import type { LogAnalyticsQueryStatus } from "~/composables/useLogAnalyticsQuery";
-import type { LogAnalysisDateRange } from "~/utils/logAnalysis";
+import type { LogAnalyticsQueryStatus } from '~/composables/useLogAnalyticsQuery'
+import type { LogAnalysisDateRange } from '~/utils/logAnalysis'
 
 defineProps<{
-  appliedRangeLabel: string;
-  canRun: boolean;
-  queryStatus: LogAnalyticsQueryStatus | "idle" | "loading" | "success" | "error";
-  rangeDirty: boolean;
-  rangeError: string | null;
-  resultsTruncated: boolean;
-}>();
+  appliedRangeLabel: string
+  canRun: boolean
+  queryStatus: LogAnalyticsQueryStatus | 'idle' | 'loading' | 'success' | 'error'
+  rangeDirty: boolean
+  rangeError: string | null
+  resultsTruncated: boolean
+}>()
 
 const emit = defineEmits<{
-  run: [];
-}>();
+  run: []
+}>()
 
-const draftRange = defineModel<LogAnalysisDateRange>("draftRange", { required: true });
+const draftRange = defineModel<LogAnalysisDateRange>('draftRange', { required: true })
 const draftFrom = computed({
   get: () => draftRange.value.from,
   set: (from: string) => {
-    draftRange.value = { ...draftRange.value, from };
+    draftRange.value = { ...draftRange.value, from }
   },
-});
+})
 const draftTo = computed({
   get: () => draftRange.value.to,
   set: (to: string) => {
-    draftRange.value = { ...draftRange.value, to };
+    draftRange.value = { ...draftRange.value, to }
   },
-});
+})
 </script>
 
 <template>

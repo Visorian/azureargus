@@ -1,25 +1,25 @@
-import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, watch, type Ref } from "vue";
+import { getCurrentScope, onScopeDispose, ref, shallowRef, toRaw, watch, type Ref } from 'vue'
 
-export const DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS = 250;
+export const DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS = 250
 
 interface BoundedLogBufferOptions<T> {
-  compare?: (left: T, right: T) => number;
-  publishIntervalMs?: number;
-  publishingEnabled?: Readonly<Ref<boolean>>;
-  publishedSize?: Readonly<Ref<number>>;
+  compare?: (left: T, right: T) => number
+  publishIntervalMs?: number
+  publishingEnabled?: Readonly<Ref<boolean>>
+  publishedSize?: Readonly<Ref<number>>
 }
 
 function normalizeBufferSize(maxSize: number) {
-  return Number.isFinite(maxSize) ? Math.max(0, Math.floor(maxSize)) : 0;
+  return Number.isFinite(maxSize) ? Math.max(0, Math.floor(maxSize)) : 0
 }
 
 export function trimToBufferSize<T>(items: readonly T[], maxSize: number) {
-  const boundedSize = normalizeBufferSize(maxSize);
+  const boundedSize = normalizeBufferSize(maxSize)
   if (items.length <= boundedSize) {
-    return [...items];
+    return [...items]
   }
 
-  return items.slice(0, boundedSize);
+  return items.slice(0, boundedSize)
 }
 
 export function prependToBoundedBuffer<T>(
@@ -27,23 +27,23 @@ export function prependToBoundedBuffer<T>(
   nextItems: readonly T[],
   maxSize: number,
 ) {
-  const boundedSize = normalizeBufferSize(maxSize);
+  const boundedSize = normalizeBufferSize(maxSize)
   if (boundedSize === 0) {
-    return [];
+    return []
   }
 
   if (nextItems.length === 0) {
-    return trimToBufferSize(currentItems, boundedSize);
+    return trimToBufferSize(currentItems, boundedSize)
   }
 
-  const result: T[] = [];
+  const result: T[] = []
 
   for (
     let nextIndex = nextItems.length - 1;
     nextIndex >= 0 && result.length < boundedSize;
     nextIndex -= 1
   ) {
-    result.push(nextItems[nextIndex]!);
+    result.push(nextItems[nextIndex]!)
   }
 
   for (
@@ -51,10 +51,10 @@ export function prependToBoundedBuffer<T>(
     currentIndex < currentItems.length && result.length < boundedSize;
     currentIndex += 1
   ) {
-    result.push(currentItems[currentIndex]!);
+    result.push(currentItems[currentIndex]!)
   }
 
-  return result;
+  return result
 }
 
 export function mergeIntoBoundedBuffer<T>(
@@ -63,15 +63,15 @@ export function mergeIntoBoundedBuffer<T>(
   maxSize: number,
   compare: (left: T, right: T) => number,
 ) {
-  const boundedSize = normalizeBufferSize(maxSize);
+  const boundedSize = normalizeBufferSize(maxSize)
   if (boundedSize === 0) {
-    return [];
+    return []
   }
 
-  const sortedNextItems = nextItems.toSorted(compare);
-  const result: T[] = [];
-  let currentIndex = 0;
-  let nextIndex = 0;
+  const sortedNextItems = nextItems.toSorted(compare)
+  const result: T[] = []
+  let currentIndex = 0
+  let nextIndex = 0
 
   // Current items already have the requested order; only the incoming batch needs sorting.
   while (
@@ -83,13 +83,13 @@ export function mergeIntoBoundedBuffer<T>(
       (currentIndex >= currentItems.length ||
         compare(sortedNextItems[nextIndex]!, currentItems[currentIndex]!) <= 0)
     ) {
-      result.push(sortedNextItems[nextIndex++]!);
+      result.push(sortedNextItems[nextIndex++]!)
     } else {
-      result.push(currentItems[currentIndex++]!);
+      result.push(currentItems[currentIndex++]!)
     }
   }
 
-  return result;
+  return result
 }
 
 export function useBoundedLogBuffer<T>(
@@ -102,80 +102,80 @@ export function useBoundedLogBuffer<T>(
     publishedSize = maxSize,
   }: BoundedLogBufferOptions<T> = {},
 ) {
-  const items = useState<T[]>(key, () => shallowRef<T[]>([]));
+  const items = useState<T[]>(key, () => shallowRef<T[]>([]))
   const rawItems = useState<T[]>(`${key}-raw`, () =>
     shallowRef(items.value.map((item) => toRaw(item))),
-  );
-  const version = useState(`${key}-version`, () => 0);
-  let publishTimer: ReturnType<typeof setTimeout> | undefined;
-  let publishPending = false;
+  )
+  const version = useState(`${key}-version`, () => 0)
+  let publishTimer: ReturnType<typeof setTimeout> | undefined
+  let publishPending = false
 
   function cancelPublish() {
     if (publishTimer === undefined) {
-      return;
+      return
     }
 
-    clearTimeout(publishTimer);
-    publishTimer = undefined;
+    clearTimeout(publishTimer)
+    publishTimer = undefined
   }
 
   function publish() {
-    cancelPublish();
+    cancelPublish()
     if (!publishingEnabled.value || !publishPending) {
-      return;
+      return
     }
 
-    publishPending = false;
-    items.value = trimToBufferSize(rawItems.value, publishedSize.value);
-    version.value += 1;
+    publishPending = false
+    items.value = trimToBufferSize(rawItems.value, publishedSize.value)
+    version.value += 1
   }
 
   function schedulePublish() {
     if (!publishingEnabled.value || publishTimer !== undefined) {
-      return;
+      return
     }
     if (publishIntervalMs <= 0) {
-      publish();
-      return;
+      publish()
+      return
     }
 
-    publishTimer = setTimeout(publish, publishIntervalMs);
+    publishTimer = setTimeout(publish, publishIntervalMs)
   }
 
   function pushMany(nextItems: readonly T[]) {
     if (nextItems.length === 0) {
-      return;
+      return
     }
 
     rawItems.value = compare
       ? mergeIntoBoundedBuffer(rawItems.value, nextItems, maxSize.value, compare)
-      : prependToBoundedBuffer(rawItems.value, nextItems, maxSize.value);
-    publishPending = true;
-    schedulePublish();
+      : prependToBoundedBuffer(rawItems.value, nextItems, maxSize.value)
+    publishPending = true
+    schedulePublish()
   }
 
   watch(
     publishingEnabled,
     (enabled) => {
       if (enabled) {
-        schedulePublish();
+        schedulePublish()
       } else {
-        cancelPublish();
+        cancelPublish()
       }
     },
-    { flush: "sync" },
-  );
+    { flush: 'sync' },
+  )
 
   function clear() {
-    cancelPublish();
-    rawItems.value = [];
-    publishPending = false;
-    items.value = [];
-    version.value += 1;
+    cancelPublish()
+    rawItems.value = []
+    publishPending = false
+    items.value = []
+    version.value += 1
   }
 
   if (getCurrentScope()) {
-    onScopeDispose(cancelPublish);
+    onScopeDispose(cancelPublish)
   }
 
   return {
@@ -185,5 +185,5 @@ export function useBoundedLogBuffer<T>(
     items,
     pushMany,
     version,
-  };
+  }
 }

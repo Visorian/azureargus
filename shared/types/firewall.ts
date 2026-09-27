@@ -1,59 +1,59 @@
-import type { DnsObservation } from "./dns";
+import type { DnsObservation } from './dns'
 
 export interface FirewallLogRecord {
-  id: string;
-  timestamp: string;
-  category: string;
-  action: string;
-  protocol: string;
-  sourceIp?: string;
-  sourcePort?: string;
-  destinationIp?: string;
-  destinationPort?: string;
-  policy?: string;
-  ruleCollectionGroup?: string;
-  ruleCollection?: string;
-  rule?: string;
-  resourceId?: string;
-  message: string;
-  raw: unknown;
-  partitionId?: string;
-  sequenceNumber?: string;
-  offset?: string;
-  eventRecordIndex?: number;
-  enqueuedTimeUtc?: string;
-  applicationProperties?: Record<string, unknown>;
-  dns?: DnsObservation;
-  searchableText: string;
+  id: string
+  timestamp: string
+  category: string
+  action: string
+  protocol: string
+  sourceIp?: string
+  sourcePort?: string
+  destinationIp?: string
+  destinationPort?: string
+  policy?: string
+  ruleCollectionGroup?: string
+  ruleCollection?: string
+  rule?: string
+  resourceId?: string
+  message: string
+  raw: unknown
+  partitionId?: string
+  sequenceNumber?: string
+  offset?: string
+  eventRecordIndex?: number
+  enqueuedTimeUtc?: string
+  applicationProperties?: Record<string, unknown>
+  dns?: DnsObservation
+  searchableText: string
 }
 
 export type FirewallLogSortKey =
-  | "timestamp"
-  | "category"
-  | "action"
-  | "protocol"
-  | "sourceIp"
-  | "sourcePort"
-  | "destinationIp"
-  | "destinationPort"
-  | "ruleCollection"
-  | "rule"
-  | "message";
+  | 'timestamp'
+  | 'category'
+  | 'action'
+  | 'protocol'
+  | 'sourceIp'
+  | 'sourcePort'
+  | 'destinationIp'
+  | 'destinationPort'
+  | 'ruleCollection'
+  | 'rule'
+  | 'message'
 
-export type FirewallLogSortDirection = "asc" | "desc";
+export type FirewallLogSortDirection = 'asc' | 'desc'
 
 export interface FirewallLogSortState {
-  key: FirewallLogSortKey;
-  direction: FirewallLogSortDirection;
+  key: FirewallLogSortKey
+  direction: FirewallLogSortDirection
 }
 
 export interface FirewallLogFilters {
-  search: string;
-  category: string[];
-  action: string;
-  protocol: string;
-  source: string;
-  sourcePort: string;
-  destination: string;
-  destinationPort: string;
+  search: string
+  category: string[]
+  action: string
+  protocol: string
+  source: string
+  sourcePort: string
+  destination: string
+  destinationPort: string
 }

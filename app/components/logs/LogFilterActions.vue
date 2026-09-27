@@ -1,14 +1,14 @@
 <script setup lang="ts">
 defineProps<{
-  applyDisabled: boolean;
-  applyLoading: boolean;
-  showApply: boolean;
-}>();
+  applyDisabled: boolean
+  applyLoading: boolean
+  showApply: boolean
+}>()
 
 const emit = defineEmits<{
-  apply: [];
-  reset: [];
-}>();
+  apply: []
+  reset: []
+}>()
 </script>
 
 <template>

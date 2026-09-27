@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RecycleScroller } from "vue-virtual-scroller";
+import { RecycleScroller } from 'vue-virtual-scroller'
 
 import type {
   DnsEntry,
@@ -9,185 +9,185 @@ import type {
   DnsOutcome,
   DnsSort,
   DnsSourceStatus,
-} from "#shared/types/dns";
-import { DNS_OUTCOME_LABELS } from "#shared/utils/dns";
-import type { LogHourCycle } from "~/composables/useLogTimeFormat";
+} from '#shared/types/dns'
+import { DNS_OUTCOME_LABELS } from '#shared/utils/dns'
+import type { LogHourCycle } from '~/composables/useLogTimeFormat'
 
 const props = withDefaults(
   defineProps<{
-    hourCycle?: LogHourCycle;
-    timeZone?: string;
-    entries: DnsEntry[];
-    sources: DnsSourceStatus[];
-    status: "idle" | "loading" | "success" | "error";
-    error: string | null;
-    entriesTruncated: boolean;
-    transportsTruncated: boolean;
-    logAnalysis: boolean;
-    canApplyFilters: boolean;
-    filterOptions: DnsFilterOptions;
-    selectedEntryId: string | null;
+    hourCycle?: LogHourCycle
+    timeZone?: string
+    entries: DnsEntry[]
+    sources: DnsSourceStatus[]
+    status: 'idle' | 'loading' | 'success' | 'error'
+    error: string | null
+    entriesTruncated: boolean
+    transportsTruncated: boolean
+    logAnalysis: boolean
+    canApplyFilters: boolean
+    filterOptions: DnsFilterOptions
+    selectedEntryId: string | null
   }>(),
-  { hourCycle: "h23", timeZone: "UTC" },
-);
+  { hourCycle: 'h23', timeZone: 'UTC' },
+)
 const emit = defineEmits<{
-  apply: [];
-  reset: [];
-  select: [entry: DnsEntry];
-}>();
-const filters = defineModel<DnsFilters>("filters", { required: true });
-const sort = defineModel<DnsSort>("sort", { required: true });
-const showUnidentifiedTransports = defineModel<boolean>("showUnidentifiedTransports", {
+  apply: []
+  reset: []
+  select: [entry: DnsEntry]
+}>()
+const filters = defineModel<DnsFilters>('filters', { required: true })
+const sort = defineModel<DnsSort>('sort', { required: true })
+const showUnidentifiedTransports = defineModel<boolean>('showUnidentifiedTransports', {
   required: true,
-});
+})
 const dnsEntryGridClass = computed(() =>
-  props.hourCycle === "h12"
-    ? "min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]"
-    : "min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]",
-);
+  props.hourCycle === 'h12'
+    ? 'min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]'
+    : 'min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]',
+)
 type SortSelection =
-  | "timestamp-desc"
-  | "timestamp-asc"
-  | "queryName-asc"
-  | "queryName-desc"
-  | "duration-asc"
-  | "duration-desc"
-  | "observations-asc"
-  | "observations-desc";
+  | 'timestamp-desc'
+  | 'timestamp-asc'
+  | 'queryName-asc'
+  | 'queryName-desc'
+  | 'duration-asc'
+  | 'duration-desc'
+  | 'observations-asc'
+  | 'observations-desc'
 const sortItems = [
-  { label: "Newest first", value: "timestamp-desc", key: "timestamp", direction: "desc" },
-  { label: "Oldest first", value: "timestamp-asc", key: "timestamp", direction: "asc" },
-  { label: "Query name A–Z", value: "queryName-asc", key: "queryName", direction: "asc" },
-  { label: "Query name Z–A", value: "queryName-desc", key: "queryName", direction: "desc" },
+  { label: 'Newest first', value: 'timestamp-desc', key: 'timestamp', direction: 'desc' },
+  { label: 'Oldest first', value: 'timestamp-asc', key: 'timestamp', direction: 'asc' },
+  { label: 'Query name A–Z', value: 'queryName-asc', key: 'queryName', direction: 'asc' },
+  { label: 'Query name Z–A', value: 'queryName-desc', key: 'queryName', direction: 'desc' },
   {
-    label: "Shortest transaction first",
-    value: "duration-asc",
-    key: "duration",
-    direction: "asc",
+    label: 'Shortest transaction first',
+    value: 'duration-asc',
+    key: 'duration',
+    direction: 'asc',
   },
   {
-    label: "Longest transaction first",
-    value: "duration-desc",
-    key: "duration",
-    direction: "desc",
+    label: 'Longest transaction first',
+    value: 'duration-desc',
+    key: 'duration',
+    direction: 'desc',
   },
   {
-    label: "Fewest observations first",
-    value: "observations-asc",
-    key: "observations",
-    direction: "asc",
+    label: 'Fewest observations first',
+    value: 'observations-asc',
+    key: 'observations',
+    direction: 'asc',
   },
   {
-    label: "Most observations first",
-    value: "observations-desc",
-    key: "observations",
-    direction: "desc",
+    label: 'Most observations first',
+    value: 'observations-desc',
+    key: 'observations',
+    direction: 'desc',
   },
 ] satisfies Array<{
-  label: string;
-  value: SortSelection;
-  key: DnsSort["key"];
-  direction: DnsSort["direction"];
-}>;
+  label: string
+  value: SortSelection
+  key: DnsSort['key']
+  direction: DnsSort['direction']
+}>
 
 function selectedSortValue(value: DnsSort): SortSelection {
-  if (value.key === "timestamp")
-    return value.direction === "desc" ? "timestamp-desc" : "timestamp-asc";
-  if (value.key === "queryName")
-    return value.direction === "asc" ? "queryName-asc" : "queryName-desc";
-  if (value.key === "duration") return value.direction === "asc" ? "duration-asc" : "duration-desc";
-  return value.direction === "asc" ? "observations-asc" : "observations-desc";
+  if (value.key === 'timestamp')
+    return value.direction === 'desc' ? 'timestamp-desc' : 'timestamp-asc'
+  if (value.key === 'queryName')
+    return value.direction === 'asc' ? 'queryName-asc' : 'queryName-desc'
+  if (value.key === 'duration') return value.direction === 'asc' ? 'duration-asc' : 'duration-desc'
+  return value.direction === 'asc' ? 'observations-asc' : 'observations-desc'
 }
 
 const sortSelection = computed<SortSelection>({
   get: () => selectedSortValue(sort.value),
   set: (value) => {
-    const selected = sortItems.find((item) => item.value === value);
-    if (!selected) return;
-    sort.value = { key: selected.key, direction: selected.direction };
+    const selected = sortItems.find((item) => item.value === value)
+    if (!selected) return
+    sort.value = { key: selected.key, direction: selected.direction }
   },
-});
+})
 
-function filterModel(key: "queryType" | "protocol" | "outcome" | "source") {
+function filterModel(key: 'queryType' | 'protocol' | 'outcome' | 'source') {
   return computed<string | null>({
     get: () => filters.value[key] || null,
     set: (value) => {
-      filters.value[key] = value ?? "";
+      filters.value[key] = value ?? ''
     },
-  });
+  })
 }
 
-const queryTypeFilter = filterModel("queryType");
-const protocolFilter = filterModel("protocol");
-const sourceFilter = filterModel("source");
+const queryTypeFilter = filterModel('queryType')
+const protocolFilter = filterModel('protocol')
+const sourceFilter = filterModel('source')
 
 function isDnsOutcome(value: string): value is DnsOutcome {
-  return Object.hasOwn(DNS_OUTCOME_LABELS, value);
+  return Object.hasOwn(DNS_OUTCOME_LABELS, value)
 }
 
 const outcomeFilter = computed<DnsOutcome | null>({
   get: () => (isDnsOutcome(filters.value.outcome) ? filters.value.outcome : null),
   set: (value) => {
-    filters.value.outcome = value ?? "";
+    filters.value.outcome = value ?? ''
   },
-});
+})
 const outcomeItems = computed(() =>
   props.filterOptions.outcomes.map((value) => ({
     label: DNS_OUTCOME_LABELS[value],
     value,
   })),
-);
+)
 const emptyEntryMessage = computed(() => {
-  if (props.status === "loading") return "Loading DNS entries…";
-  if (props.error) return "DNS query failed.";
-  if (props.status === "idle" && props.logAnalysis) return "Run DNS query to load entries.";
-  const unavailable = props.sources.filter((source) => source.availability !== "available");
+  if (props.status === 'loading') return 'Loading DNS entries…'
+  if (props.error) return 'DNS query failed.'
+  if (props.status === 'idle' && props.logAnalysis) return 'Run DNS query to load entries.'
+  const unavailable = props.sources.filter((source) => source.availability !== 'available')
   if (props.sources.length > 0 && unavailable.length === props.sources.length) {
-    return "No DNS sources are available for this query.";
+    return 'No DNS sources are available for this query.'
   }
-  if (unavailable.length > 0) return "No entries returned by available DNS sources.";
-  if (props.entriesTruncated) return "No entries retained within bounded DNS query results.";
-  return "No matching DNS entries.";
-});
+  if (unavailable.length > 0) return 'No entries returned by available DNS sources.'
+  if (props.entriesTruncated) return 'No entries retained within bounded DNS query results.'
+  return 'No matching DNS entries.'
+})
 const sourceWarnings = computed(() =>
   props.sources
-    .filter((source) => source.availability !== "available")
+    .filter((source) => source.availability !== 'available')
     .map((source) => ({
       key: source.source,
       text: source.warning ?? `${source.source} source unavailable`,
     })),
-);
+)
 
-function outcomeLabel(value: DnsEntry["outcome"]) {
-  return DNS_OUTCOME_LABELS[value];
+function outcomeLabel(value: DnsEntry['outcome']) {
+  return DNS_OUTCOME_LABELS[value]
 }
 
 function duration(seconds: number | undefined) {
-  if (seconds === undefined) return "-";
-  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)} µs`;
-  if (seconds < 1) return `${(seconds * 1_000).toFixed(2)} ms`;
-  return `${seconds.toFixed(2)} s`;
+  if (seconds === undefined) return '-'
+  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)} µs`
+  if (seconds < 1) return `${(seconds * 1_000).toFixed(2)} ms`
+  return `${seconds.toFixed(2)} s`
 }
 
-function endpoint(observation: DnsObservation, side: "client" | "server") {
-  const ip = side === "client" ? observation.clientIp : observation.serverIp;
-  const port = side === "client" ? observation.clientPort : observation.serverPort;
-  return [ip, port].filter(Boolean).join(":") || "-";
+function endpoint(observation: DnsObservation, side: 'client' | 'server') {
+  const ip = side === 'client' ? observation.clientIp : observation.serverIp
+  const port = side === 'client' ? observation.clientPort : observation.serverPort
+  return [ip, port].filter(Boolean).join(':') || '-'
 }
 
 function destination(entry: DnsEntry) {
-  if (entry.destination) return entry.destination;
+  if (entry.destination) return entry.destination
   const observation = entry.observations.find(
     (item) => Boolean(item.serverIp) || Boolean(item.serverPort),
-  );
-  return observation ? endpoint(observation, "server") : "-";
+  )
+  return observation ? endpoint(observation, 'server') : '-'
 }
 
-function completeness(value: DnsEntry["completeness"]) {
+function completeness(value: DnsEntry['completeness']) {
   return value
-    .split("-")
+    .split('-')
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
+    .join(' ')
 }
 </script>
 
@@ -342,12 +342,12 @@ function completeness(value: DnsEntry["completeness"]) {
                     :time-zone="timeZone"
                   />
                   <span class="truncate font-mono">{{
-                    item.displayText ?? item.queryName ?? "Not observed"
+                    item.displayText ?? item.queryName ?? 'Not observed'
                   }}</span>
-                  <span>{{ item.queryType ?? "-" }}</span>
-                  <span>{{ item.protocol ?? "-" }}</span>
+                  <span>{{ item.queryType ?? '-' }}</span>
+                  <span>{{ item.protocol ?? '-' }}</span>
                   <span class="truncate font-mono" :title="item.client || '-'">
-                    {{ item.client || "-" }}
+                    {{ item.client || '-' }}
                   </span>
                   <span class="truncate font-mono" :title="destination(item)">
                     {{ destination(item) }}

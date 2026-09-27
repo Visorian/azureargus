@@ -1,87 +1,87 @@
-import { ref, type Ref } from "vue";
-import { onBeforeRouteLeave } from "vue-router";
+import { ref, type Ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 
-export type AnalysisMode = "real-time-analysis" | "log-analysis";
+export type AnalysisMode = 'real-time-analysis' | 'log-analysis'
 
 interface UseAnalysisModeOptions {
-  abortLogAnalysis(): void;
-  canUseLogAnalysis: Readonly<Ref<boolean>>;
-  canUseRealTime: Readonly<Ref<boolean>>;
-  closeDetail(): void;
-  disconnectRealTime(): Promise<void>;
-  mode: Ref<AnalysisMode>;
-  pauseRealTime(): void;
-  resetRealTime(): Promise<void>;
+  abortLogAnalysis(): void
+  canUseLogAnalysis: Readonly<Ref<boolean>>
+  canUseRealTime: Readonly<Ref<boolean>>
+  closeDetail(): void
+  disconnectRealTime(): Promise<void>
+  mode: Ref<AnalysisMode>
+  pauseRealTime(): void
+  resetRealTime(): Promise<void>
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Could not switch analysis mode.";
+  return error instanceof Error ? error.message : 'Could not switch analysis mode.'
 }
 
 export function useAnalysisMode(options: UseAnalysisModeOptions) {
-  const transitioning = ref(false);
-  const lastError = ref<string | null>(null);
-  let logAnalysisCommitted = false;
+  const transitioning = ref(false)
+  const lastError = ref<string | null>(null)
+  let logAnalysisCommitted = false
 
   async function setMode(nextMode: AnalysisMode) {
     if (nextMode === options.mode.value || transitioning.value) {
-      return nextMode === options.mode.value;
+      return nextMode === options.mode.value
     }
-    if (nextMode === "log-analysis" && !options.canUseLogAnalysis.value) {
-      lastError.value = "Log Analytics is unavailable.";
-      return false;
+    if (nextMode === 'log-analysis' && !options.canUseLogAnalysis.value) {
+      lastError.value = 'Log Analytics is unavailable.'
+      return false
     }
-    if (nextMode === "real-time-analysis" && !options.canUseRealTime.value) {
-      lastError.value = "Live Event Hub is unavailable.";
-      return false;
+    if (nextMode === 'real-time-analysis' && !options.canUseRealTime.value) {
+      lastError.value = 'Live Event Hub is unavailable.'
+      return false
     }
 
-    transitioning.value = true;
-    lastError.value = null;
+    transitioning.value = true
+    lastError.value = null
     try {
-      if (nextMode === "log-analysis") {
-        options.pauseRealTime();
+      if (nextMode === 'log-analysis') {
+        options.pauseRealTime()
       } else {
-        options.abortLogAnalysis();
+        options.abortLogAnalysis()
       }
 
-      options.closeDetail();
-      options.mode.value = nextMode;
-      logAnalysisCommitted = false;
-      return true;
+      options.closeDetail()
+      options.mode.value = nextMode
+      logAnalysisCommitted = false
+      return true
     } catch (error: unknown) {
-      lastError.value = getErrorMessage(error);
-      return false;
+      lastError.value = getErrorMessage(error)
+      return false
     } finally {
-      transitioning.value = false;
+      transitioning.value = false
     }
   }
 
   async function commitLogAnalysis() {
-    if (options.mode.value !== "log-analysis" || logAnalysisCommitted) return false;
-    logAnalysisCommitted = true;
+    if (options.mode.value !== 'log-analysis' || logAnalysisCommitted) return false
+    logAnalysisCommitted = true
     try {
-      await options.resetRealTime();
-      return true;
+      await options.resetRealTime()
+      return true
     } catch (error: unknown) {
-      lastError.value = getErrorMessage(error);
-      return false;
+      lastError.value = getErrorMessage(error)
+      return false
     }
   }
 
   onBeforeRouteLeave(async () => {
-    options.abortLogAnalysis();
+    options.abortLogAnalysis()
     try {
-      await options.disconnectRealTime();
+      await options.disconnectRealTime()
     } catch {
       // Navigation should not trap the user after teardown was attempted.
     }
-  });
+  })
 
   return {
     commitLogAnalysis,
     lastError,
     setMode,
     transitioning,
-  };
+  }
 }

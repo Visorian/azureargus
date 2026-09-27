@@ -1,384 +1,384 @@
 import {
   expandAzureMonitorRecords,
   normalizeFirewallLogRecord,
-} from "../../app/composables/useFirewallLogParser";
+} from '../../app/composables/useFirewallLogParser'
 
-describe("firewall log parser", () => {
-  it("expands Azure Monitor Event Hub records payloads", () => {
-    const records = [{ category: "AZFWNetworkRule" }, { category: "AZFWApplicationRule" }];
+describe('firewall log parser', () => {
+  it('expands Azure Monitor Event Hub records payloads', () => {
+    const records = [{ category: 'AZFWNetworkRule' }, { category: 'AZFWApplicationRule' }]
 
-    expect(expandAzureMonitorRecords({ records })).toEqual(records);
-  });
+    expect(expandAzureMonitorRecords({ records })).toEqual(records)
+  })
 
-  it("expands UTF-8 encoded Azure Monitor Event Hub payloads", () => {
-    const records = [{ category: "AZFWNetworkRule" }, { category: "AZFWApplicationRule" }];
-    const body = new TextEncoder().encode(JSON.stringify({ records }));
+  it('expands UTF-8 encoded Azure Monitor Event Hub payloads', () => {
+    const records = [{ category: 'AZFWNetworkRule' }, { category: 'AZFWApplicationRule' }]
+    const body = new TextEncoder().encode(JSON.stringify({ records }))
 
-    expect(expandAzureMonitorRecords(body)).toEqual(records);
-  });
+    expect(expandAzureMonitorRecords(body)).toEqual(records)
+  })
 
-  it("recovers escaped DNS message properties in Azure Monitor payloads", () => {
-    const body = String.raw`{"records":[{"time":"2026-07-16T16:28:38.728265+00:00","properties": {\"msg\":\"DNS Request: 192.168.179.30:54245 - 49226 AAAA IN \\ 100.112.0.22. udp 42 false 1224 NXDOMAIN\"},"category":"AzureFirewallDnsProxy"}]}`;
+  it('recovers escaped DNS message properties in Azure Monitor payloads', () => {
+    const body = String.raw`{"records":[{"time":"2026-07-16T16:28:38.728265+00:00","properties": {\"msg\":\"DNS Request: 192.168.179.30:54245 - 49226 AAAA IN \\ 100.112.0.22. udp 42 false 1224 NXDOMAIN\"},"category":"AzureFirewallDnsProxy"}]}`
 
     expect(expandAzureMonitorRecords(body)).toEqual([
       {
-        time: "2026-07-16T16:28:38.728265+00:00",
+        time: '2026-07-16T16:28:38.728265+00:00',
         properties: {
           msg: String.raw`DNS Request: 192.168.179.30:54245 - 49226 AAAA IN \ 100.112.0.22. udp 42 false 1224 NXDOMAIN`,
         },
-        category: "AzureFirewallDnsProxy",
+        category: 'AzureFirewallDnsProxy',
       },
-    ]);
-  });
+    ])
+  })
 
-  it("normalizes structured firewall logs", () => {
+  it('normalizes structured firewall logs', () => {
     const log = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-07-09T10:00:00Z",
-        category: "AZFWNetworkRule",
+        time: '2026-07-09T10:00:00Z',
+        category: 'AZFWNetworkRule',
         properties: {
-          action: "Deny",
-          protocol: "TCP",
-          sourceIp: "10.0.0.4",
+          action: 'Deny',
+          protocol: 'TCP',
+          sourceIp: '10.0.0.4',
           sourcePort: 44321,
-          destinationIp: "20.30.40.50",
+          destinationIp: '20.30.40.50',
           destinationPort: 443,
-          policy: "hub-policy",
-          ruleCollectionGroup: "hub-collection-group",
-          ruleCollection: "blocked",
-          rule: "deny-web",
-          msg: "Deny TCP from 10.0.0.4:44321 to 20.30.40.50:443",
+          policy: 'hub-policy',
+          ruleCollectionGroup: 'hub-collection-group',
+          ruleCollection: 'blocked',
+          rule: 'deny-web',
+          msg: 'Deny TCP from 10.0.0.4:44321 to 20.30.40.50:443',
         },
       },
-      partitionId: "0",
+      partitionId: '0',
       sequenceNumber: 42,
-    });
+    })
 
-    expect(log.category).toBe("AZFWNetworkRule");
-    expect(log.action).toBe("Deny");
-    expect(log.protocol).toBe("TCP");
-    expect(log.sourceIp).toBe("10.0.0.4");
-    expect(log.destinationPort).toBe("443");
-    expect(log.policy).toBe("hub-policy");
-    expect(log.ruleCollectionGroup).toBe("hub-collection-group");
-    expect(log.enqueuedTimeUtc).toBeUndefined();
-  });
+    expect(log.category).toBe('AZFWNetworkRule')
+    expect(log.action).toBe('Deny')
+    expect(log.protocol).toBe('TCP')
+    expect(log.sourceIp).toBe('10.0.0.4')
+    expect(log.destinationPort).toBe('443')
+    expect(log.policy).toBe('hub-policy')
+    expect(log.ruleCollectionGroup).toBe('hub-collection-group')
+    expect(log.enqueuedTimeUtc).toBeUndefined()
+  })
 
-  it("extracts minimal fields from legacy message logs", () => {
+  it('extracts minimal fields from legacy message logs', () => {
     const log = normalizeFirewallLogRecord({
       raw: {
-        category: "AzureFirewallNetworkRule",
+        category: 'AzureFirewallNetworkRule',
         properties: {
-          msg: "Action: Allow. TCP request from 192.168.1.10:5050 to 10.1.0.8:443. Policy: legacy-policy. Rule Collection Group: legacy-collection-group. Rule Collection: legacy-collection. Rule: allow-web.",
+          msg: 'Action: Allow. TCP request from 192.168.1.10:5050 to 10.1.0.8:443. Policy: legacy-policy. Rule Collection Group: legacy-collection-group. Rule Collection: legacy-collection. Rule: allow-web.',
         },
       },
-    });
+    })
 
-    expect(log.action).toBe("ALLOW");
-    expect(log.protocol).toBe("TCP");
-    expect(log.sourceIp).toBe("192.168.1.10");
-    expect(log.destinationIp).toBe("10.1.0.8");
-    expect(log.policy).toBe("legacy-policy");
-    expect(log.ruleCollectionGroup).toBe("legacy-collection-group");
-    expect(log.ruleCollection).toBe("legacy-collection");
-    expect(log.rule).toBe("allow-web");
-  });
+    expect(log.action).toBe('ALLOW')
+    expect(log.protocol).toBe('TCP')
+    expect(log.sourceIp).toBe('192.168.1.10')
+    expect(log.destinationIp).toBe('10.1.0.8')
+    expect(log.policy).toBe('legacy-policy')
+    expect(log.ruleCollectionGroup).toBe('legacy-collection-group')
+    expect(log.ruleCollection).toBe('legacy-collection')
+    expect(log.rule).toBe('allow-web')
+  })
 
-  it("extracts an FQDN destination from legacy application-rule messages", () => {
+  it('extracts an FQDN destination from legacy application-rule messages', () => {
     const log = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-08-13T13:57:01.735317+00:00",
-        operationName: "AzureFirewallApplicationRuleLog",
+        time: '2026-08-13T13:57:01.735317+00:00',
+        operationName: 'AzureFirewallApplicationRuleLog',
         properties: {
-          msg: "HTTPS request from 10.141.8.11:52386 to login.live.com:443. Action: Allow. Policy: obh-afwp-glob-001. Rule Collection Group: obh-rcg-glob-Internet-001. Rule Collection: Allow_Outbound_Internet_SNAT. Rule: Internet-Access",
+          msg: 'HTTPS request from 10.141.8.11:52386 to login.live.com:443. Action: Allow. Policy: obh-afwp-glob-001. Rule Collection Group: obh-rcg-glob-Internet-001. Rule Collection: Allow_Outbound_Internet_SNAT. Rule: Internet-Access',
         },
-        category: "AzureFirewallApplicationRule",
+        category: 'AzureFirewallApplicationRule',
       },
-    });
+    })
 
     expect(log).toMatchObject({
-      sourceIp: "10.141.8.11",
-      sourcePort: "52386",
-      destinationIp: "login.live.com",
-      destinationPort: "443",
-    });
-  });
+      sourceIp: '10.141.8.11',
+      sourcePort: '52386',
+      destinationIp: 'login.live.com',
+      destinationPort: '443',
+    })
+  })
 
-  it("uses a structured application-rule FQDN when destination IP is empty", () => {
-    const fqdn = "germanywestcentral-gas.guestconfiguration.azure.com";
+  it('uses a structured application-rule FQDN when destination IP is empty', () => {
+    const fqdn = 'germanywestcentral-gas.guestconfiguration.azure.com'
     const log = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-08-13T14:08:50.152602+00:00",
+        time: '2026-08-13T14:08:50.152602+00:00',
         properties: {
-          Protocol: "HTTPS",
-          SourceIp: "10.140.17.5",
+          Protocol: 'HTTPS',
+          SourceIp: '10.140.17.5',
           SourcePort: 41936,
-          DestinationIp: "",
+          DestinationIp: '',
           DestinationPort: 443,
           Fqdn: fqdn,
-          Action: "Allow",
+          Action: 'Allow',
         },
-        category: "AZFWApplicationRule",
+        category: 'AZFWApplicationRule',
       },
-    });
+    })
 
-    expect(log.destinationIp).toBe(fqdn);
-    expect(log.destinationPort).toBe("443");
+    expect(log.destinationIp).toBe(fqdn)
+    expect(log.destinationPort).toBe('443')
 
     const logWithIp = normalizeFirewallLogRecord({
       raw: {
-        properties: { DestinationIp: "20.30.40.50", Fqdn: fqdn },
-        category: "AZFWApplicationRule",
+        properties: { DestinationIp: '20.30.40.50', Fqdn: fqdn },
+        category: 'AZFWApplicationRule',
       },
-    });
-    expect(logWithIp.destinationIp).toBe("20.30.40.50");
-  });
+    })
+    expect(logWithIp.destinationIp).toBe('20.30.40.50')
+  })
 
-  it("maps live Event Hub DNS proxy requests and preserves delivery metadata", () => {
+  it('maps live Event Hub DNS proxy requests and preserves delivery metadata', () => {
     const message =
-      "DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s";
-    const applicationProperties = { schemaVersion: "1", diagnosticCategory: "dns" };
+      'DNS Request: 10.140.16.133:29135 - 50772 A IN winatp-gw-neu3.microsoft.com. udp 57 false 1232 NOERROR qr,rd,ra 336 0.0032s'
+    const applicationProperties = { schemaVersion: '1', diagnosticCategory: 'dns' }
     const log = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-07-12T16:36:42.076008+00:00",
+        time: '2026-07-12T16:36:42.076008+00:00',
         resourceId:
-          "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
-        operationName: "AzureFirewallDnsProxyLog",
+          '/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001',
+        operationName: 'AzureFirewallDnsProxyLog',
         properties: {
           msg: message,
         },
-        category: "AzureFirewallDnsProxy",
+        category: 'AzureFirewallDnsProxy',
       },
-      enqueuedTimeUtc: new Date("2026-07-12T16:36:43.000Z"),
-      partitionId: "2",
+      enqueuedTimeUtc: new Date('2026-07-12T16:36:43.000Z'),
+      partitionId: '2',
       sequenceNumber: 99,
-      offset: "1200",
+      offset: '1200',
       applicationProperties,
-    });
+    })
 
-    expect(log.action).toBe("DNS query");
-    expect(log.category).toBe("AzureFirewallDnsProxy");
-    expect(log.protocol).toBe("UDP");
-    expect(log.sourceIp).toBe("10.140.16.133");
-    expect(log.sourcePort).toBe("29135");
-    expect(log.resourceId).toContain("/AZUREFIREWALLS/");
+    expect(log.action).toBe('DNS query')
+    expect(log.category).toBe('AzureFirewallDnsProxy')
+    expect(log.protocol).toBe('UDP')
+    expect(log.sourceIp).toBe('10.140.16.133')
+    expect(log.sourcePort).toBe('29135')
+    expect(log.resourceId).toContain('/AZUREFIREWALLS/')
     expect(log).toMatchObject({
-      enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+      enqueuedTimeUtc: '2026-07-12T16:36:43.000Z',
       applicationProperties,
-      partitionId: "2",
-      sequenceNumber: "99",
-      offset: "1200",
+      partitionId: '2',
+      sequenceNumber: '99',
+      offset: '1200',
       dns: {
-        source: "dns-proxy",
-        stage: "proxy-exchange",
-        queryId: "50772",
-        queryName: "winatp-gw-neu3.microsoft.com.",
-        queryType: "A",
-        queryClass: "IN",
-        protocol: "UDP",
-        clientIp: "10.140.16.133",
-        clientPort: "29135",
-        responseCode: "NOERROR",
-        responseFlags: ["qr", "rd", "ra"],
+        source: 'dns-proxy',
+        stage: 'proxy-exchange',
+        queryId: '50772',
+        queryName: 'winatp-gw-neu3.microsoft.com.',
+        queryType: 'A',
+        queryClass: 'IN',
+        protocol: 'UDP',
+        clientIp: '10.140.16.133',
+        clientPort: '29135',
+        responseCode: 'NOERROR',
+        responseFlags: ['qr', 'rd', 'ra'],
         requestSizeBytes: 57,
         responseSizeBytes: 336,
         durationSeconds: 0.0032,
-        enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+        enqueuedTimeUtc: '2026-07-12T16:36:43.000Z',
         raw: { msg: message },
       },
-    });
-    expect(log.searchableText).toContain("dns query");
-  });
+    })
+    expect(log.searchableText).toContain('dns query')
+  })
 
-  it("keeps malformed Event Hub DNS proxy records in All logs without a DNS entry", () => {
+  it('keeps malformed Event Hub DNS proxy records in All logs without a DNS entry', () => {
     const log = normalizeFirewallLogRecord({
       raw: {
-        category: "AzureFirewallDnsProxy",
-        properties: { msg: "DNS Request: malformed" },
+        category: 'AzureFirewallDnsProxy',
+        properties: { msg: 'DNS Request: malformed' },
       },
-    });
+    })
 
-    expect(log.category).toBe("AzureFirewallDnsProxy");
-    expect(log.action).toBe("DNS query");
-    expect(log.dns).toBeUndefined();
-    expect(log.searchableText).toContain("dns request: malformed");
-  });
+    expect(log.category).toBe('AzureFirewallDnsProxy')
+    expect(log.action).toBe('DNS query')
+    expect(log.dns).toBeUndefined()
+    expect(log.searchableText).toContain('dns request: malformed')
+  })
 
-  it("maps retained Event Hub network-rule DNS with transport metadata", () => {
-    const applicationProperties = { schemaVersion: "1", diagnosticCategory: "network" };
+  it('maps retained Event Hub network-rule DNS with transport metadata', () => {
+    const applicationProperties = { schemaVersion: '1', diagnosticCategory: 'network' }
     const log = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-07-12T16:36:42.076Z",
-        category: "AZFWNetworkRule",
+        time: '2026-07-12T16:36:42.076Z',
+        category: 'AZFWNetworkRule',
         resourceId:
-          "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
+          '/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw',
         properties: {
-          Action: "Allow",
-          Protocol: "TCP",
-          SourceIp: "10.0.0.4",
+          Action: 'Allow',
+          Protocol: 'TCP',
+          SourceIp: '10.0.0.4',
           SourcePort: 53_000,
-          DestinationIp: "168.63.129.16",
+          DestinationIp: '168.63.129.16',
           DestinationPort: 53,
-          Policy: "hub-policy",
-          RuleCollectionGroup: "hub-group",
-          RuleCollection: "dns-rules",
-          Rule: "allow-dns",
+          Policy: 'hub-policy',
+          RuleCollectionGroup: 'hub-group',
+          RuleCollection: 'dns-rules',
+          Rule: 'allow-dns',
         },
       },
-      enqueuedTimeUtc: new Date("2026-07-12T16:36:43.000Z"),
-      partitionId: "2",
+      enqueuedTimeUtc: new Date('2026-07-12T16:36:43.000Z'),
+      partitionId: '2',
       sequenceNumber: 99,
-      offset: "1200",
+      offset: '1200',
       applicationProperties,
-    });
+    })
 
     expect(log).toMatchObject({
-      enqueuedTimeUtc: "2026-07-12T16:36:43.000Z",
+      enqueuedTimeUtc: '2026-07-12T16:36:43.000Z',
       applicationProperties,
-      partitionId: "2",
-      sequenceNumber: "99",
-      offset: "1200",
+      partitionId: '2',
+      sequenceNumber: '99',
+      offset: '1200',
       dns: {
-        source: "network-rule",
-        protocol: "TCP",
-        clientIp: "10.0.0.4",
-        clientPort: "53000",
-        serverIp: "168.63.129.16",
-        serverPort: "53",
-        policy: "hub-policy",
-        ruleCollectionGroup: "hub-group",
-        ruleCollection: "dns-rules",
-        rule: "allow-dns",
+        source: 'network-rule',
+        protocol: 'TCP',
+        clientIp: '10.0.0.4',
+        clientPort: '53000',
+        serverIp: '168.63.129.16',
+        serverPort: '53',
+        policy: 'hub-policy',
+        ruleCollectionGroup: 'hub-group',
+        ruleCollection: 'dns-rules',
+        rule: 'allow-dns',
       },
-    });
-  });
+    })
+  })
 
-  it("uses EventData-local record index in stable identity", () => {
+  it('uses EventData-local record index in stable identity', () => {
     const first = normalizeFirewallLogRecord({
-      raw: { category: "AZFWNetworkRule" },
-      partitionId: "2",
+      raw: { category: 'AZFWNetworkRule' },
+      partitionId: '2',
       sequenceNumber: 99,
-      offset: "1200",
+      offset: '1200',
       index: 700,
       eventRecordIndex: 3,
-    });
+    })
 
-    expect(first.id).toContain("2:1200:3:");
-    expect(first.eventRecordIndex).toBe(3);
-    expect(first.offset).toBe("1200");
-  });
+    expect(first.id).toContain('2:1200:3:')
+    expect(first.eventRecordIndex).toBe(3)
+    expect(first.offset).toBe('1200')
+  })
 
-  it("uses global ingestion index when EventData position metadata is unavailable", () => {
+  it('uses global ingestion index when EventData position metadata is unavailable', () => {
     const raw = {
-      time: "2026-07-12T16:36:42.000Z",
-      category: "AZFWNetworkRule",
+      time: '2026-07-12T16:36:42.000Z',
+      category: 'AZFWNetworkRule',
       resourceId:
-        "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw",
-    };
-    const first = normalizeFirewallLogRecord({ raw, partitionId: "0", index: 10 });
-    const second = normalizeFirewallLogRecord({ raw, partitionId: "0", index: 11 });
+        '/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/azureFirewalls/fw',
+    }
+    const first = normalizeFirewallLogRecord({ raw, partitionId: '0', index: 10 })
+    const second = normalizeFirewallLogRecord({ raw, partitionId: '0', index: 11 })
 
-    expect(first.id).not.toBe(second.id);
-    expect(first.id).toContain("0:index-10:10:");
-  });
+    expect(first.id).not.toBe(second.id)
+    expect(first.id).toContain('0:index-10:10:')
+  })
 
-  it("labels structured Azure Firewall DNS query records as DNS queries", () => {
+  it('labels structured Azure Firewall DNS query records as DNS queries', () => {
     const log = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-07-12T16:31:58.589993+00:00",
+        time: '2026-07-12T16:31:58.589993+00:00',
         resourceId:
-          "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
+          '/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001',
         properties: {
-          SourceIp: "192.168.179.30",
+          SourceIp: '192.168.179.30',
           SourcePort: 54487,
           QueryId: 39185,
-          QueryType: "A",
-          QueryClass: "IN",
-          QueryName: "router12.teamviewer.com.",
-          Protocol: "udp",
+          QueryType: 'A',
+          QueryClass: 'IN',
+          QueryName: 'router12.teamviewer.com.',
+          Protocol: 'udp',
           RequestSize: 52,
           DnssecOkBit: false,
           EDNS0BufferSize: 1224,
-          ResponseCode: "NOERROR",
-          ResponseFlags: "qr,rd,ra",
+          ResponseCode: 'NOERROR',
+          ResponseFlags: 'qr,rd,ra',
           ResponseSize: 344,
           RequestDurationSecs: 0.014257901,
           ErrorNumber: 0,
-          ErrorMessage: "",
+          ErrorMessage: '',
         },
-        category: "AZFWDnsQuery",
+        category: 'AZFWDnsQuery',
       },
-    });
+    })
 
-    expect(log.action).toBe("DNS query");
-    expect(log.category).toBe("AZFWDnsQuery");
-    expect(log.protocol).toBe("udp");
-    expect(log.sourceIp).toBe("192.168.179.30");
-    expect(log.sourcePort).toBe("54487");
-    expect(log.dns).toBeUndefined();
-    expect(log.searchableText).toContain("dns query");
-  });
+    expect(log.action).toBe('DNS query')
+    expect(log.category).toBe('AZFWDnsQuery')
+    expect(log.protocol).toBe('udp')
+    expect(log.sourceIp).toBe('192.168.179.30')
+    expect(log.sourcePort).toBe('54487')
+    expect(log.dns).toBeUndefined()
+    expect(log.searchableText).toContain('dns query')
+  })
 
-  it("labels default actions as the rule when no rule matched", () => {
+  it('labels default actions as the rule when no rule matched', () => {
     const defaultAction = normalizeFirewallLogRecord({
       raw: {
-        category: "AZFWNetworkRule",
+        category: 'AZFWNetworkRule',
         properties: {
-          ActionReason: "Default Action",
-          Rule: "",
+          ActionReason: 'Default Action',
+          Rule: '',
         },
       },
-    });
+    })
     const namedRule = normalizeFirewallLogRecord({
       raw: {
-        category: "AZFWNetworkRule",
+        category: 'AZFWNetworkRule',
         properties: {
-          ActionReason: "Default Action",
-          Rule: "deny-web",
+          ActionReason: 'Default Action',
+          Rule: 'deny-web',
         },
       },
-    });
+    })
     const applicationDefault = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-07-16T15:15:58.874439+00:00",
+        time: '2026-07-16T15:15:58.874439+00:00',
         resourceId:
-          "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
+          '/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001',
         properties: {
-          Protocol: "HTTPS",
-          SourceIp: "10.140.5.36",
+          Protocol: 'HTTPS',
+          SourceIp: '10.140.5.36',
           SourcePort: 51298,
           DestinationPort: 443,
-          Fqdn: "0f0287f2-8b3c-4676-a466-934cd6e80d09.ods.opinsights.azure.com",
-          TargetUrl: "",
-          Action: "Deny",
-          Policy: "",
-          RuleCollectionGroup: "",
-          RuleCollection: "",
-          Rule: "",
-          ActionReason: "No rule matched. Proceeding with default action",
+          Fqdn: '0f0287f2-8b3c-4676-a466-934cd6e80d09.ods.opinsights.azure.com',
+          TargetUrl: '',
+          Action: 'Deny',
+          Policy: '',
+          RuleCollectionGroup: '',
+          RuleCollection: '',
+          Rule: '',
+          ActionReason: 'No rule matched. Proceeding with default action',
           IsTlsInspected: false,
-          WebCategory: "",
+          WebCategory: '',
           IsExplicitProxyRequest: false,
         },
-        category: "AZFWApplicationRule",
+        category: 'AZFWApplicationRule',
       },
-    });
+    })
     const legacyApplicationDefault = normalizeFirewallLogRecord({
       raw: {
-        time: "2026-07-16T15:18:15.518183+00:00",
+        time: '2026-07-16T15:18:15.518183+00:00',
         resourceId:
-          "/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001",
-        operationName: "AzureFirewallApplicationRuleLog",
+          '/SUBSCRIPTIONS/1487A784-5C73-422F-B7A3-FCEA3C426610/RESOURCEGROUPS/OBH-RG-DEW1-NETWORK-001/PROVIDERS/MICROSOFT.NETWORK/AZUREFIREWALLS/OBH-AFW-DEW1-CONNECTIVITY-001',
+        operationName: 'AzureFirewallApplicationRuleLog',
         properties: {
-          msg: "HTTPS request from 10.140.5.36:51384 to winatp-gw-neu3.microsoft.com:443. Action: Deny. No rule matched. Proceeding with default action",
+          msg: 'HTTPS request from 10.140.5.36:51384 to winatp-gw-neu3.microsoft.com:443. Action: Deny. No rule matched. Proceeding with default action',
         },
-        category: "AzureFirewallApplicationRule",
+        category: 'AzureFirewallApplicationRule',
       },
-    });
+    })
 
-    expect(defaultAction.rule).toBe("Default");
-    expect(namedRule.rule).toBe("deny-web");
-    expect(applicationDefault.rule).toBe("Default");
-    expect(legacyApplicationDefault.rule).toBe("Default");
-  });
-});
+    expect(defaultAction.rule).toBe('Default')
+    expect(namedRule.rule).toBe('deny-web')
+    expect(applicationDefault.rule).toBe('Default')
+    expect(legacyApplicationDefault.rule).toBe('Default')
+  })
+})

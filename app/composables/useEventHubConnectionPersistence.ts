@@ -1,128 +1,128 @@
-import type { Ref } from "vue";
+import type { Ref } from 'vue'
 
 import {
   clearStoredEventHubConnectionString,
   readStoredEventHubConnectionString,
   storeEventHubConnectionString,
   type EventHubConnectionStorage,
-} from "~/utils/eventHubConnectionStorage";
+} from '~/utils/eventHubConnectionStorage'
 
 export function useEventHubConnectionPersistence(
   connectionString: Ref<string>,
   options: { active?: Readonly<Ref<boolean>> } = {},
 ) {
-  const enabled = ref(false);
-  const lastError = ref<string | null>(null);
-  const active = options.active ?? ref(true);
-  let initialized = false;
-  let mounted = false;
-  let ignoreEnabledChange = false;
-  let hasStoredValue = false;
-  let storage: EventHubConnectionStorage | null = null;
+  const enabled = ref(false)
+  const lastError = ref<string | null>(null)
+  const active = options.active ?? ref(true)
+  let initialized = false
+  let mounted = false
+  let ignoreEnabledChange = false
+  let hasStoredValue = false
+  let storage: EventHubConnectionStorage | null = null
 
   function setEnabledWithoutSync(value: boolean) {
-    ignoreEnabledChange = true;
-    enabled.value = value;
-    ignoreEnabledChange = false;
+    ignoreEnabledChange = true
+    enabled.value = value
+    ignoreEnabledChange = false
   }
 
   function clearStoredValue() {
     if (storage === null) {
-      setEnabledWithoutSync(true);
-      lastError.value = "Connection string could not be removed from browser storage.";
-      return;
+      setEnabledWithoutSync(true)
+      lastError.value = 'Connection string could not be removed from browser storage.'
+      return
     }
 
     try {
-      clearStoredEventHubConnectionString(storage);
-      hasStoredValue = false;
-      lastError.value = null;
+      clearStoredEventHubConnectionString(storage)
+      hasStoredValue = false
+      lastError.value = null
     } catch {
-      hasStoredValue = true;
-      setEnabledWithoutSync(true);
-      lastError.value = "Connection string could not be removed from browser storage.";
+      hasStoredValue = true
+      setEnabledWithoutSync(true)
+      lastError.value = 'Connection string could not be removed from browser storage.'
     }
   }
 
   function saveCurrentValue() {
     if (storage === null) {
-      setEnabledWithoutSync(hasStoredValue);
-      lastError.value = "Connection string could not be saved in browser storage.";
-      return;
+      setEnabledWithoutSync(hasStoredValue)
+      lastError.value = 'Connection string could not be saved in browser storage.'
+      return
     }
 
     try {
-      storeEventHubConnectionString(storage, connectionString.value);
-      hasStoredValue = true;
-      lastError.value = null;
+      storeEventHubConnectionString(storage, connectionString.value)
+      hasStoredValue = true
+      lastError.value = null
     } catch {
-      setEnabledWithoutSync(hasStoredValue);
-      lastError.value = "Connection string could not be saved in browser storage.";
+      setEnabledWithoutSync(hasStoredValue)
+      lastError.value = 'Connection string could not be saved in browser storage.'
     }
   }
 
   function initialize() {
     if (!mounted || initialized || !active.value) {
-      return;
+      return
     }
 
     try {
-      storage = window.localStorage;
-      const storedValue = readStoredEventHubConnectionString(storage);
+      storage = window.localStorage
+      const storedValue = readStoredEventHubConnectionString(storage)
       if (storedValue !== null) {
-        hasStoredValue = true;
-        connectionString.value = storedValue;
-        setEnabledWithoutSync(true);
+        hasStoredValue = true
+        connectionString.value = storedValue
+        setEnabledWithoutSync(true)
       }
     } catch {
-      storage = null;
-      lastError.value = "Connection string could not be read from browser storage.";
+      storage = null
+      lastError.value = 'Connection string could not be read from browser storage.'
     } finally {
-      initialized = true;
+      initialized = true
     }
   }
 
   onMounted(() => {
-    mounted = true;
-    initialize();
-  });
+    mounted = true
+    initialize()
+  })
 
   watch(active, (isActive) => {
     if (isActive) {
-      initialize();
-      return;
+      initialize()
+      return
     }
 
-    setEnabledWithoutSync(false);
-    storage = null;
-    initialized = false;
-  });
+    setEnabledWithoutSync(false)
+    storage = null
+    initialized = false
+  })
 
   watch(connectionString, () => {
     if (active.value && initialized && enabled.value) {
-      saveCurrentValue();
+      saveCurrentValue()
     }
-  });
+  })
 
   watch(
     enabled,
     (shouldPersist) => {
       if (!active.value || !initialized || ignoreEnabledChange) {
-        return;
+        return
       }
 
       if (shouldPersist) {
-        saveCurrentValue();
-        return;
+        saveCurrentValue()
+        return
       }
 
-      clearStoredValue();
+      clearStoredValue()
     },
-    { flush: "sync" },
-  );
+    { flush: 'sync' },
+  )
 
   return {
     enabled,
     lastError,
-  };
+  }
 }

@@ -1,33 +1,33 @@
-import { effectScope, isRef, ref, type Ref } from "vue";
+import { effectScope, isRef, ref, type Ref } from 'vue'
 
 import {
   mergeIntoBoundedBuffer,
   prependToBoundedBuffer,
   trimToBufferSize,
   useBoundedLogBuffer,
-} from "../../app/composables/useBoundedLogBuffer";
+} from '../../app/composables/useBoundedLogBuffer'
 
 beforeEach(() => {
-  vi.useFakeTimers();
-  const stateByKey = new Map<string, Ref<unknown>>();
-  vi.stubGlobal("useState", <T>(key: string, initialize: () => T | Ref<T>) => {
-    const existing = stateByKey.get(key);
+  vi.useFakeTimers()
+  const stateByKey = new Map<string, Ref<unknown>>()
+  vi.stubGlobal('useState', <T>(key: string, initialize: () => T | Ref<T>) => {
+    const existing = stateByKey.get(key)
     if (existing) {
-      return existing as Ref<T>;
+      return existing as Ref<T>
     }
-    const initial = initialize();
-    const state = isRef(initial) ? initial : ref(initial);
-    stateByKey.set(key, state as Ref<unknown>);
-    return state;
-  });
-});
+    const initial = initialize()
+    const state = isRef(initial) ? initial : ref(initial)
+    stateByKey.set(key, state as Ref<unknown>)
+    return state
+  })
+})
 
 afterEach(() => {
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-});
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
-describe("bounded log buffer helpers", () => {
+describe('bounded log buffer helpers', () => {
   it.each([
     { current: [9, 7, 3], incoming: [1, 8, 10], limit: 4, expected: [10, 9, 8, 7] },
     { current: [9, 7], incoming: [1, 5, 3, 4], limit: 3, expected: [9, 7, 5] },
@@ -35,157 +35,157 @@ describe("bounded log buffer helpers", () => {
     { current: [9, 7, 3], incoming: [], limit: 2, expected: [9, 7] },
     { current: [9], incoming: [10], limit: 0, expected: [] },
   ])(
-    "retains the newest values when merging $incoming into $current",
+    'retains the newest values when merging $incoming into $current',
     ({ current, incoming, limit, expected }) => {
-      const originalCurrent = [...current];
-      const originalIncoming = [...incoming];
+      const originalCurrent = [...current]
+      const originalIncoming = [...incoming]
 
       expect(
         mergeIntoBoundedBuffer(current, incoming, limit, (left, right) => right - left),
-      ).toEqual(expected);
-      expect(current).toEqual(originalCurrent);
-      expect(incoming).toEqual(originalIncoming);
+      ).toEqual(expected)
+      expect(current).toEqual(originalCurrent)
+      expect(incoming).toEqual(originalIncoming)
     },
-  );
+  )
 
-  it("keeps newer records visible when a delayed batch exceeds raw capacity", () => {
-    const buffer = useBoundedLogBuffer<number>("ordered", ref(3), {
+  it('keeps newer records visible when a delayed batch exceeds raw capacity', () => {
+    const buffer = useBoundedLogBuffer<number>('ordered', ref(3), {
       compare: (left, right) => right - left,
       publishedSize: ref(2),
-    });
-    buffer.pushMany([90, 100]);
-    buffer.flush();
-    expect(buffer.items.value).toEqual([100, 90]);
+    })
+    buffer.pushMany([90, 100])
+    buffer.flush()
+    expect(buffer.items.value).toEqual([100, 90])
 
-    buffer.pushMany([1, 5, 3, 4]);
-    buffer.flush();
-    expect(buffer.getRawItems()).toEqual([100, 90, 5]);
-    expect(buffer.items.value).toEqual([100, 90]);
+    buffer.pushMany([1, 5, 3, 4])
+    buffer.flush()
+    expect(buffer.getRawItems()).toEqual([100, 90, 5])
+    expect(buffer.items.value).toEqual([100, 90])
 
-    buffer.pushMany([110, 2]);
-    buffer.flush();
-    expect(buffer.getRawItems()).toEqual([110, 100, 90]);
-    expect(buffer.items.value).toEqual([110, 100]);
-  });
+    buffer.pushMany([110, 2])
+    buffer.flush()
+    expect(buffer.getRawItems()).toEqual([110, 100, 90])
+    expect(buffer.items.value).toEqual([110, 100])
+  })
 
-  it("keeps newest-first items at the front of the buffer", () => {
-    expect(trimToBufferSize(["newest", "middle", "oldest"], 2)).toEqual(["newest", "middle"]);
-  });
+  it('keeps newest-first items at the front of the buffer', () => {
+    expect(trimToBufferSize(['newest', 'middle', 'oldest'], 2)).toEqual(['newest', 'middle'])
+  })
 
-  it("normalizes invalid buffer sizes to an empty buffer", () => {
-    expect(trimToBufferSize(["newest"], Number.NaN)).toEqual([]);
-  });
+  it('normalizes invalid buffer sizes to an empty buffer', () => {
+    expect(trimToBufferSize(['newest'], Number.NaN)).toEqual([])
+  })
 
-  it("prepends incoming batches with the current newest-first ordering", () => {
-    expect(prependToBoundedBuffer(["old-1", "old-2"], ["batch-old", "batch-new"], 3)).toEqual([
-      "batch-new",
-      "batch-old",
-      "old-1",
-    ]);
-  });
+  it('prepends incoming batches with the current newest-first ordering', () => {
+    expect(prependToBoundedBuffer(['old-1', 'old-2'], ['batch-old', 'batch-new'], 3)).toEqual([
+      'batch-new',
+      'batch-old',
+      'old-1',
+    ])
+  })
 
-  it("keeps newest incoming items when the incoming batch exceeds capacity", () => {
-    expect(prependToBoundedBuffer(["old"], ["oldest", "middle", "newest"], 2)).toEqual([
-      "newest",
-      "middle",
-    ]);
-  });
+  it('keeps newest incoming items when the incoming batch exceeds capacity', () => {
+    expect(prependToBoundedBuffer(['old'], ['oldest', 'middle', 'newest'], 2)).toEqual([
+      'newest',
+      'middle',
+    ])
+  })
 
-  it("retains current items only up to remaining capacity", () => {
-    expect(prependToBoundedBuffer(["old-1", "old-2", "old-3"], ["new"], 3)).toEqual([
-      "new",
-      "old-1",
-      "old-2",
-    ]);
-  });
+  it('retains current items only up to remaining capacity', () => {
+    expect(prependToBoundedBuffer(['old-1', 'old-2', 'old-3'], ['new'], 3)).toEqual([
+      'new',
+      'old-1',
+      'old-2',
+    ])
+  })
 
-  it("normalizes invalid prepend buffer sizes to an empty buffer", () => {
-    expect(prependToBoundedBuffer(["old"], ["new"], Number.NaN)).toEqual([]);
-    expect(prependToBoundedBuffer(["old"], ["new"], 0)).toEqual([]);
-  });
+  it('normalizes invalid prepend buffer sizes to an empty buffer', () => {
+    expect(prependToBoundedBuffer(['old'], ['new'], Number.NaN)).toEqual([])
+    expect(prependToBoundedBuffer(['old'], ['new'], 0)).toEqual([])
+  })
 
-  it("keeps current items when prepending an empty batch", () => {
-    expect(prependToBoundedBuffer(["newest", "oldest"], [], 5)).toEqual(["newest", "oldest"]);
-  });
+  it('keeps current items when prepending an empty batch', () => {
+    expect(prependToBoundedBuffer(['newest', 'oldest'], [], 5)).toEqual(['newest', 'oldest'])
+  })
 
-  it("publishes only visible rows on the coalesced interval", () => {
-    const buffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
+  it('publishes only visible rows on the coalesced interval', () => {
+    const buffer = useBoundedLogBuffer<{ id: number }>('test', ref(5), {
       publishedSize: ref(2),
-    });
-    const records = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    })
+    const records = [{ id: 1 }, { id: 2 }, { id: 3 }]
 
-    buffer.pushMany(records);
+    buffer.pushMany(records)
 
-    expect(buffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1]);
-    expect(buffer.items.value).toEqual([]);
-    vi.advanceTimersByTime(249);
-    expect(buffer.items.value).toEqual([]);
+    expect(buffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1])
+    expect(buffer.items.value).toEqual([])
+    vi.advanceTimersByTime(249)
+    expect(buffer.items.value).toEqual([])
 
-    vi.advanceTimersByTime(1);
-    expect(buffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2]);
-    expect(buffer.version.value).toBe(1);
-  });
+    vi.advanceTimersByTime(1)
+    expect(buffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2])
+    expect(buffer.version.value).toBe(1)
+  })
 
-  it("retains raw rows when the buffer composable is recreated", () => {
-    const firstBuffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
+  it('retains raw rows when the buffer composable is recreated', () => {
+    const firstBuffer = useBoundedLogBuffer<{ id: number }>('test', ref(5), {
       publishedSize: ref(2),
-    });
-    firstBuffer.pushMany([{ id: 1 }, { id: 2 }, { id: 3 }]);
-    firstBuffer.flush();
+    })
+    firstBuffer.pushMany([{ id: 1 }, { id: 2 }, { id: 3 }])
+    firstBuffer.flush()
 
-    const recreatedBuffer = useBoundedLogBuffer<{ id: number }>("test", ref(5), {
+    const recreatedBuffer = useBoundedLogBuffer<{ id: number }>('test', ref(5), {
       publishedSize: ref(2),
-    });
+    })
 
-    expect(recreatedBuffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2]);
-    expect(recreatedBuffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1]);
-  });
+    expect(recreatedBuffer.items.value.map((record: { id: number }) => record.id)).toEqual([3, 2])
+    expect(recreatedBuffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1])
+  })
 
-  it("flushes a pending publication immediately and cancels its timer", () => {
-    const buffer = useBoundedLogBuffer<string>("test", ref(5), {
+  it('flushes a pending publication immediately and cancels its timer', () => {
+    const buffer = useBoundedLogBuffer<string>('test', ref(5), {
       publishedSize: ref(2),
-    });
+    })
 
-    buffer.pushMany(["old", "new"]);
-    buffer.flush();
+    buffer.pushMany(['old', 'new'])
+    buffer.flush()
 
-    expect(buffer.items.value).toEqual(["new", "old"]);
-    expect(buffer.version.value).toBe(1);
-    vi.advanceTimersByTime(250);
-    expect(buffer.version.value).toBe(1);
-  });
+    expect(buffer.items.value).toEqual(['new', 'old'])
+    expect(buffer.version.value).toBe(1)
+    vi.advanceTimersByTime(250)
+    expect(buffer.version.value).toBe(1)
+  })
 
-  it("retains raw rows without publishing while UI is inactive and catches up on activation", () => {
-    const publishingEnabled = ref(false);
-    const buffer = useBoundedLogBuffer<string>("test", ref(5), { publishingEnabled });
+  it('retains raw rows without publishing while UI is inactive and catches up on activation', () => {
+    const publishingEnabled = ref(false)
+    const buffer = useBoundedLogBuffer<string>('test', ref(5), { publishingEnabled })
 
-    buffer.pushMany(["old", "new"]);
-    buffer.flush();
-    vi.advanceTimersByTime(500);
+    buffer.pushMany(['old', 'new'])
+    buffer.flush()
+    vi.advanceTimersByTime(500)
 
-    expect(buffer.getRawItems()).toEqual(["new", "old"]);
-    expect(buffer.items.value).toEqual([]);
-    expect(buffer.version.value).toBe(0);
+    expect(buffer.getRawItems()).toEqual(['new', 'old'])
+    expect(buffer.items.value).toEqual([])
+    expect(buffer.version.value).toBe(0)
 
-    publishingEnabled.value = true;
-    vi.advanceTimersByTime(250);
+    publishingEnabled.value = true
+    vi.advanceTimersByTime(250)
 
-    expect(buffer.items.value).toEqual(["new", "old"]);
-    expect(buffer.version.value).toBe(1);
-  });
+    expect(buffer.items.value).toEqual(['new', 'old'])
+    expect(buffer.version.value).toBe(1)
+  })
 
-  it("cancels pending publication when its reactive scope is disposed", () => {
-    const scope = effectScope();
-    const buffer = scope.run(() => useBoundedLogBuffer<string>("test", ref(5)));
+  it('cancels pending publication when its reactive scope is disposed', () => {
+    const scope = effectScope()
+    const buffer = scope.run(() => useBoundedLogBuffer<string>('test', ref(5)))
     if (!buffer) {
-      throw new Error("Buffer was not created.");
+      throw new Error('Buffer was not created.')
     }
 
-    buffer.pushMany(["pending"]);
-    scope.stop();
-    vi.advanceTimersByTime(250);
+    buffer.pushMany(['pending'])
+    scope.stop()
+    vi.advanceTimersByTime(250)
 
-    expect(buffer.items.value).toEqual([]);
-    expect(buffer.version.value).toBe(0);
-  });
-});
+    expect(buffer.items.value).toEqual([])
+    expect(buffer.version.value).toBe(0)
+  })
+})
