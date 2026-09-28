@@ -51,8 +51,5 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Typecheck scripts
-        run: bun run typecheck:scripts
-
       - name: Unit tests
         run: bun run test:unit

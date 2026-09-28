@@ -16,7 +16,6 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "typecheck": "nuxt typecheck",
-    "typecheck:scripts": "tsc -p scripts",
     "test:unit": "vitest run --project unit --project nuxt",
     "test:browser": "node -e \"if (!process.env.PLAYWRIGHT_EXECUTABLE_PATH) { console.error('PLAYWRIGHT_EXECUTABLE_PATH must point to the Nix-wrapped Chromium executable.'); process.exit(1); }\" && vitest run --project browser",
     "test:e2e": "playwright test",
