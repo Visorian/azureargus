@@ -59,7 +59,7 @@ export function useTemporaryLogAnalyticsAuth() {
 
   async function getClient() {
     if (clientPromise !== null) {
-      return clientPromise
+      return await clientPromise
     }
 
     const { BrowserCacheLocation, PublicClientApplication: MsalClient } =

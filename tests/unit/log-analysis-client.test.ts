@@ -240,7 +240,7 @@ describe('Log analysis client', () => {
         active: ref(true),
         filters: reactive(createDefaultLogFilters()),
         queryLimit: ref(1_000),
-        request: async () => requests[requestIndex++]!.promise,
+        request: async () => await requests[requestIndex++]!.promise,
         sort: reactive(createDefaultLogSort()),
         storage: createStorage(),
       }),
@@ -275,7 +275,7 @@ describe('Log analysis client', () => {
         queryLimit: ref(1_000),
         request: async (body) => {
           requests.push(body)
-          return requests.length === 1 ? initial.promise : response('refined')
+          return requests.length === 1 ? await initial.promise : response('refined')
         },
         sort: reactive(createDefaultLogSort()),
         storage: createStorage(),
@@ -314,7 +314,7 @@ describe('Log analysis client', () => {
         queryLimit: ref(1_000),
         request: async (_body, signal) => {
           requestSignal = signal
-          return new Promise<LogAnalyticsQueryResponse>((_resolve, reject) => {
+          return await new Promise<LogAnalyticsQueryResponse>((_resolve, reject) => {
             signal.addEventListener('abort', () => {
               reject(new DOMException('Aborted', 'AbortError'))
             })
@@ -470,7 +470,7 @@ describe('Log analysis client', () => {
           signal.addEventListener('abort', () => {
             secondRequest.reject(new DOMException('Aborted', 'AbortError'))
           })
-          return secondRequest.promise
+          return await secondRequest.promise
         },
         sort: reactive(createDefaultLogSort()),
         storage: createStorage(),

@@ -75,7 +75,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
   if (options.request === undefined) {
     const requestFetch = useRequestFetch()
     request = async (body: LogAnalyticsQueryRequest, signal: AbortSignal) =>
-      requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
+      await requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
         body,
         method: 'POST',
         signal,
@@ -238,7 +238,7 @@ export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
 
     rangeError.value = null
     criteriaChangedDuringInitialLoad = false
-    return execute(parsed.value, !hasRun.value, requestForExecution)
+    return await execute(parsed.value, !hasRun.value, requestForExecution)
   }
 
   function scheduleRefinement(immediate = false) {

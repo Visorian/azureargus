@@ -93,7 +93,7 @@ async function waitForAccessToken(
   signal?: AbortSignal,
 ): Promise<CachedAccessToken> {
   if (!signal) {
-    return promise
+    return await promise
   }
   if (signal.aborted) {
     throw new DOMException('Aborted', 'AbortError')

@@ -16,9 +16,9 @@ const RETENTION_OFF_ROW_PATTERN = /Jul 21, 2026, 10:00:00 AZFWNetworkRule/
 const RETENTION_ON_ROW_PATTERN = /Jul 21, 2026, 10:01:00 AZFWNetworkRule/
 
 async function getStoredLogCount(page: Page) {
-  return page.evaluate(
+  return await page.evaluate(
     async ({ databaseName, storeName }) =>
-      new Promise<number>((resolve, reject) => {
+      await new Promise<number>((resolve, reject) => {
         const openRequest = indexedDB.open(databaseName)
         openRequest.addEventListener('error', () => {
           reject(openRequest.error ?? new Error('Opening log history database failed'))
@@ -41,9 +41,9 @@ async function getStoredLogCount(page: Page) {
 }
 
 async function storeLog(page: Page, record: PersistedFirewallLogRecord) {
-  return page.evaluate(
-    async ({ databaseName, log, storeName }) =>
-      new Promise<void>((resolve, reject) => {
+  await page.evaluate(
+    async ({ databaseName, log, storeName }) => {
+      await new Promise<void>((resolve, reject) => {
         const openRequest = indexedDB.open(databaseName)
         openRequest.addEventListener('error', () => {
           reject(openRequest.error ?? new Error('Opening log history database failed'))
@@ -61,7 +61,8 @@ async function storeLog(page: Page, record: PersistedFirewallLogRecord) {
             resolve()
           })
         })
-      }),
+      })
+    },
     { databaseName: LOG_HISTORY_DB_NAME, log: record, storeName: LOG_HISTORY_STORE_NAME },
   )
 }
@@ -109,7 +110,7 @@ test('local log retention is opt-in and clearing is persistent', async ({ page }
   await expect(
     page.getByRole('group', { name: 'All logs status and actions' }).getByRole('status'),
   ).toHaveText('connected')
-  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
 
   await page.reload()
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
@@ -144,12 +145,12 @@ test('local log retention is opt-in and clearing is persistent', async ({ page }
   await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
   await expect(page.getByText('1 visible / 1 received')).toBeVisible()
   await expect(page.getByRole('row', { name: RETENTION_ON_ROW_PATTERN })).toBeVisible()
-  await expect.poll(async () => getStoredLogCount(page)).toBe(1)
+  await expect.poll(async () => await getStoredLogCount(page)).toBe(1)
 
   await openSettings(page)
   await logRetentionSwitch.click()
   await expect(logRetentionSwitch).not.toBeChecked()
-  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
   await page.reload()
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await openSettings(page)
@@ -168,7 +169,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
   })
   await logRetentionSwitch.click()
   await expect(logRetentionSwitch).toBeChecked()
-  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
 
   await storeLog(page, {
     id: 'source-a-record',
@@ -179,7 +180,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
     message: 'source A must not survive',
     searchableText: 'source A must not survive',
   })
-  await expect.poll(async () => getStoredLogCount(page)).toBe(1)
+  await expect.poll(async () => await getStoredLogCount(page)).toBe(1)
 
   await settingsDrawer
     .getByRole('textbox', { name: 'Connection string*' })
@@ -188,7 +189,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
     )
   await settingsDrawer.getByRole('button', { name: 'Connect', exact: true }).click()
 
-  await expect.poll(async () => getStoredLogCount(page)).toBe(0)
+  await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
   await expect(logRetentionSwitch).toBeChecked()
   await expect(searchInput).toHaveValue('')
   await expect(page.getByRole('main')).toBeVisible()

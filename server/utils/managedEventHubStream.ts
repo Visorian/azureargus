@@ -82,7 +82,7 @@ async function settled(promise: Promise<unknown>): Promise<void> {
 }
 
 async function waitForResponseDrain(response: ServerResponse) {
-  return new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     function cleanup() {
       response.off('close', onClose)
       response.off('drain', onDrain)
@@ -240,10 +240,11 @@ export function createManagedEventHubStream({
   const lacksDemand = () =>
     !closed && controller?.desiredSize !== null && (controller?.desiredSize ?? 0) <= 0
 
-  const nextDemand = async () =>
-    new Promise<void>((resolve) => {
+  const nextDemand = async () => {
+    await new Promise<void>((resolve) => {
       demandResolve = resolve
     })
+  }
 
   const waitForDemand = async () => {
     while (lacksDemand()) {
@@ -253,7 +254,8 @@ export function createManagedEventHubStream({
 
   const cleanup = async () => {
     if (cleanupPromise) {
-      return cleanupPromise
+      await cleanupPromise
+      return
     }
 
     closed = true
@@ -279,7 +281,7 @@ export function createManagedEventHubStream({
         // Stream may already be cancelled by its consumer.
       }
     })()
-    return cleanupPromise
+    await cleanupPromise
   }
 
   // cleanup() never rejects: client closes are settled and controller.close() is guarded.
@@ -306,7 +308,7 @@ export function createManagedEventHubStream({
     const encoded = encodeManagedEventHubEnvelope(envelope)
     const pendingWrite = enqueueAfter(writeChain, encoded, waitForBackpressure)
     writeChain = settled(pendingWrite)
-    return pendingWrite
+    await pendingWrite
   }
 
   const sendHeartbeat = async () => {

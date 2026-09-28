@@ -420,7 +420,7 @@ describe('Log Analytics Azure request', () => {
 
   it('aborts timed-out upstream requests', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      return new Promise<Response>((_resolve, reject) => {
+      return await new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           reject(new DOMException('Aborted', 'AbortError'))
         })

@@ -152,8 +152,10 @@ async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient
         : new EventHubConsumerClient(form.consumerGroup.trim(), form.connectionString.trim())
 
     return {
-      close: async () => eventHubClient.close(),
-      getPartitionIds: async () => eventHubClient.getPartitionIds(),
+      close: async () => {
+        await eventHubClient.close()
+      },
+      getPartitionIds: async () => await eventHubClient.getPartitionIds(),
       subscribe: (handlers, options) => eventHubClient.subscribe(handlers, options),
     }
   }
@@ -423,7 +425,8 @@ export function useEventHubReceiver({
     }
 
     if (disconnectPromise) {
-      return disconnectPromise
+      await disconnectPromise
+      return
     }
 
     const activeSubscription = subscription

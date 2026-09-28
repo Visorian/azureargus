@@ -25,7 +25,7 @@ export async function mockManagedEventHubStream(page: Page) {
         location.href,
       )
       if (requestUrl.pathname !== '/api/event-hub/stream') {
-        return originalFetch(input, init)
+        return await originalFetch(input, init)
       }
 
       state.requests.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null)
@@ -50,12 +50,14 @@ export async function enqueueManagedEventHubEnvelope(
   envelope: ManagedEventHubStreamEnvelope,
 ) {
   await expect
-    .poll(async () =>
-      page.evaluate(() =>
-        Boolean(
-          (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream?.controller,
+    .poll(
+      async () =>
+        await page.evaluate(() =>
+          Boolean(
+            (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream
+              ?.controller,
+          ),
         ),
-      ),
     )
     .toBe(true)
   await page.evaluate((nextEnvelope) => {
@@ -80,7 +82,7 @@ export async function closeManagedEventHubStream(page: Page) {
 }
 
 export async function getManagedEventHubRequests(page: Page) {
-  return page.evaluate(
+  return await page.evaluate(
     () =>
       (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream?.requests ?? [],
   )

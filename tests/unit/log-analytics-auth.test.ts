@@ -55,7 +55,7 @@ describe('Log Analytics token provider', () => {
     let resolveResponse: ((response: Response) => void) | undefined
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(
       async () =>
-        new Promise<Response>((resolve) => {
+        await new Promise<Response>((resolve) => {
           resolveResponse = resolve
         }),
     )
@@ -85,7 +85,7 @@ describe('Log Analytics token provider', () => {
 
   it('bounds token acquisition with a timeout', async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
-      return new Promise<Response>((_resolve, reject) => {
+      return await new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => {
           reject(new DOMException('Aborted', 'AbortError'))
         })
@@ -103,7 +103,7 @@ describe('Log Analytics token provider', () => {
     let resolveResponse: ((response: Response) => void) | undefined
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(
       async () =>
-        new Promise<Response>((resolve) => {
+        await new Promise<Response>((resolve) => {
           resolveResponse = resolve
         }),
     )

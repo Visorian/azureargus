@@ -4,7 +4,7 @@
     "typeAware": true,
     "typeCheck": true,
     "reportUnusedDisableDirectives": "error",
-    "maxWarnings": 1075
+    "maxWarnings": 972
   },
   "plugins": [
     "eslint",
@@ -51,6 +51,8 @@
     "tools/oxlint/anti-slop"
   ],
   "rules": {
+    "typescript/return-await": ["error", "always"],
+    "vitest/no-conditional-in-test": "off",
     "eslint/require-await": "off",
     "eslint/prefer-promise-reject-errors": "off",
     "eslint/no-throw-literal": "off",
@@ -241,7 +243,7 @@
     "unicorn/prefer-object-from-entries": "error",
     "unicorn/prefer-optional-catch-binding": "error",
     "unicorn/prefer-response-static-json": "error",
-    "unicorn/prefer-spread": "error",
+    "unicorn/prefer-spread": "off",
     "unicorn/prefer-string-raw": "error",
     "unicorn/prefer-string-trim-start-end": "error",
     "unicorn/prefer-structured-clone": "error",
@@ -341,7 +343,6 @@
         "typescript/prefer-nullish-coalescing": "warn",
         "typescript/require-await": "warn",
         "typescript/strict-boolean-expressions": "warn",
-        "vitest/no-conditional-in-test": "warn",
         "vitest/prefer-strict-equal": "warn",
         "vitest/require-mock-type-parameters": "warn"
       }

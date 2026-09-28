@@ -25,7 +25,7 @@ test('managed Event Hub uses configured server stream without exposing credentia
   await expect(page.getByRole('checkbox', { name: 'Remember connection string' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect
-    .poll(async () => getManagedEventHubRequests(page))
+    .poll(async () => await getManagedEventHubRequests(page))
     .toEqual([{ consumerGroup: '$Default', lookbackMinutes: 15 }])
   await expect
     .poll(async () => JSON.stringify(await getManagedEventHubRequests(page)))
@@ -69,7 +69,7 @@ test('managed Event Hub uses configured server stream without exposing credentia
       .getByText('reconnecting', { exact: true }),
   ).toBeVisible()
   await expect
-    .poll(async () => getManagedEventHubRequests(page))
+    .poll(async () => await getManagedEventHubRequests(page))
     .toEqual([
       { consumerGroup: '$Default', lookbackMinutes: 15 },
       { consumerGroup: '$Default', lookbackMinutes: 15, resumeFrom: { '0': 42 } },

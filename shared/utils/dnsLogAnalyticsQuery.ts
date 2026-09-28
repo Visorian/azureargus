@@ -531,8 +531,9 @@ export async function executeDnsReadinessQuery(
 ): Promise<DnsReadinessResponse> {
   const probes = buildDnsReadinessProbes()
   const results = await Promise.allSettled(
-    probes.map(async ({ query }) =>
-      executeLogAnalyticsRawQuery(target, query, undefined, accessToken, options),
+    probes.map(
+      async ({ query }) =>
+        await executeLogAnalyticsRawQuery(target, query, undefined, accessToken, options),
     ),
   )
   throwIfAborted(options.signal)

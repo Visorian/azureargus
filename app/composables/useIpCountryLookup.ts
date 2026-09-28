@@ -256,12 +256,13 @@ export function createIpCountryLookupClient(
 
 export function useIpCountryLookup() {
   const requestFetch = useRequestFetch()
-  const client = createIpCountryLookupClient(async (body, signal) =>
-    requestFetch<unknown>('/api/ip-country', {
-      body,
-      method: 'POST',
-      signal,
-    }),
+  const client = createIpCountryLookupClient(
+    async (body, signal) =>
+      await requestFetch<unknown>('/api/ip-country', {
+        body,
+        method: 'POST',
+        signal,
+      }),
   )
   onScopeDispose(() => {
     client.dispose()

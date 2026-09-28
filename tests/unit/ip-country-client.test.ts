@@ -37,7 +37,7 @@ describe('IP country client', () => {
       .fn<(body: { ips: string[] }, signal: AbortSignal) => Promise<IpCountryLookupResponse>>()
       .mockImplementationOnce(
         async ({ ips }) =>
-          new Promise((resolve) => {
+          await new Promise((resolve) => {
             resolveFirst = () => {
               resolve(createResponse(ips))
             }
@@ -69,7 +69,7 @@ describe('IP country client', () => {
       .fn<(body: { ips: string[] }, signal: AbortSignal) => Promise<IpCountryLookupResponse>>()
       .mockImplementationOnce(
         async ({ ips }) =>
-          new Promise((resolve) => {
+          await new Promise((resolve) => {
             resolveFirst = () => {
               resolve(createResponse(ips, 'DE'))
             }
@@ -243,7 +243,7 @@ describe('IP country client', () => {
     let signal: AbortSignal | undefined
     const request = vi.fn(async (_body, nextSignal: AbortSignal) => {
       signal = nextSignal
-      return new Promise<IpCountryLookupResponse>(() => {})
+      return await new Promise<IpCountryLookupResponse>(() => {})
     })
     const client = createIpCountryLookupClient(request)
 
@@ -258,7 +258,7 @@ describe('IP country client', () => {
     let signal: AbortSignal | undefined
     const request = vi.fn(async (_body, nextSignal: AbortSignal) => {
       signal = nextSignal
-      return new Promise<IpCountryLookupResponse>((_resolve, reject) => {
+      return await new Promise<IpCountryLookupResponse>((_resolve, reject) => {
         nextSignal.addEventListener('abort', () => {
           reject(new DOMException('Aborted', 'AbortError'))
         })

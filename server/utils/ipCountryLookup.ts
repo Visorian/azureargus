@@ -95,7 +95,7 @@ export function createIpCountryLookup({
   onInitializationError = (message) => {
     console.error(message)
   },
-  openReader = async (databasePath) => Reader.open(databasePath),
+  openReader = async (databasePath) => await Reader.open(databasePath),
 }: IpCountryLookupOptions = {}) {
   let readerPromise: Promise<IpCountryReader> | null = null
   let initializationErrorReported = false
@@ -124,7 +124,7 @@ export function createIpCountryLookup({
 
     readerPromise ??= openReaderOrReportUnavailable(databasePath)
 
-    return readerPromise
+    return await readerPromise
   }
 
   async function lookup(ip: string, databasePath: string) {

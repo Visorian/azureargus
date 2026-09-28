@@ -1146,7 +1146,7 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     const factory = createDeferred<CreateEventHubReceiverClient>()
     const createClient = vi.fn<CreateEventHubReceiverClient>()
-    const loadClientFactory = vi.fn(async () => factory.promise)
+    const loadClientFactory = vi.fn(async () => await factory.promise)
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
     const receiver = useEventHubReceiver({ loadClientFactory })
 
@@ -1754,7 +1754,9 @@ describe('Event Hub receiver helpers', () => {
   it('shares one teardown across overlapping disconnect calls', async () => {
     installNuxtMocks()
     const closeBarrier: PromiseWithResolvers<void> = Promise.withResolvers()
-    const subscriptionClose = vi.fn(async () => closeBarrier.promise)
+    const subscriptionClose = vi.fn(async () => {
+      await closeBarrier.promise
+    })
     const clientClose = vi.fn(async () => {})
     const client: EventHubReceiverClient = {
       close: clientClose,

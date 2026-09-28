@@ -114,7 +114,9 @@ describe('analysis mode orchestration', () => {
   it('aborts Log work and awaits Real-time teardown before route leave completes', async () => {
     const abortLogAnalysis = createVoidMock()
     const disconnect = createDeferred()
-    const disconnectRealTime = vi.fn<() => Promise<void>>(async () => disconnect.promise)
+    const disconnectRealTime = vi.fn<() => Promise<void>>(async () => {
+      await disconnect.promise
+    })
     useAnalysisMode({
       abortLogAnalysis,
       canUseLogAnalysis: ref(true),

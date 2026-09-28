@@ -82,8 +82,8 @@ describe('DNS source readiness client', () => {
     >(async (target, signal) => {
       signals.push(signal)
       return target.mode === 'delegated' && target.workspaceId.endsWith('1')
-        ? first.promise
-        : second.promise
+        ? await first.promise
+        : await second.promise
     })
     const target = ref<DnsReadinessTarget | null>({
       mode: 'delegated',
@@ -123,7 +123,7 @@ describe('DNS source readiness client', () => {
       useDnsSourceReadiness({
         request: async (_target, nextSignal) => {
           signal = nextSignal
-          return deferred.promise
+          return await deferred.promise
         },
         target,
       }),

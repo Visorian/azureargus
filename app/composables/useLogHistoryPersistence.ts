@@ -39,7 +39,7 @@ function createBrowserLogHistoryStore(): LogHistoryStoreApi {
       }
 
       const store = await import('~/utils/logHistoryStore.client')
-      return store.deleteLogHistoryBefore(timestamp)
+      return await store.deleteLogHistoryBefore(timestamp)
     },
     async pruneLogHistory(retention, now) {
       if (!isIndexedDBAvailable()) {
@@ -55,7 +55,7 @@ function createBrowserLogHistoryStore(): LogHistoryStoreApi {
       }
 
       const store = await import('~/utils/logHistoryStore.client')
-      return store.queryLogHistoryRange(query)
+      return await store.queryLogHistoryRange(query)
     },
   }
 }

@@ -6,7 +6,9 @@ describe('managed Event Hub stream registry', () => {
     const firstFinished = new Promise<void>((resolve) => {
       finishFirst = resolve
     })
-    const closeFirst = vi.fn<() => Promise<void>>(async () => firstFinished)
+    const closeFirst = vi.fn<() => Promise<void>>(async () => {
+      await firstFinished
+    })
     const closeSecond = vi.fn<() => Promise<void>>(async () => {})
     const unregisterFirst = await registerManagedEventHubStream('session', closeFirst)
 

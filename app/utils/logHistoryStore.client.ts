@@ -54,7 +54,7 @@ function upgradeDatabase(database: IDBDatabase, transaction: IDBTransaction | nu
 }
 
 async function transactionToPromise(transaction: IDBTransaction) {
-  return new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     transaction.addEventListener('complete', () => {
       resolve()
     })
@@ -68,7 +68,7 @@ async function transactionToPromise(transaction: IDBTransaction) {
 }
 
 async function requestToPromise<T>(request: IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
+  return await new Promise<T>((resolve, reject) => {
     request.addEventListener('success', () => {
       resolve(request.result)
     })
@@ -83,7 +83,7 @@ export async function openLogHistoryStore(): Promise<IDBDatabase | null> {
     return null
   }
 
-  return new Promise<IDBDatabase>((resolve, reject) => {
+  return await new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(LOG_HISTORY_DB_NAME, LOG_HISTORY_DB_VERSION)
 
     request.addEventListener('upgradeneeded', () => {

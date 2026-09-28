@@ -208,7 +208,9 @@ test('temporary discovery enforces one overall timeout including token acquisiti
   vi.useFakeTimers()
   try {
     const tokenProvider = createTokenProvider()
-    tokenProvider.getManagementAccessToken.mockImplementation(async () => new Promise(() => {}))
+    tokenProvider.getManagementAccessToken.mockImplementation(
+      async () => await new Promise(() => {}),
+    )
     const fetchImplementation = vi.fn<typeof fetch>()
     const client = createTemporaryLogAnalyticsClient(tokenProvider, {
       discoveryTimeoutMs: 20,
@@ -238,7 +240,7 @@ test('temporary discovery sanitizes malformed Azure payloads and aborts sibling 
       })
     }
     siblingSignal = init?.signal ?? undefined
-    return new Promise<Response>((_resolve, reject) => {
+    return await new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener(
         'abort',
         () => {
@@ -275,7 +277,7 @@ test('temporary discovery sanitizes unexpected management-token failures', async
 test('temporary query preserves caller cancellation', async () => {
   const tokenProvider = createTokenProvider()
   const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
-    return new Promise<Response>((_resolve, reject) => {
+    return await new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener(
         'abort',
         () => {
@@ -302,12 +304,12 @@ test.each([
   [
     'DNS readiness',
     async (client: ReturnType<typeof createTemporaryLogAnalyticsClient>, signal: AbortSignal) =>
-      client.dnsReadiness(tenantId, workspaceId, signal),
+      await client.dnsReadiness(tenantId, workspaceId, signal),
   ],
   [
     'DNS listing',
     async (client: ReturnType<typeof createTemporaryLogAnalyticsClient>, signal: AbortSignal) =>
-      client.dnsList(
+      await client.dnsList(
         tenantId,
         workspaceId,
         {
@@ -322,7 +324,7 @@ test.each([
   async (_name, run) => {
     const tokenProvider = createTokenProvider()
     const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
-      return new Promise<Response>((_resolve, reject) => {
+      return await new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener(
           'abort',
           () => {

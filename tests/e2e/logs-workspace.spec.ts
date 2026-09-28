@@ -140,8 +140,9 @@ test('receiver status indicators follow the active pane actions', async ({ page 
 
   await page.setViewportSize({ height: 812, width: 375 })
   await expect
-    .poll(async () =>
-      page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    .poll(
+      async () =>
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     )
     .toBe(true)
 })
@@ -214,21 +215,23 @@ test('data source rail remains bounded at narrow viewport', async ({ page }) => 
     expect(Math.abs(drawerBox!.width - workspaceBox!.width)).toBeLessThanOrEqual(1)
   }).toPass()
   await expect
-    .poll(async () =>
-      page.evaluate(() => ({
-        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-      })),
+    .poll(
+      async () =>
+        await page.evaluate(() => ({
+          horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+        })),
     )
     .toEqual({ horizontal: true, vertical: true })
   await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
   await expect(dataSource).toBeVisible()
   await expect
-    .poll(async () =>
-      page.evaluate(() => ({
-        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-      })),
+    .poll(
+      async () =>
+        await page.evaluate(() => ({
+          horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+        })),
     )
     .toEqual({ horizontal: true, vertical: true })
 })
@@ -241,13 +244,15 @@ test('main log table scrolls horizontally at a narrow viewport', async ({ page }
   const table = page.getByTestId('log-table-scroll')
   await expect(table).toHaveCSS('overflow-x', 'auto')
   await expect
-    .poll(async () => table.evaluate((element) => element.scrollWidth > element.clientWidth))
+    .poll(async () => await table.evaluate((element) => element.scrollWidth > element.clientWidth))
     .toBe(true)
 
   await table.evaluate((element) => {
     element.scrollLeft = element.scrollWidth - element.clientWidth
   })
-  await expect.poll(async () => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+  await expect
+    .poll(async () => await table.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(0)
 
   const ruleHeader = table.getByRole('columnheader', { name: 'Rule' })
   const ruleCell = table.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('cell').nth(8)
@@ -264,8 +269,9 @@ test('main log table scrolls horizontally at a narrow viewport', async ({ page }
     expect(Math.abs(headerBox!.width - cellBox!.width)).toBeLessThanOrEqual(1)
   }).toPass()
   await expect
-    .poll(async () =>
-      page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    .poll(
+      async () =>
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     )
     .toBe(true)
 })
@@ -655,7 +661,9 @@ test('renders application-rule FQDN destinations and full category names', async
     })
     await expect(label).toBeVisible()
     await expect
-      .poll(async () => label.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .poll(
+        async () => await label.evaluate((element) => element.scrollWidth <= element.clientWidth),
+      )
       .toBe(true)
   }
 })
@@ -718,8 +726,9 @@ test.describe('time display preferences', () => {
     await expect(dnsTimeHeader).toBeVisible()
     await expect(page.getByText('Times shown in UTC', { exact: true })).toBeVisible()
     await expect
-      .poll(async () =>
-        dnsTimeHeader.evaluate((element) => element.scrollWidth <= element.clientWidth),
+      .poll(
+        async () =>
+          await dnsTimeHeader.evaluate((element) => element.scrollWidth <= element.clientWidth),
       )
       .toBe(true)
     await expect(dnsEntry.locator('time')).toHaveText('00:09:24')

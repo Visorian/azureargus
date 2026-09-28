@@ -58,14 +58,14 @@ export function createLogHistoryStore(adapter: LogHistoryStoreAdapter): LogHisto
       await pruneLogHistory(retention)
     },
     async clearLogHistory() {
-      return adapter.clear()
+      await adapter.clear()
     },
     async deleteLogHistoryBefore(timestamp) {
-      return adapter.deleteBefore(timestamp)
+      return await adapter.deleteBefore(timestamp)
     },
     pruneLogHistory,
     async queryLogHistoryRange(query) {
-      return adapter.queryRange({
+      return await adapter.queryRange({
         ...query,
         limit: normalizeLimit(query.limit),
       })

@@ -34,7 +34,7 @@ async function expectAlignedColumns(header: Locator, row: Locator) {
 
 async function expectNoHorizontalOverflow(cell: Locator) {
   await expect
-    .poll(async () => cell.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .poll(async () => await cell.evaluate((element) => element.scrollWidth - element.clientWidth))
     .toBeLessThanOrEqual(1)
 }
 
@@ -442,7 +442,7 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
   await expect(resolutionDetail).toBeVisible()
   await expect(resolutionDetail.getByText('Loading DNS observations…')).toBeVisible()
   await resolutionDetail.evaluate(async (element) => {
-    await Promise.all(element.getAnimations().map(async (animation) => animation.finished))
+    await Promise.all(element.getAnimations().map(async (animation) => await animation.finished))
   })
   const loadingBox = await resolutionDetail.boundingBox()
   releaseDetail()

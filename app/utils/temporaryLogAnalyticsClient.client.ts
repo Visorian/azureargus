@@ -209,7 +209,11 @@ export function createTemporaryLogAnalyticsClient(
             if (boundedSignal.aborted) {
               throw abortReason(boundedSignal)
             }
-            return discoverAzureLogAnalyticsAccess(accessToken, boundedSignal, fetchImplementation)
+            return await discoverAzureLogAnalyticsAccess(
+              accessToken,
+              boundedSignal,
+              fetchImplementation,
+            )
           },
         )
       } catch (error: unknown) {
@@ -223,12 +227,12 @@ export function createTemporaryLogAnalyticsClient(
       request: LogAnalyticsQueryRequest,
       signal: AbortSignal,
     ): Promise<LogAnalyticsQueryResponse> {
-      return withLogAnalyticsToken(
+      return await withLogAnalyticsToken(
         tenantId,
         workspaceId,
         signal,
         async (accessToken, targetWorkspace) =>
-          executeLogAnalyticsQuery({ workspaceId: targetWorkspace }, request, accessToken, {
+          await executeLogAnalyticsQuery({ workspaceId: targetWorkspace }, request, accessToken, {
             fetchImplementation,
             signal,
           }),
@@ -240,12 +244,12 @@ export function createTemporaryLogAnalyticsClient(
       workspaceId: string,
       signal: AbortSignal,
     ): Promise<DnsReadinessResponse> {
-      return withLogAnalyticsToken(
+      return await withLogAnalyticsToken(
         tenantId,
         workspaceId,
         signal,
         async (accessToken, targetWorkspace) =>
-          executeDnsReadinessQuery({ workspaceId: targetWorkspace }, accessToken, {
+          await executeDnsReadinessQuery({ workspaceId: targetWorkspace }, accessToken, {
             fetchImplementation,
             signal,
           }),
@@ -258,12 +262,12 @@ export function createTemporaryLogAnalyticsClient(
       request: DnsListQueryRequest,
       signal: AbortSignal,
     ): Promise<DnsListQueryResponse> {
-      return withLogAnalyticsToken(
+      return await withLogAnalyticsToken(
         tenantId,
         workspaceId,
         signal,
         async (accessToken, targetWorkspace) =>
-          executeDnsListQuery({ workspaceId: targetWorkspace }, request, accessToken, {
+          await executeDnsListQuery({ workspaceId: targetWorkspace }, request, accessToken, {
             fetchImplementation,
             signal,
           }),
@@ -276,12 +280,12 @@ export function createTemporaryLogAnalyticsClient(
       request: DnsDetailQueryRequest,
       signal: AbortSignal,
     ): Promise<DnsDetailQueryResponse> {
-      return withLogAnalyticsToken(
+      return await withLogAnalyticsToken(
         tenantId,
         workspaceId,
         signal,
         async (accessToken, targetWorkspace) =>
-          executeDnsDetailQuery({ workspaceId: targetWorkspace }, request, accessToken, {
+          await executeDnsDetailQuery({ workspaceId: targetWorkspace }, request, accessToken, {
             fetchImplementation,
             signal,
           }),

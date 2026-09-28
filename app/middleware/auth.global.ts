@@ -8,14 +8,14 @@ export default defineNuxtRouteMiddleware(async (to) => {
   try {
     capabilities = await deployment.load()
   } catch {
-    return navigateTo('/configuration-error')
+    return await navigateTo('/configuration-error')
   }
 
   if (capabilities.mode === 'invalid') {
-    return navigateTo('/configuration-error')
+    return await navigateTo('/configuration-error')
   }
   if (capabilities.mode === 'anonymous') {
-    return to.path === '/login' ? navigateTo('/logs') : undefined
+    return to.path === '/login' ? await navigateTo('/logs') : undefined
   }
 
   const { loggedIn } = useOidcAuth()
@@ -23,5 +23,5 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return
   }
 
-  return navigateTo('/login')
+  return await navigateTo('/login')
 })

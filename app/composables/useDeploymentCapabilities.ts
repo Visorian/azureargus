@@ -18,7 +18,7 @@ export function useDeploymentCapabilities() {
       return capabilities.value
     }
     if (!force && pendingLoad !== null) {
-      return pendingLoad
+      return await pendingLoad
     }
 
     status.value = 'loading'

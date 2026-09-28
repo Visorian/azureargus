@@ -444,14 +444,14 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       return false
     }
     rangeError.value = null
-    return executeList(parsed.value)
+    return await executeList(parsed.value)
   }
 
   async function applyFilters() {
     if (options.mode.value !== 'log-analysis' || !appliedRange.value || rangeDirty.value) {
       return false
     }
-    return executeList(appliedRange.value)
+    return await executeList(appliedRange.value)
   }
 
   async function selectEntry(entry: DnsEntry) {

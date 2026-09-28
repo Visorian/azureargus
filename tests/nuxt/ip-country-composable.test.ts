@@ -24,7 +24,7 @@ describe('useIpCountryLookup', () => {
     let signal: AbortSignal | undefined
     requestFetch.mockImplementation(async (_url: string, options: { signal: AbortSignal }) => {
       signal = options.signal
-      return new Promise<unknown>(() => {})
+      return await new Promise<unknown>(() => {})
     })
     const scope = effectScope()
     const client = scope.run(() => useIpCountryLookup())

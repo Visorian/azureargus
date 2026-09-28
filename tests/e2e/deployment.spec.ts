@@ -56,10 +56,11 @@ test('anonymous Event Hub settings expose both bounded deployment choices', asyn
   await expect(eventHubOnlyLink).toHaveAttribute('target', '_blank')
   await expect(eventHubWithDiagnosticsLink).toHaveAttribute('target', '_blank')
   await expect
-    .poll(async () =>
-      page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
+    .poll(
+      async () =>
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
     )
     .toBe(true)
 })
@@ -163,11 +164,12 @@ test('anonymous mode can reach logs page', async ({ page }) => {
     (element) => element.getBoundingClientRect().width,
   )
   await expect
-    .poll(async () =>
-      page.evaluate(() => ({
-        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-      })),
+    .poll(
+      async () =>
+        await page.evaluate(() => ({
+          horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+        })),
     )
     .toEqual({ horizontal: true, vertical: true })
 

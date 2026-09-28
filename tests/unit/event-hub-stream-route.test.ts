@@ -343,7 +343,7 @@ describe('managed Event Hub stream route', () => {
     let discoveryAborted = false
     const client = installAzureClientMock(
       async (options) =>
-        new Promise<string[]>((_resolve, reject) => {
+        await new Promise<string[]>((_resolve, reject) => {
           const abortSignal = options?.abortSignal
           abortSignal?.addEventListener(
             'abort',
