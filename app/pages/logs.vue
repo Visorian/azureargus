@@ -2249,7 +2249,7 @@ function statusColor(status: string) {
           @reset="dns.resetFilters"
           @select="dns.selectEntry"
         >
-          <template v-if="logAnalysisActive" #queryControls="{ mobile }">
+          <template v-if="logAnalysisActive" #query-controls="{ mobile }">
             <LogsLogAnalyticsQueryControls
               :show-run="!mobile"
               :display-time-zone="logTimeZone"

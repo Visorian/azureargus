@@ -47,7 +47,7 @@ const showUnidentifiedTransports = defineModel<boolean>("showUnidentifiedTranspo
   required: true,
 });
 defineSlots<{
-  queryControls?: (props: { mobile: boolean }) => unknown;
+  "query-controls"?: (props: { mobile: boolean }) => unknown;
 }>();
 const isMobile = useMediaQuery("(max-width: 1023px)");
 const tablet = useMediaQuery("(min-width: 768px)");
@@ -346,8 +346,8 @@ function completeness(value: DnsEntry["completeness"]) {
           />
         </div>
       </template>
-      <template v-if="$slots['queryControls']" #query="{ mobile }">
-        <slot name="queryControls" :mobile="mobile" />
+      <template v-if="$slots['query-controls']" #query="{ mobile }">
+        <slot name="query-controls" :mobile="mobile" />
       </template>
     </LogsLogAnalysisToolbar>
 
