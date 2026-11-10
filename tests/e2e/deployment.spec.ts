@@ -134,8 +134,6 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   const settingsButton = page.getByRole("button", { name: "Settings", exact: true });
   const settingsDrawer = page.locator("#logs-settings-drawer");
   await expect(settingsButton).toHaveAttribute("aria-expanded", "false");
-  await expect(settingsDrawer).toHaveAttribute("aria-hidden", "true");
-  await expect(settingsDrawer).toHaveJSProperty("inert", true);
   await expect(settingsDrawer).toBeHidden();
   const dataSource = page.getByRole("group", { name: "Data source" });
   await expect(dataSource).toBeVisible();
@@ -194,11 +192,13 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   ).toBeCloseTo(tableWidth, 1);
   await expect(searchLogs).toHaveValue("dns");
 
+  await searchLogs.fill("dns updated");
+  await expect(searchLogs).toBeFocused();
+  await expect(searchLogs).toHaveValue("dns updated");
+  await expect(settingsDrawer).toBeVisible();
   await closeSettings.click();
   await expect(settingsButton).toHaveAttribute("aria-expanded", "false");
-  await expect(settingsDrawer).toHaveAttribute("aria-hidden", "true");
-  await expect(settingsDrawer).toHaveJSProperty("inert", true);
-  await expect(settingsButton).toBeFocused();
+  await expect(openEventHubSettings).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(settingsDrawer.locator(":focus")).toHaveCount(0);
   await expect(settingsDrawer).toBeHidden();
@@ -206,10 +206,9 @@ test("anonymous mode can reach logs page", async ({ page }) => {
   await settingsButton.click();
   await expect(closeSettings).toBeFocused();
 
-  const filterDropdowns = page.getByRole("button", { name: "Show popup" });
   await expect(page.getByRole("button", { name: "Category filter" })).toBeVisible();
-  await expect(filterDropdowns.filter({ hasText: "Action" })).toBeVisible();
-  await expect(filterDropdowns.filter({ hasText: "Protocol" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Action filter" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Protocol filter" })).toBeVisible();
 
   const lookbackSelect = page.getByRole("combobox", { name: "Lookback" });
   await lookbackSelect.click();

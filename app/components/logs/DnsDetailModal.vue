@@ -27,6 +27,7 @@ const props = withDefaults(
   { hourCycle: "h23", timeZone: "UTC" },
 );
 const open = defineModel<boolean>("open", { required: true });
+const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
 const toast = useToast();
 const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? []);
 const relatedEvidence = computed(() => props.detail?.relatedEvidence ?? []);
@@ -36,6 +37,10 @@ const modalTitle = computed(() => {
   if (props.entry?.source === "internal-fqdn-failure") return "Internal FQDN failure detail";
   return "DNS resolution detail";
 });
+
+function forwardCloseAutoFocus(event: Event) {
+  emit("closeAutoFocus", event);
+}
 
 function stageLabel(observation: DnsObservation) {
   if (observation.stage === "proxy-exchange") return "Proxy exchange";
@@ -97,6 +102,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
   <UModal
     v-model:open="open"
     :title="modalTitle"
+    :content="{ onCloseAutoFocus: forwardCloseAutoFocus }"
     :description="`Times shown in ${timeZone}`"
     :ui="{
       content:
@@ -109,7 +115,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
         <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3 sm:gap-x-6">
           <div>
             <p class="text-xs text-brand-gray-500">DNS name or message</p>
-            <p class="break-all font-mono">
+            <p class="font-mono break-all">
               {{ entry.displayText ?? entry.queryName ?? "Not observed" }}
             </p>
           </div>
@@ -128,7 +134,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Client</p>
-            <p class="break-all font-mono">{{ entry.client || "-" }}</p>
+            <p class="font-mono break-all">{{ entry.client || "-" }}</p>
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Path</p>
@@ -256,14 +262,14 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                 </div>
                 <div v-if="observation.clientIp">
                   <dt class="text-xs text-brand-gray-500">Client endpoint</dt>
-                  <dd class="break-all font-mono">
+                  <dd class="font-mono break-all">
                     {{ observation.clientIp
                     }}<span v-if="observation.clientPort">:{{ observation.clientPort }}</span>
                   </dd>
                 </div>
                 <div v-if="observation.serverIp">
                   <dt class="text-xs text-brand-gray-500">Destination endpoint</dt>
-                  <dd class="break-all font-mono">
+                  <dd class="font-mono break-all">
                     {{ observation.serverIp
                     }}<span v-if="observation.serverPort">:{{ observation.serverPort }}</span>
                   </dd>
@@ -323,11 +329,11 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                 </div>
                 <div v-if="observation.queryMessage" class="sm:col-span-2 lg:col-span-3">
                   <dt class="text-xs text-brand-gray-500">Query message</dt>
-                  <dd class="break-all font-mono text-xs">{{ observation.queryMessage }}</dd>
+                  <dd class="font-mono text-xs break-all">{{ observation.queryMessage }}</dd>
                 </div>
                 <div v-if="observation.serverMessage" class="sm:col-span-2 lg:col-span-3">
                   <dt class="text-xs text-brand-gray-500">Server message</dt>
-                  <dd class="break-all font-mono text-xs">{{ observation.serverMessage }}</dd>
+                  <dd class="font-mono text-xs break-all">{{ observation.serverMessage }}</dd>
                 </div>
                 <div v-if="observation.queryTime">
                   <dt class="text-xs text-brand-gray-500">Azure query time</dt>
@@ -359,7 +365,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                 </div>
                 <div v-if="observation.resourceId" class="sm:col-span-2 lg:col-span-3">
                   <dt class="text-xs text-brand-gray-500">Azure resource</dt>
-                  <dd class="break-all font-mono text-xs">{{ observation.resourceId }}</dd>
+                  <dd class="font-mono text-xs break-all">{{ observation.resourceId }}</dd>
                 </div>
                 <div v-for="flag in observation.responseFlags" :key="flag">
                   <dt class="text-xs text-brand-gray-500">Flag {{ flag }}</dt>
@@ -442,11 +448,11 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                   </div>
                   <div v-if="evidence.queryName">
                     <dt class="text-xs text-brand-gray-500">FQDN</dt>
-                    <dd class="break-all font-mono text-xs">{{ evidence.queryName }}</dd>
+                    <dd class="font-mono text-xs break-all">{{ evidence.queryName }}</dd>
                   </div>
                   <div v-if="evidence.targetUrl" class="sm:col-span-2">
                     <dt class="text-xs text-brand-gray-500">Target URL</dt>
-                    <dd class="break-all font-mono text-xs">{{ evidence.targetUrl }}</dd>
+                    <dd class="font-mono text-xs break-all">{{ evidence.targetUrl }}</dd>
                   </div>
                   <div v-if="evidence.translatedIp">
                     <dt class="text-xs text-brand-gray-500">Translated endpoint</dt>
@@ -464,7 +470,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                     readonly
                     spellcheck="false"
                     wrap="off"
-                    class="mt-2 block max-h-96 w-full resize-none overflow-auto border-0 bg-brand-gray-50 p-3 font-mono text-xs leading-5 select-text text-brand-gray-950 focus:outline-none dark:bg-brand-gray-900 dark:text-brand-gray-50"
+                    class="mt-2 block max-h-96 w-full resize-none overflow-auto border-0 bg-brand-gray-50 p-3 font-mono text-xs leading-5 text-brand-gray-950 select-text focus:outline-none dark:bg-brand-gray-900 dark:text-brand-gray-50"
                   />
                 </details>
               </article>
@@ -484,6 +490,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                   >
                 </h3>
                 <UButton
+                  class="touch-control"
                   variant="ghost"
                   color="neutral"
                   size="xs"
@@ -502,7 +509,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                 readonly
                 spellcheck="false"
                 wrap="off"
-                class="block max-h-96 w-full resize-none overflow-auto border-0 bg-transparent p-3 font-mono text-xs leading-5 select-text text-brand-gray-950 focus:outline-none dark:text-brand-gray-50"
+                class="block max-h-96 w-full resize-none overflow-auto border-0 bg-transparent p-3 font-mono text-xs leading-5 text-brand-gray-950 select-text focus:outline-none dark:text-brand-gray-50"
               />
             </section>
           </div>

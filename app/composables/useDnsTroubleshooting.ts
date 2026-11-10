@@ -1,3 +1,5 @@
+import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from "vue";
+
 import type {
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
@@ -11,9 +13,9 @@ import type {
 } from "#shared/types/dns";
 import type { LogAnalyticsStorageKind } from "#shared/types/logAnalytics";
 import { createDnsDetailSelector, DNS_QUERY_TYPE_LABELS } from "#shared/utils/dns";
-import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from "vue";
 import { createDnsObservationStore } from "~/utils/dnsObservationStore";
 import { parseLogAnalysisDateRange, type LogAnalysisDateRange } from "~/utils/logAnalysis";
+
 import type { AnalysisMode } from "./useAnalysisMode";
 import { DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS } from "./useBoundedLogBuffer";
 import type { NormalizedLogBatchSink } from "./useEventHubReceiver";
@@ -200,6 +202,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
   const realtimeTransports = shallowRef<DnsObservation[]>([]);
   const logResponse = shallowRef<DnsListQueryResponse | null>(null);
   const appliedRange = ref<{ from: string; to: string } | null>(null);
+  const appliedFilters = ref<DnsFilters | null>(null);
   const logStatus = ref<DnsRequestStatus>("idle");
   const logLastError = ref<string | null>(null);
   const realtimeEntriesTruncated = ref(false);
@@ -334,6 +337,11 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       parsed.value.to !== appliedRange.value.to
     );
   });
+  const filtersDirty = computed(
+    () =>
+      appliedFilters.value !== null &&
+      JSON.stringify(logFilters) !== JSON.stringify(appliedFilters.value),
+  );
   const canApplyFilters = computed(
     () =>
       options.mode.value === "log-analysis" &&
@@ -368,12 +376,13 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     listController = controller;
     logStatus.value = "loading";
     logLastError.value = null;
+    const requestFilters = { ...filters.value };
     try {
       const response = await options.requestList(
         {
           from: range.from,
           to: range.to,
-          filters: { ...filters.value },
+          filters: requestFilters,
           limit: options.queryLimit.value,
           storage: options.storage.value,
         },
@@ -389,6 +398,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       closeDetail();
       logResponse.value = response;
       appliedRange.value = range;
+      appliedFilters.value = requestFilters;
       logStatus.value = "success";
       return true;
     } catch (error: unknown) {
@@ -480,6 +490,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       abortList();
       logResponse.value = null;
       appliedRange.value = null;
+      appliedFilters.value = null;
       logStatus.value = "idle";
       logLastError.value = null;
       return;
@@ -532,6 +543,7 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     entries: filteredEntries,
     entriesTruncated,
     filterOptions,
+    filtersDirty,
     filters,
     queriedEntryCount: computed(() => filteredNamedEntries.value.length),
     lastError,

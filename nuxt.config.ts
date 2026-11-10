@@ -88,6 +88,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: "Azure Argus",
+      htmlAttrs: { lang: "en" },
     },
   },
   compatibilityDate: "2026-07-09",

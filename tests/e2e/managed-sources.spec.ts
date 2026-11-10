@@ -259,4 +259,26 @@ test("managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
   await expect(normalizedRow).toContainText("192.0.2.53");
   await expect(normalizedRow).toContainText("53");
   await expect(normalizedRow).toContainText("rule-1");
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.getByRole("button", { name: "Clear results" }).click();
+  await page.getByRole("button", { name: "Choose time range" }).click();
+  const mobileQuery = page.getByRole("dialog", { name: "Query & filters", exact: true });
+  await mobileQuery.getByRole("textbox", { name: "Start" }).fill("2026-07-12T14:00");
+  await mobileQuery.getByRole("textbox", { name: "End" }).fill("2026-07-12T15:00");
+  await mobileQuery.getByRole("button", { name: "Run query" }).click();
+  await expect(page.getByText("1 visible", { exact: true })).toBeVisible();
+  await mobileQuery.getByRole("button", { name: "Show 1 result", exact: true }).click();
+  await expect(mobileQuery).toBeHidden();
+  await expect(page.getByRole("button", { name: "Query & filters (1)" })).toBeFocused();
+  const mobileLog = page
+    .getByTestId("mobile-log-list")
+    .getByRole("button")
+    .filter({ hasText: "192.0.2.53" });
+  await expect(mobileLog).toContainText("192.0.2.53");
+  await mobileLog.click();
+  await expect(page.getByRole("dialog", { name: "Log detail" })).toBeVisible();
+  await expect(
+    page.getByRole("dialog", { name: "Log detail" }).getByText("rule-1", { exact: true }),
+  ).toBeVisible();
 });
