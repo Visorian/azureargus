@@ -294,10 +294,10 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   let settingsDrawer = await openSettings(page);
   await expect(page.getByText("Run DNS query to load entries.")).toBeVisible();
   await expect(
-    page.getByTestId("log-filter-row").getByRole("button", { name: "Apply filters" }),
+    page.getByTestId("log-query-row").getByRole("button", { name: "Apply filters" }),
   ).toBeVisible();
   await expect(
-    page.getByTestId("log-filter-row").getByRole("button", { name: "Reset" }),
+    page.getByTestId("log-query-row").getByRole("button", { name: "Reset" }),
   ).toBeVisible();
   await expect(
     page.getByTestId("log-query-row").getByRole("button", { name: "Run query" }),
@@ -330,6 +330,17 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   expect(detailRequests).toBe(0);
 
   await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect
+    .poll(async () => {
+      const [start, end] = await Promise.all([
+        page.getByRole("textbox", { name: "Start" }).boundingBox(),
+        page.getByRole("textbox", { name: "End" }).boundingBox(),
+      ]);
+      return start && end ? Math.abs(start.y - end.y) : Infinity;
+    })
+    .toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole("button", { name: "Run query" }).click();
   expect(readinessRequests).toBe(1);
   const dnsStatusRail = page.getByRole("group", {
@@ -380,7 +391,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await expect(page.getByText(/could not be queried/)).toHaveCount(0);
   await expect(page.getByText("DNS transport query failed", { exact: true })).toHaveCount(0);
 
-  const resultFilter = page.getByLabel("DNS result");
+  const resultFilter = page.getByRole("button", { name: "DNS result", exact: true });
   await resultFilter.click();
   await expect(page.getByRole("option", { name: "Response received" })).toBeVisible();
   await expect(page.getByRole("option", { name: "Transport observed" })).toBeVisible();
@@ -390,7 +401,7 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
     .getByTestId("dns-filter-grid")
     .locator(":scope > *")
     .evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().top));
-  expect(filterControlTops).toHaveLength(7);
+  expect(filterControlTops).toHaveLength(6);
   expect(Math.max(...filterControlTops) - Math.min(...filterControlTops)).toBeLessThanOrEqual(1);
 
   const entryRows = page
@@ -414,15 +425,14 @@ test("managed DNS lens queries explicitly and shows decoded response size", asyn
   await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(4));
   await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(5));
 
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(transportRow).toHaveCount(1);
   await page.setViewportSize({ width: 390, height: 812 });
+  await expect(transportRow).toHaveCount(1);
   await transportRow.scrollIntoViewIfNeeded();
-  await page.getByTestId("dns-entry-scroll").evaluate((element) => {
-    element.scrollLeft = 120;
-  });
-  await expectAlignedColumns(entryHeader, entryRow);
-  await expectAlignedColumns(entryHeader, transportRow);
-  await expectNoHorizontalOverflow(entryRow.locator(":scope > *").nth(4));
-  await expectNoHorizontalOverflow(transportRow.locator(":scope > *").nth(5));
+  await expect(entryHeader).toHaveCount(0);
+  await expectNoHorizontalOverflow(transportRow);
+  await expect(transportRow).toContainText("168.63.129.16:53");
 
   await transportRow.click();
   const transportDetail = page.getByRole("dialog", { name: "DNS transport detail" });

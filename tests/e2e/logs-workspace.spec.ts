@@ -178,83 +178,121 @@ test("data source rail keeps source left and controls right", async ({ page }) =
   await expectRightAligned(rail, settingsButton);
   await expect(viewControls.getByRole("button", { name: "All logs" })).toBeVisible();
   await expect(viewControls.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
+  await settingsButton.click();
+  await viewControls.getByRole("button", { name: "DNS troubleshooting" }).click();
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "true");
+  const search = page.getByRole("textbox", { name: "Domain or DNS search" });
+  await search.fill("typing with settings open");
+  await expect(search).toBeFocused();
+  await expect(settingsButton).toHaveAttribute("aria-expanded", "true");
+  await settingsButton.click();
+  await expect(page.locator("#logs-settings-drawer")).toBeHidden();
+  await viewControls.getByRole("button", { name: "All logs" }).click();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect
+    .poll(
+      async () =>
+        (await page.getByRole("textbox", { name: "Search logs" }).boundingBox())?.width ?? 0,
+    )
+    .toBeGreaterThanOrEqual(192);
+  await page.getByRole("button", { name: "DNS troubleshooting", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await page.getByRole("textbox", { name: "Domain or DNS search" }).boundingBox())?.width ??
+        0,
+    )
+    .toBeGreaterThanOrEqual(192);
+  await expect
+    .poll(
+      async () =>
+        (await page.getByRole("button", { name: "Query type", exact: true }).boundingBox())
+          ?.width ?? 0,
+    )
+    .toBeGreaterThanOrEqual(128);
 });
 
-test("data source rail remains bounded at narrow viewport", async ({ page }) => {
-  await page.setViewportSize({ height: 812, width: 375 });
-  await enterAnonymousMode(page);
-
-  const dataSource = page.getByRole("group", { name: "Data source" });
-  await expect(dataSource.getByRole("button", { name: "Live Event Hub" })).toBeVisible();
-  await expect(dataSource.getByRole("button", { name: "Log Analytics" })).toBeVisible();
-  const view = page.getByRole("group", { name: "View" });
-  const rail = page.getByRole("region", { name: "Data source" });
-  const settingsButton = rail.getByRole("button", { name: "Settings", exact: true });
-  await expect(view.getByRole("button", { name: "All logs" })).toBeVisible();
-  await expect(view.getByRole("button", { name: "DNS troubleshooting" })).toBeVisible();
-  await expectRightAligned(rail, settingsButton);
-  const settingsDrawer = await openSettings(page);
-  await expect(settingsDrawer.getByRole("button", { name: "Close settings" })).toBeVisible();
-  await expect(async () => {
-    const [drawerBox, workspaceBox] = await Promise.all([
-      settingsDrawer.boundingBox(),
-      settingsDrawer.locator("..").boundingBox(),
-    ]);
-    expect(drawerBox).not.toBeNull();
-    expect(workspaceBox).not.toBeNull();
-    expect(Math.abs(drawerBox!.x - workspaceBox!.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(drawerBox!.width - workspaceBox!.width)).toBeLessThanOrEqual(1);
-  }).toPass();
+test("mobile workspace menu switches views and keeps settings reachable", async ({ page }) => {
+  await page.setViewportSize({ height: 568, width: 320 });
+  await mockManagedDeployment(page, { eventHub: true, logAnalytics: false });
+  await page.goto("/logs");
+  const menuButton = page.getByRole("button", { name: "Workspace menu" });
+  await expect(page.getByRole("heading", { name: "All logs", exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "Search logs" }).fill("retained search");
+  await menuButton.click();
+  const menu = page.getByRole("navigation", { name: "Workspace" });
+  await expect(menu.getByRole("button", { name: "Live Event Hub" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(menu.getByRole("button", { name: "Log Analytics" })).toBeDisabled();
+  await expect(menu.getByText("Log Analytics is not configured.")).toBeVisible();
+  await menu.getByRole("button", { name: "DNS troubleshooting" }).click();
+  await expect(menu).toBeHidden();
+  await expect(
+    page.getByRole("heading", { name: "DNS troubleshooting", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Domain or DNS search" })).toBeVisible();
+  await menuButton.click();
+  await menu.getByRole("button", { name: "All logs", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Search logs" })).toHaveValue("retained search");
+  await menuButton.click();
+  await menu.getByRole("button", { name: "Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await expect(settings).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Close settings" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(settings).toBeHidden();
+  await expect(menuButton).toBeFocused();
   await expect
-    .poll(() =>
-      page.evaluate(() => ({
-        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-      })),
+    .poll(
+      async () =>
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     )
-    .toEqual({ horizontal: true, vertical: true });
-  await settingsDrawer.getByRole("button", { name: "Close settings" }).click();
-  await expect(dataSource).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(() => ({
-        horizontal: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        vertical: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-      })),
-    )
-    .toEqual({ horizontal: true, vertical: true });
-});
-
-test("main log table scrolls horizontally at a narrow viewport", async ({ page }) => {
-  await page.setViewportSize({ height: 700, width: 900 });
-  await startManagedEventHub(page);
-  await enqueueDetailLog(page);
-
-  const table = page.getByTestId("log-table-scroll");
-  await expect(table).toHaveCSS("overflow-x", "auto");
-  await expect
-    .poll(() => table.evaluate((element) => element.scrollWidth > element.clientWidth))
     .toBe(true);
+});
 
-  await table.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth - element.clientWidth;
+test("mobile logs can be filtered, sorted and inspected without horizontal scrolling", async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 568, width: 320 });
+  await startManagedEventHub(page);
+  const destination = "germanywestcentral-gas.guestconfiguration.azure.com";
+  await enqueueDetailLog(page, destination);
+  const log = page.getByRole("button", {
+    name: `Open log details for ${destination} at Jul 12, 2026, 16:36:42.015`,
   });
-  await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-
-  const ruleHeader = table.getByRole("columnheader", { name: "Rule" });
-  const ruleCell = table.getByRole("row").filter({ hasText: "deny-web" }).getByRole("cell").nth(8);
-  await expect(ruleHeader).toBeInViewport();
-  await expect(ruleCell).toBeInViewport();
-  await expect(async () => {
-    const [headerBox, cellBox] = await Promise.all([
-      ruleHeader.boundingBox(),
-      ruleCell.boundingBox(),
-    ]);
-    expect(headerBox).not.toBeNull();
-    expect(cellBox).not.toBeNull();
-    expect(Math.abs(headerBox!.x - cellBox!.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(headerBox!.width - cellBox!.width)).toBeLessThanOrEqual(1);
-  }).toPass();
+  await expect(log).toContainText("10.140.16.133");
+  await expect(log).toContainText(destination);
+  await expect(log).toContainText("Deny");
+  await expect.poll(async () => (await log.boundingBox())?.y ?? Infinity).toBeLessThan(260);
+  await expect
+    .poll(async () => await log.evaluate((element) => element.scrollWidth <= element.clientWidth))
+    .toBe(true);
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  const filters = page.getByRole("dialog", { name: "Filters", exact: true });
+  await filters.getByRole("textbox", { name: "Source address" }).fill("192.0.2.1");
+  await filters.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Filters (1)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No matching logs" })).toBeVisible();
+  await page.getByRole("button", { name: "Reset filters" }).click();
+  await expect(log).toBeVisible();
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  await page.getByRole("combobox", { name: "Sort by" }).click();
+  await page.getByRole("option", { name: "Destination", exact: true }).click();
+  await page.getByRole("button", { name: "Sort descending", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Sort ascending", exact: true })).toBeVisible();
+  await filters.getByRole("button", { name: "Show 1 result", exact: true }).click();
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(log).toHaveCount(1);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect(log).toHaveCount(1);
+  await log.click();
+  const detail = page.getByRole("dialog", { name: "Log detail" });
+  await expect(detail.getByText(destination, { exact: true })).toBeVisible();
+  await expect(detail.getByText("hub-policy", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(log).toBeFocused();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
