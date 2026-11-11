@@ -290,6 +290,7 @@ const azureDiagnosticsReadyCount = computed(
             </div>
             <div class="flex flex-wrap gap-2">
               <UButton
+                class="touch-control"
                 color="primary"
                 variant="solid"
                 icon="i-lucide-log-in"
@@ -301,6 +302,7 @@ const azureDiagnosticsReadyCount = computed(
                 @click="emit('connectAzure')"
               />
               <UButton
+                class="touch-control"
                 color="neutral"
                 variant="outline"
                 icon="i-lucide-unplug"
@@ -359,6 +361,7 @@ const azureDiagnosticsReadyCount = computed(
             </p>
             <div class="flex flex-wrap gap-2">
               <UButton
+                class="touch-control"
                 :to="adminConsentUrl ?? undefined"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -369,6 +372,7 @@ const azureDiagnosticsReadyCount = computed(
                 :disabled="adminConsentUrl === null"
               />
               <UButton
+                class="touch-control"
                 color="neutral"
                 variant="outline"
                 icon="i-lucide-refresh-cw"
@@ -441,6 +445,7 @@ const azureDiagnosticsReadyCount = computed(
             </p>
             <div class="flex flex-wrap gap-2">
               <UButton
+                class="touch-control"
                 color="neutral"
                 variant="outline"
                 icon="i-lucide-refresh-cw"
@@ -454,6 +459,7 @@ const azureDiagnosticsReadyCount = computed(
                 @click="emit('refreshAzureAccess')"
               />
               <UButton
+                class="touch-control"
                 :to="tenantValid ? LOG_ANALYTICS_WORKSPACES_URL : undefined"
                 target="_blank"
                 rel="noopener noreferrer"

@@ -75,3 +75,91 @@
   --color-brand-pink-900: hsl(329, 77%, 30%);
   --color-brand-pink-950: hsl(330, 93%, 17%);
 }
+
+:root {
+  --ui-primary: var(--color-brand-blue-600);
+  --ui-success: var(--color-green-700);
+  --ui-error: var(--color-red-700);
+  --ui-warning: var(--color-amber-800);
+  --ui-text-muted: var(--color-brand-gray-600);
+  --ui-text-dimmed: var(--color-brand-gray-600);
+}
+
+.dark {
+  --ui-primary: var(--color-brand-blue-300);
+  --ui-success: var(--color-green-400);
+  --ui-error: var(--color-red-400);
+  --ui-warning: var(--color-amber-300);
+  --ui-text-muted: var(--color-brand-gray-300);
+  --ui-text-dimmed: var(--color-brand-gray-400);
+}
+
+.workspace-menu {
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.mobile-log-endpoint .country-flag[aria-hidden='true'] {
+  display: none;
+}
+
+@media (width < 64rem) {
+  .mobile-results {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+
+  .mobile-filter-fields > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mobile-filter-fields > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .mobile-filter-fields .dns-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .touch-control:is(button, a),
+  .touch-fields [data-slot='trailingClear'] {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+
+  .touch-fields [role='option'] {
+    min-height: 2.75rem;
+    align-items: center;
+  }
+
+  .touch-control,
+  .touch-control > input,
+  .touch-fields input:not([type='checkbox'], [type='radio']),
+  .touch-fields textarea,
+  .touch-fields select,
+  .touch-fields button[aria-haspopup='listbox'],
+  .touch-fields [role='combobox'] {
+    min-height: 2.75rem;
+  }
+
+  .touch-control > input,
+  .touch-fields input:not([type='checkbox'], [type='radio']),
+  .touch-fields textarea,
+  .touch-fields select {
+    font-size: 1rem;
+  }
+
+  .touch-control input::placeholder,
+  .touch-fields input::placeholder,
+  .touch-fields textarea::placeholder {
+    color: var(--ui-text-dimmed);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='overlay'],
+  [data-slot='content'] {
+    animation-duration: 0s !important;
+  }
+}

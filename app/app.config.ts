@@ -13,7 +13,7 @@ export default defineAppConfig({
           color: 'primary',
           variant: 'solid',
           class:
-            'bg-brand-blue-500 text-white hover:bg-brand-blue-400 active:bg-brand-blue-400 disabled:bg-brand-blue-500 disabled:text-white disabled:opacity-90 aria-disabled:bg-brand-blue-500 aria-disabled:text-white aria-disabled:opacity-90',
+            'bg-brand-blue-600 text-white hover:bg-brand-blue-700 active:bg-brand-blue-700 disabled:bg-brand-blue-600 disabled:text-white disabled:opacity-90 aria-disabled:bg-brand-blue-600 aria-disabled:text-white aria-disabled:opacity-90',
         },
         {
           color: 'neutral',
@@ -43,19 +43,22 @@ export default defineAppConfig({
     select: {
       slots: {
         base: 'bg-white ring-brand-gray-400 hover:ring-brand-gray-500 dark:bg-brand-gray-900 dark:ring-brand-gray-600 dark:hover:ring-brand-gray-500',
-        content: 'ring-brand-gray-300 dark:ring-brand-gray-700',
+        content: 'touch-fields z-60 ring-brand-gray-300 dark:ring-brand-gray-700',
       },
     },
     selectMenu: {
       slots: {
         base: 'bg-white ring-brand-gray-400 hover:ring-brand-gray-500 dark:bg-brand-gray-900 dark:ring-brand-gray-600 dark:hover:ring-brand-gray-500',
-        content: 'ring-brand-gray-300 dark:ring-brand-gray-700',
+        content: 'touch-fields z-60 ring-brand-gray-300 dark:ring-brand-gray-700',
       },
     },
     textarea: {
       slots: {
         base: 'bg-white ring-brand-gray-400 placeholder:text-brand-gray-500 hover:ring-brand-gray-500 dark:bg-brand-gray-900 dark:ring-brand-gray-600 dark:placeholder:text-brand-gray-400 dark:hover:ring-brand-gray-500',
       },
+    },
+    tooltip: {
+      slots: { content: 'z-60' },
     },
     card: {
       slots: {
@@ -68,6 +71,7 @@ export default defineAppConfig({
         content:
           'z-50 bg-white ring-brand-gray-300 dark:bg-brand-gray-950 dark:ring-brand-gray-700',
         body: 'max-h-[72vh] overflow-auto select-text',
+        close: 'min-h-11 min-w-11 lg:min-h-0 lg:min-w-0',
       },
       compoundVariants: [
         {

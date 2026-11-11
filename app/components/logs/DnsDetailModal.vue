@@ -27,6 +27,7 @@ const props = withDefaults(
   }>(),
   { hourCycle: 'h23', timeZone: 'UTC' },
 )
+const emit = defineEmits<{ closeAutoFocus: [event: Event] }>()
 const toast = useToast()
 const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? [])
 const relatedEvidence = computed(() => props.detail?.relatedEvidence ?? [])
@@ -42,6 +43,10 @@ const modalTitle = computed(() => {
   }
   return 'DNS resolution detail'
 })
+
+function forwardCloseAutoFocus(event: Event) {
+  emit('closeAutoFocus', event)
+}
 
 function stageLabel(observation: DnsObservation) {
   if (observation.stage === 'proxy-exchange') {
@@ -119,6 +124,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
   <UModal
     v-model:open="open"
     :title="modalTitle"
+    :content="{ onCloseAutoFocus: forwardCloseAutoFocus }"
     :description="`Times shown in ${timeZone}`"
     :ui="{
       content:
@@ -506,6 +512,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                   >
                 </h3>
                 <UButton
+                  class="touch-control"
                   variant="ghost"
                   color="neutral"
                   size="xs"

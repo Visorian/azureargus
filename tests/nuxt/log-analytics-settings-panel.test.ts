@@ -14,6 +14,8 @@ function createDraftRange(): LogAnalysisDateRange {
 function createQueryProps(draftRange = createDraftRange()) {
   return {
     draftRange,
+    displayTimeZone: 'UTC',
+    hourCycle: 'h23' as const,
     appliedRangeLabel: '08:00–09:00',
     canRun: true,
     queryStatus: 'idle' as const,
@@ -91,13 +93,15 @@ describe('LogAnalyticsQueryControls', () => {
       .find((button) => button.text().includes('Run query'))
     expect(runButton).toBeDefined()
     expect(runButton!.attributes()).toHaveProperty('disabled')
-    expect(wrapper.text()).toContain(
-      'Run query to apply date range. Results still show 08:00–09:00.',
-    )
+    expect(wrapper.text()).not.toContain('Run query to apply date range.')
     expect(wrapper.text()).toContain(
       'Result limit reached. Narrow filters or time range for complete results.',
     )
 
+    await wrapper.setProps({ queryStatus: 'success' })
+    expect(wrapper.text()).toContain(
+      'Run query to apply date range. Results still show 08:00–09:00.',
+    )
     await wrapper.setProps({ rangeError: 'Start date must be before end date.' })
     expect(wrapper.get('[role="alert"]').text()).toBe('Start date must be before end date.')
     expect(wrapper.text()).not.toContain('Run query to apply date range.')

@@ -65,7 +65,7 @@ function createFilters(): DnsFilters {
 
 const RecycleScrollerStub = defineComponent({
   props: { items: { type: Array, required: true } },
-  template: '<div><slot v-for="item in items" :item="item" /></div>',
+  template: '<div><slot v-for="item in items" :item="item" :active="true" /></div>',
 })
 const SelectStub = defineComponent({
   inheritAttrs: false,
@@ -224,7 +224,7 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).not.toContain('Source query failed')
   })
 
-  it('keeps matching filter actions in the filter row and query controls in the next row', async () => {
+  it('keeps search and filters above query controls and secondary actions', async () => {
     const wrapper = await mountSuspended(DnsTroubleshootingView, {
       props: {
         entries: [],
@@ -262,10 +262,15 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.emitted('reset')).toHaveLength(1)
     expect(wrapper.get('[data-testid="log-query-row"]').text()).toContain('Query controls')
     expect(filterRow.element.contains(filterGrid.element)).toBe(true)
-    expect(filterRow.element.contains(filterActions.element)).toBe(true)
-    expect(filterRow.getComponent({ name: 'UCheckbox' }).props('label')).toBe(
-      'Show unidentified DNS transport',
-    )
+    expect(
+      wrapper.get('[data-testid="log-query-row"]').element.contains(filterActions.element),
+    ).toBe(true)
+    expect(
+      wrapper
+        .get('[data-testid="log-query-row"]')
+        .getComponent({ name: 'UCheckbox' })
+        .props('label'),
+    ).toBe('Show unidentified DNS transport')
   })
 
   it('maps explicit sort-order choices without a separate direction control', async () => {

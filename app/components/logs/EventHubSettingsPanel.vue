@@ -82,6 +82,7 @@ const connectionFieldsDisabled = computed(
       </p>
       <div class="mt-2 flex flex-wrap gap-2">
         <UButton
+          class="touch-control"
           :to="DEPLOY_EVENT_HUB_URL"
           target="_blank"
           rel="noopener noreferrer"
@@ -93,6 +94,7 @@ const connectionFieldsDisabled = computed(
           aria-label="Deploy Event Hub only to Azure (opens in new tab)"
         />
         <UButton
+          class="touch-control"
           :to="DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL"
           target="_blank"
           rel="noopener noreferrer"
@@ -164,6 +166,7 @@ const connectionFieldsDisabled = computed(
       </UFormField>
       <div class="flex gap-2">
         <UButton
+          class="touch-control"
           type="submit"
           color="primary"
           variant="solid"
@@ -173,6 +176,7 @@ const connectionFieldsDisabled = computed(
           :loading="connecting || reconnecting"
         />
         <UButton
+          class="touch-control"
           variant="outline"
           color="neutral"
           icon="i-lucide-unplug"
@@ -193,6 +197,7 @@ const connectionFieldsDisabled = computed(
         />
         <UTooltip :content="{ side: 'bottom' }" :ui="{ content: 'h-auto max-w-72 p-3' }">
           <UButton
+            class="touch-control"
             icon="i-lucide-info"
             aria-label="About local log retention"
             color="neutral"

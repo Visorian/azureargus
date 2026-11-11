@@ -114,6 +114,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: 'Azure Argus',
+      htmlAttrs: { lang: 'en' },
     },
   },
   css: ['~/assets/css/main.css'],

@@ -50,14 +50,14 @@ async function leave() {
     <header
       class="shrink-0 border-b border-brand-gray-200 bg-white dark:border-brand-gray-800 dark:bg-brand-gray-900"
     >
-      <div class="flex h-14 items-center justify-between px-4">
+      <div class="flex h-12 items-center justify-between px-4 sm:h-14">
         <div class="flex items-center gap-3">
           <div class="grid size-8 place-items-center rounded-md bg-brand-blue-600 text-white">
             <UIcon name="i-lucide-shield" class="size-4" />
           </div>
           <div>
             <p class="text-sm font-semibold">{{ runtimeConfig.public.siteName }}</p>
-            <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
+            <p class="hidden text-xs text-brand-gray-600 sm:block dark:text-brand-gray-300">
               Azure Firewall Analytics
             </p>
           </div>
@@ -66,13 +66,14 @@ async function leave() {
           <span class="hidden text-xs text-brand-gray-600 sm:inline dark:text-brand-gray-300">
             {{ identityLabel }}
           </span>
-          <UColorModeButton />
+          <UColorModeButton class="min-h-11 min-w-11" />
           <UButton
             v-if="deployment.capabilities.value?.mode === 'managed'"
             variant="ghost"
             color="neutral"
             icon="i-lucide-log-out"
             aria-label="Leave"
+            class="min-h-11 min-w-11"
             @click="leave"
           />
         </div>
