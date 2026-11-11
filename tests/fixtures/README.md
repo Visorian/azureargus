@@ -33,3 +33,19 @@ and provide a captured structured `AZFWNetworkRule` schema from `AzureDiagnostic
 provide real Event Hub envelope, legacy free-form `AzureFirewallNetworkRule`, source-port-53 in
 `AzureDiagnostics`, or `AZFWDnsFlowTrace` evidence. They also do not validate retry metadata,
 multiple Azure Firewall resources, multiple Event Hub partitions, or multi-row correlation.
+
+## Firewall policy fixtures
+
+`firewall/azure-policy-hierarchy.sanitized.json` contains Azure Resource Manager responses from four
+unattached Basic firewall policies, five collection groups, and four IP groups. The policy graph has
+a base policy with three direct children. Azure rejected an attempted third level with
+`FirewallPolicyBasePolicyCannotInheritFromAnother`.
+
+The fixture also contains flattened JSON projections returned by `az rest --query`. The Azure CLI
+firewall extension was not installed for this capture. Subscription and resource group identifiers
+were replaced consistently, and volatile etags and service GUIDs were removed. Rule order,
+priorities, actions, source and destination references, empty values, CIDRs, and address ranges were
+preserved.
+
+These records verify REST and pasted CLI parsing, selected-policy inheritance, IP group resolution,
+and configured-rule decisions. They do not record traffic passing through a deployed firewall.

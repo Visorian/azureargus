@@ -1,0 +1,1093 @@
+{
+  "provenance": {
+    "source": "Actual Azure Resource Manager responses and Azure CLI az rest JMESPath projections.",
+    "apiVersion": "2025-05-01",
+    "policyTier": "Basic",
+    "sanitization": "Subscription and resource group identifiers replaced consistently; etags and resource GUIDs removed.",
+    "validation": "Configuration parsing and configured-rule decisions. No dataplane traffic was sent.",
+    "hierarchyConstraint": {
+      "attemptedChain": ["base", "regional", "workload"],
+      "rejectionCode": "FirewallPolicyBasePolicyCannotInheritFromAnother"
+    }
+  },
+  "resources": [
+    {
+      "properties": {
+        "size": "0.001628876 MB",
+        "sku": {
+          "tier": "Basic"
+        },
+        "childPolicies": [],
+        "ruleCollectionGroups": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload/ruleCollectionGroups/workload-rules"
+          }
+        ],
+        "firewalls": [],
+        "threatIntelMode": "Alert",
+        "basePolicy": {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base"
+        },
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload",
+      "name": "workload",
+      "type": "Microsoft.Network/FirewallPolicies",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.00155735 MB",
+        "sku": {
+          "tier": "Basic"
+        },
+        "childPolicies": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling"
+          }
+        ],
+        "ruleCollectionGroups": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-first"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-rules"
+          }
+        ],
+        "firewalls": [],
+        "threatIntelMode": "Alert",
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base",
+      "name": "base",
+      "type": "Microsoft.Network/FirewallPolicies",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.001595497 MB",
+        "priority": 100,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "base-deny-smtp",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": ["*"],
+                "sourceIpGroups": [],
+                "destinationAddresses": ["*"],
+                "destinationIpGroups": [],
+                "destinationFqdns": [],
+                "destinationPorts": ["25"]
+              }
+            ],
+            "name": "base-block-smtp",
+            "priority": 650
+          }
+        ],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-first",
+      "name": "organization-first",
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.002425194 MB",
+        "priority": 600,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "base-deny-ssh",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": ["*"],
+                "sourceIpGroups": [],
+                "destinationAddresses": ["*"],
+                "destinationIpGroups": [],
+                "destinationFqdns": [],
+                "destinationPorts": ["22"]
+              }
+            ],
+            "name": "base-block-ssh",
+            "priority": 900
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "ApplicationRule",
+                "ipv6Rule": false,
+                "name": "base-deny-blocked-domain",
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "fqdnTags": [],
+                "webCategories": [],
+                "targetFqdns": ["blocked.example.com"],
+                "targetUrls": [],
+                "terminateTLS": false,
+                "sourceAddresses": ["*"],
+                "destinationAddresses": [],
+                "sourceIpGroups": [],
+                "httpHeadersToInsert": []
+              }
+            ],
+            "name": "base-block-domain",
+            "priority": 100
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyNatRuleCollection",
+            "action": {
+              "type": "Dnat"
+            },
+            "rules": [
+              {
+                "ruleType": "NatRule",
+                "ipv6Rule": false,
+                "name": "base-dnat",
+                "translatedAddress": "10.30.0.4",
+                "translatedPort": "8443",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": ["198.51.100.0/24"],
+                "sourceIpGroups": [],
+                "destinationAddresses": ["203.0.113.100"],
+                "destinationPorts": ["443"]
+              }
+            ],
+            "name": "base-publish-service",
+            "priority": 500
+          }
+        ],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-rules",
+      "name": "organization-rules",
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.003548622 MB",
+        "priority": 100,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyNatRuleCollection",
+            "action": {
+              "type": "Dnat"
+            },
+            "rules": [
+              {
+                "ruleType": "NatRule",
+                "ipv6Rule": false,
+                "name": "workload-dnat",
+                "translatedAddress": "10.30.0.4",
+                "translatedPort": "8443",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": ["198.51.100.0/24"],
+                "sourceIpGroups": [],
+                "destinationAddresses": ["203.0.113.10"],
+                "destinationPorts": ["443"]
+              }
+            ],
+            "name": "workload-publish-service",
+            "priority": 900
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "workload-skip-empty-clients",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/empty-clients"
+                ],
+                "destinationAddresses": [],
+                "destinationIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+                ],
+                "destinationFqdns": [],
+                "destinationPorts": ["443"]
+              }
+            ],
+            "name": "workload-empty-group",
+            "priority": 400
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Allow"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "workload-allow-private-https",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+                ],
+                "destinationAddresses": [],
+                "destinationIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+                ],
+                "destinationFqdns": [],
+                "destinationPorts": ["443"]
+              }
+            ],
+            "name": "workload-private-https",
+            "priority": 500
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Allow"
+            },
+            "rules": [
+              {
+                "ruleType": "ApplicationRule",
+                "ipv6Rule": false,
+                "name": "workload-allow-example-subdomains",
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "fqdnTags": [],
+                "webCategories": [],
+                "targetFqdns": ["*.example.com"],
+                "targetUrls": [],
+                "terminateTLS": false,
+                "sourceAddresses": [],
+                "destinationAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+                ],
+                "httpHeadersToInsert": []
+              }
+            ],
+            "name": "workload-public-https",
+            "priority": 200
+          }
+        ],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload/ruleCollectionGroups/workload-rules",
+      "name": "workload-rules",
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.001626968 MB",
+        "sku": {
+          "tier": "Basic"
+        },
+        "childPolicies": [],
+        "ruleCollectionGroups": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling/ruleCollectionGroups/sibling-rules"
+          }
+        ],
+        "firewalls": [],
+        "threatIntelMode": "Alert",
+        "basePolicy": {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base"
+        },
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling",
+      "name": "sibling",
+      "type": "Microsoft.Network/FirewallPolicies",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.001890182 MB",
+        "priority": 100,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "sibling-deny-private-https",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+                ],
+                "destinationAddresses": [],
+                "destinationIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+                ],
+                "destinationFqdns": [],
+                "destinationPorts": ["443"]
+              }
+            ],
+            "name": "sibling-deny-https",
+            "priority": 100
+          }
+        ],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling/ruleCollectionGroups/sibling-rules",
+      "name": "sibling-rules",
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.001623154 MB",
+        "sku": {
+          "tier": "Basic"
+        },
+        "childPolicies": [],
+        "ruleCollectionGroups": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional/ruleCollectionGroups/regional-rules"
+          }
+        ],
+        "firewalls": [],
+        "threatIntelMode": "Alert",
+        "basePolicy": {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base"
+        },
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional",
+      "name": "regional",
+      "type": "Microsoft.Network/FirewallPolicies",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "size": "0.003657341 MB",
+        "priority": 200,
+        "ruleCollections": [
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "skip-empty-clients",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/empty-clients"
+                ],
+                "destinationAddresses": [],
+                "destinationIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+                ],
+                "destinationFqdns": [],
+                "destinationPorts": ["443"]
+              }
+            ],
+            "name": "regional-empty-group",
+            "priority": 600
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "regional-deny-rdp",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+                ],
+                "destinationAddresses": [],
+                "destinationIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+                ],
+                "destinationFqdns": [],
+                "destinationPorts": ["3389"]
+              }
+            ],
+            "name": "regional-block-rdp",
+            "priority": 700
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Deny"
+            },
+            "rules": [
+              {
+                "ruleType": "ApplicationRule",
+                "ipv6Rule": false,
+                "name": "regional-deny-admin-domain",
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "fqdnTags": [],
+                "webCategories": [],
+                "targetFqdns": ["admin.example.com"],
+                "targetUrls": [],
+                "terminateTLS": false,
+                "sourceAddresses": ["*"],
+                "destinationAddresses": [],
+                "sourceIpGroups": [],
+                "httpHeadersToInsert": []
+              }
+            ],
+            "name": "regional-block-domain",
+            "priority": 100
+          },
+          {
+            "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+            "action": {
+              "type": "Allow"
+            },
+            "rules": [
+              {
+                "ruleType": "NetworkRule",
+                "ipv6Rule": false,
+                "name": "regional-monitoring-service",
+                "ipProtocols": ["TCP"],
+                "sourceAddresses": [],
+                "sourceIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/regional-clients"
+                ],
+                "destinationAddresses": [],
+                "destinationIpGroups": [
+                  "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+                ],
+                "destinationFqdns": [],
+                "destinationPorts": ["8443"]
+              }
+            ],
+            "name": "regional-monitoring",
+            "priority": 800
+          }
+        ],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional/ruleCollectionGroups/regional-rules",
+      "name": "regional-rules",
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "firewalls": [],
+        "firewallPolicies": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload"
+          }
+        ],
+        "ipAddresses": [],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/empty-clients",
+      "name": "empty-clients",
+      "type": "Microsoft.Network/IpGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "firewalls": [],
+        "firewallPolicies": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling"
+          }
+        ],
+        "ipAddresses": ["10.30.0.4", "10.30.1.0/28"],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services",
+      "name": "services",
+      "type": "Microsoft.Network/IpGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "firewalls": [],
+        "firewallPolicies": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload"
+          },
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling"
+          }
+        ],
+        "ipAddresses": ["10.20.0.0/24", "10.21.0.8-10.21.0.12"],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients",
+      "name": "clients",
+      "type": "Microsoft.Network/IpGroups",
+      "location": "westeurope"
+    },
+    {
+      "properties": {
+        "firewalls": [],
+        "firewallPolicies": [
+          {
+            "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional"
+          }
+        ],
+        "ipAddresses": ["10.40.0.10"],
+        "provisioningState": "Succeeded"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/regional-clients",
+      "name": "regional-clients",
+      "type": "Microsoft.Network/IpGroups",
+      "location": "westeurope"
+    }
+  ],
+  "cliResources": [
+    {
+      "basePolicy": {
+        "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload",
+      "location": "westeurope",
+      "name": "workload",
+      "provisioningState": "Succeeded",
+      "ruleCollectionGroups": [
+        {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload/ruleCollectionGroups/workload-rules"
+        }
+      ],
+      "sku": {
+        "tier": "Basic"
+      },
+      "threatIntelMode": "Alert",
+      "type": "Microsoft.Network/FirewallPolicies"
+    },
+    {
+      "basePolicy": null,
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base",
+      "location": "westeurope",
+      "name": "base",
+      "provisioningState": "Succeeded",
+      "ruleCollectionGroups": [
+        {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-first"
+        },
+        {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-rules"
+        }
+      ],
+      "sku": {
+        "tier": "Basic"
+      },
+      "threatIntelMode": "Alert",
+      "type": "Microsoft.Network/FirewallPolicies"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-first",
+      "name": "organization-first",
+      "priority": 100,
+      "provisioningState": "Succeeded",
+      "ruleCollections": [
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "base-block-smtp",
+          "priority": 650,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": ["*"],
+              "destinationFqdns": [],
+              "destinationIpGroups": [],
+              "destinationPorts": ["25"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "base-deny-smtp",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": ["*"],
+              "sourceIpGroups": []
+            }
+          ]
+        }
+      ],
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base/ruleCollectionGroups/organization-rules",
+      "name": "organization-rules",
+      "priority": 600,
+      "provisioningState": "Succeeded",
+      "ruleCollections": [
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "base-block-ssh",
+          "priority": 900,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": ["*"],
+              "destinationFqdns": [],
+              "destinationIpGroups": [],
+              "destinationPorts": ["22"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "base-deny-ssh",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": ["*"],
+              "sourceIpGroups": []
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "base-block-domain",
+          "priority": 100,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "fqdnTags": [],
+              "httpHeadersToInsert": [],
+              "ipv6Rule": false,
+              "name": "base-deny-blocked-domain",
+              "protocols": [
+                {
+                  "port": 443,
+                  "protocolType": "Https"
+                }
+              ],
+              "ruleType": "ApplicationRule",
+              "sourceAddresses": ["*"],
+              "sourceIpGroups": [],
+              "targetFqdns": ["blocked.example.com"],
+              "targetUrls": [],
+              "terminateTLS": false,
+              "webCategories": []
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Dnat"
+          },
+          "name": "base-publish-service",
+          "priority": 500,
+          "ruleCollectionType": "FirewallPolicyNatRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": ["203.0.113.100"],
+              "destinationPorts": ["443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "base-dnat",
+              "ruleType": "NatRule",
+              "sourceAddresses": ["198.51.100.0/24"],
+              "sourceIpGroups": [],
+              "translatedAddress": "10.30.0.4",
+              "translatedPort": "8443"
+            }
+          ]
+        }
+      ],
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/workload/ruleCollectionGroups/workload-rules",
+      "name": "workload-rules",
+      "priority": 100,
+      "provisioningState": "Succeeded",
+      "ruleCollections": [
+        {
+          "action": {
+            "type": "Dnat"
+          },
+          "name": "workload-publish-service",
+          "priority": 900,
+          "ruleCollectionType": "FirewallPolicyNatRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": ["203.0.113.10"],
+              "destinationPorts": ["443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "workload-dnat",
+              "ruleType": "NatRule",
+              "sourceAddresses": ["198.51.100.0/24"],
+              "sourceIpGroups": [],
+              "translatedAddress": "10.30.0.4",
+              "translatedPort": "8443"
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "workload-empty-group",
+          "priority": 400,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "destinationFqdns": [],
+              "destinationIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+              ],
+              "destinationPorts": ["443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "workload-skip-empty-clients",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/empty-clients"
+              ]
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Allow"
+          },
+          "name": "workload-private-https",
+          "priority": 500,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "destinationFqdns": [],
+              "destinationIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+              ],
+              "destinationPorts": ["443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "workload-allow-private-https",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+              ]
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Allow"
+          },
+          "name": "workload-public-https",
+          "priority": 200,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "fqdnTags": [],
+              "httpHeadersToInsert": [],
+              "ipv6Rule": false,
+              "name": "workload-allow-example-subdomains",
+              "protocols": [
+                {
+                  "port": 443,
+                  "protocolType": "Https"
+                }
+              ],
+              "ruleType": "ApplicationRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+              ],
+              "targetFqdns": ["*.example.com"],
+              "targetUrls": [],
+              "terminateTLS": false,
+              "webCategories": []
+            }
+          ]
+        }
+      ],
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups"
+    },
+    {
+      "basePolicy": {
+        "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling",
+      "location": "westeurope",
+      "name": "sibling",
+      "provisioningState": "Succeeded",
+      "ruleCollectionGroups": [
+        {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling/ruleCollectionGroups/sibling-rules"
+        }
+      ],
+      "sku": {
+        "tier": "Basic"
+      },
+      "threatIntelMode": "Alert",
+      "type": "Microsoft.Network/FirewallPolicies"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/sibling/ruleCollectionGroups/sibling-rules",
+      "name": "sibling-rules",
+      "priority": 100,
+      "provisioningState": "Succeeded",
+      "ruleCollections": [
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "sibling-deny-https",
+          "priority": 100,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "destinationFqdns": [],
+              "destinationIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+              ],
+              "destinationPorts": ["443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "sibling-deny-private-https",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+              ]
+            }
+          ]
+        }
+      ],
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups"
+    },
+    {
+      "basePolicy": {
+        "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/base"
+      },
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional",
+      "location": "westeurope",
+      "name": "regional",
+      "provisioningState": "Succeeded",
+      "ruleCollectionGroups": [
+        {
+          "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional/ruleCollectionGroups/regional-rules"
+        }
+      ],
+      "sku": {
+        "tier": "Basic"
+      },
+      "threatIntelMode": "Alert",
+      "type": "Microsoft.Network/FirewallPolicies"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/firewallPolicies/regional/ruleCollectionGroups/regional-rules",
+      "name": "regional-rules",
+      "priority": 200,
+      "provisioningState": "Succeeded",
+      "ruleCollections": [
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "regional-empty-group",
+          "priority": 600,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "destinationFqdns": [],
+              "destinationIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+              ],
+              "destinationPorts": ["443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "skip-empty-clients",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/empty-clients"
+              ]
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "regional-block-rdp",
+          "priority": 700,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "destinationFqdns": [],
+              "destinationIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+              ],
+              "destinationPorts": ["3389"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "regional-deny-rdp",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients"
+              ]
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Deny"
+          },
+          "name": "regional-block-domain",
+          "priority": 100,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "fqdnTags": [],
+              "httpHeadersToInsert": [],
+              "ipv6Rule": false,
+              "name": "regional-deny-admin-domain",
+              "protocols": [
+                {
+                  "port": 443,
+                  "protocolType": "Https"
+                }
+              ],
+              "ruleType": "ApplicationRule",
+              "sourceAddresses": ["*"],
+              "sourceIpGroups": [],
+              "targetFqdns": ["admin.example.com"],
+              "targetUrls": [],
+              "terminateTLS": false,
+              "webCategories": []
+            }
+          ]
+        },
+        {
+          "action": {
+            "type": "Allow"
+          },
+          "name": "regional-monitoring",
+          "priority": 800,
+          "ruleCollectionType": "FirewallPolicyFilterRuleCollection",
+          "rules": [
+            {
+              "destinationAddresses": [],
+              "destinationFqdns": [],
+              "destinationIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services"
+              ],
+              "destinationPorts": ["8443"],
+              "ipProtocols": ["TCP"],
+              "ipv6Rule": false,
+              "name": "regional-monitoring-service",
+              "ruleType": "NetworkRule",
+              "sourceAddresses": [],
+              "sourceIpGroups": [
+                "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/regional-clients"
+              ]
+            }
+          ]
+        }
+      ],
+      "type": "Microsoft.Network/FirewallPolicies/RuleCollectionGroups"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/empty-clients",
+      "ipAddresses": [],
+      "location": "westeurope",
+      "name": "empty-clients",
+      "provisioningState": "Succeeded",
+      "type": "Microsoft.Network/IpGroups"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/services",
+      "ipAddresses": ["10.30.0.4", "10.30.1.0/28"],
+      "location": "westeurope",
+      "name": "services",
+      "provisioningState": "Succeeded",
+      "type": "Microsoft.Network/IpGroups"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/clients",
+      "ipAddresses": ["10.20.0.0/24", "10.21.0.8-10.21.0.12"],
+      "location": "westeurope",
+      "name": "clients",
+      "provisioningState": "Succeeded",
+      "type": "Microsoft.Network/IpGroups"
+    },
+    {
+      "id": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/firewall-fixture/providers/Microsoft.Network/ipGroups/regional-clients",
+      "ipAddresses": ["10.40.0.10"],
+      "location": "westeurope",
+      "name": "regional-clients",
+      "provisioningState": "Succeeded",
+      "type": "Microsoft.Network/IpGroups"
+    }
+  ]
+}
