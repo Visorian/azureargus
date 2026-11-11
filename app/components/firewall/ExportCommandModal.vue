@@ -62,7 +62,7 @@ async function copyCommand() {
     :ui="{
       content: 'touch-fields max-w-3xl',
       header: 'shrink-0 pe-16',
-      body: 'min-h-0 max-h-none space-y-5 overflow-y-auto',
+      body: 'relative min-h-0 max-h-none space-y-5 overflow-y-auto',
       footer: 'shrink-0 flex-col items-stretch gap-2 bg-default',
       close: 'top-2 end-2 min-h-11 min-w-11',
     }"

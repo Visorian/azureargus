@@ -381,6 +381,11 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
       async () => await command.evaluate((element) => element.scrollHeight - element.clientHeight),
     )
     .toBeLessThanOrEqual(1)
+  await dialog.getByRole('radio', { name: 'JSON file to upload', exact: true }).check()
+  await command.click()
+  await expect(
+    dialog.getByRole('heading', { name: 'Export Azure Firewall configuration', exact: true }),
+  ).toBeInViewport({ ratio: 1 })
   await firewall.fill('')
   await expect(copy).toBeEnabled()
   await policy.fill('*')
