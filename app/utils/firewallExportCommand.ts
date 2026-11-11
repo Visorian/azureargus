@@ -1,6 +1,11 @@
-import { AZURE_FIREWALL_API_VERSION } from '#shared/utils/azureFirewallReader'
+const LINE_BREAKS = /[\r\n]/u
+const WILDCARDS = /[*?[\]]/u
+const SOURCE_REVISION = /^[a-f0-9]{40}$/iu
+
+export type FirewallExportEnvironment = 'bash-cli' | 'azure-powershell' | 'powershell-cli'
 
 export interface FirewallExportCommandOptions {
+  environment: FirewallExportEnvironment
   subscription: string
   resourceGroup: string
   firewallName: string
@@ -8,108 +13,101 @@ export interface FirewallExportCommandOptions {
   output: 'file' | 'text'
 }
 
-function nuLiteral(value: string): string {
-  let delimiter = '#'
-  while (value.includes(`'${delimiter}`)) {
-    delimiter += '#'
+export function firewallExportSelectionError(
+  options: FirewallExportCommandOptions,
+): string | undefined {
+  if (options.firewallName.trim() === '' && options.policyName.trim() === '') {
+    return 'Enter a firewall or policy name to generate the command.'
   }
-  return `r${delimiter}'${value}'${delimiter}`
+  if (WILDCARDS.test(options.firewallName) || WILDCARDS.test(options.policyName)) {
+    return 'Enter exact firewall and policy names. Wildcards are not supported.'
+  }
+  return undefined
 }
 
-export function createFirewallExportCommand(options: FirewallExportCommandOptions): string {
-  const command = `do {
-  let subscription = ${nuLiteral(options.subscription.trim())}
-  let resource_group = ${nuLiteral(options.resourceGroup.trim())}
-  let firewall_name = ${nuLiteral(options.firewallName.trim())}
-  let policy_name = ${nuLiteral(options.policyName.trim())}
+export function firewallExportSourceError(sourceRevision: string | undefined): string | undefined {
+  if (sourceRevision === undefined || !SOURCE_REVISION.test(sourceRevision)) {
+    return 'This build has no valid source revision. Deploy a build from a published Git commit to enable export commands.'
+  }
+  return undefined
+}
 
-  def az-json [args: list<string>] {
-    let result = (^az ...$args --only-show-errors --output json | complete)
-    if $result.exit_code != 0 { error make {msg: $result.stderr} }
-    $result.stdout | from json
+function bashLiteral(value: string): string {
+  if (LINE_BREAKS.test(value)) {
+    const escaped = value
+      .replaceAll('\\', String.raw`\\`)
+      .replaceAll("'", String.raw`\'`)
+      .replaceAll('\r', String.raw`\r`)
+      .replaceAll('\n', String.raw`\n`)
+    return `$'${escaped}'`
   }
-  def read-arm [url: string] {
-    if not ($url | str starts-with 'https://management.azure.com/') {
-      error make {msg: 'Refusing a URL outside Azure Resource Manager.'}
-    }
-    let target_subscription = ($url | url parse | get path | split row '/' | get 2)
-    az-json [rest --subscription $target_subscription --method get --url $url]
-  }
-  def read-resource [id: string] {
-    read-arm $'https://management.azure.com($id)?api-version=${AZURE_FIREWALL_API_VERSION}'
-  }
-  def read-pages [initial: string] {
-    mut url = $initial
-    mut values = []
-    mut seen = []
-    while $url != '' {
-      if $url in $seen { error make {msg: 'Azure returned repeated pagination.'} }
-      $seen = ($seen | append $url)
-      let page = (read-arm $url)
-      $values = ($values | append $page.value)
-      $url = ($page.nextLink? | default '')
-    }
-    $values
-  }
-  def select-resources [items: list, name: string] {
-    $items | where {|item|
-      $name == '' or ($item.name | str lowercase) == ($name | str lowercase)
-    }
-  }
+  return `'${value.replaceAll("'", String.raw`'\''`)}'`
+}
 
-  let account_args = (if $subscription == '' { [account show] } else { [account show --subscription $subscription] })
-  let account = (az-json $account_args)
-  let group_path = (if $resource_group == '' { '' } else { $'/resourceGroups/($resource_group | url encode --all)' })
-  let scope = $'/subscriptions/($account.id)($group_path)/providers/Microsoft.Network'
-  mut pending = []
-  if $policy_name != '' or $firewall_name == '' {
-    let policies = (read-pages $'https://management.azure.com($scope)/firewallPolicies?api-version=${AZURE_FIREWALL_API_VERSION}')
-    let matches = (select-resources $policies $policy_name)
-    if $policy_name != '' and ($matches | is-empty) { error make {msg: 'No policy matched the supplied name and resource group.'} }
-    $pending = ($matches | each {|policy| $policy.id })
-  }
-  if $firewall_name != '' {
-    let firewalls = (read-pages $'https://management.azure.com($scope)/azureFirewalls?api-version=${AZURE_FIREWALL_API_VERSION}')
-    let matches = (select-resources $firewalls $firewall_name)
-    if ($matches | is-empty) { error make {msg: 'No firewall matched the supplied name and resource group.'} }
-    for firewall in $matches {
-      let policy_id = ($firewall.properties.firewallPolicy?.id? | default '')
-      if $policy_id == '' { error make {msg: 'The selected firewall uses classic rules. Select a policy-backed firewall.'} }
-      $pending = ($pending | append $policy_id)
-    }
-  }
-  if ($pending | is-empty) { error make {msg: 'No firewall policies found in the selected subscription and resource group.'} }
+function powershellLiteral(value: string): string {
+  const quoted = `'${value.replaceAll("'", "''").replaceAll('\r', "'+[char]13+'").replaceAll('\n', "'+[char]10+'")}'`
+  return LINE_BREAKS.test(value) ? `(${quoted})` : quoted
+}
 
-  mut resources = []
-  mut loaded = []
-  mut ip_groups = []
-  while not ($pending | is-empty) {
-    let id = ($pending | first)
-    $pending = ($pending | skip 1)
-    let key = ($id | str lowercase)
-    if $key in $loaded { continue }
-    let policy = (read-resource $id)
-    let groups = (read-pages $'https://management.azure.com($id)/ruleCollectionGroups?api-version=${AZURE_FIREWALL_API_VERSION}')
-    let group_ids = ($groups | each {|group| $group.id | str lowercase })
-    for reference in ($policy.properties.ruleCollectionGroups? | default []) {
-      if ($reference.id | str lowercase) not-in $group_ids { error make {msg: 'A policy collection group is missing. Retry after policy updates finish.'} }
-    }
-    $resources = ($resources | append ($policy | upsert properties.ruleCollectionGroups ($groups | each {|group| {id: $group.id} })) | append $groups)
-    $loaded = ($loaded | append $key)
-    let parent = ($policy.properties.basePolicy?.id? | default '')
-    if $parent != '' { $pending = ($pending | append $parent) }
-    for group in $groups {
-      for collection in $group.properties.ruleCollections {
-        for rule in $collection.rules {
-          $ip_groups = ($ip_groups | append ($rule.sourceIpGroups? | default []) | append ($rule.destinationIpGroups? | default []))
-        }
+function parameter(flag: string, value: string, quote: (value: string) => string): string {
+  const trimmed = value.trim()
+  return trimmed === '' ? '' : `${flag} ${quote(trimmed)}`
+}
+
+export function createFirewallExportCommand(
+  options: FirewallExportCommandOptions,
+  sourceRevision: string | undefined,
+): string {
+  if (
+    sourceRevision === undefined ||
+    firewallExportSourceError(sourceRevision) !== undefined ||
+    firewallExportSelectionError(options) !== undefined
+  ) {
+    return ''
+  }
+  const bash = options.environment === 'bash-cli'
+  const quote = bash ? bashLiteral : powershellLiteral
+  const flags = bash
+    ? {
+        firewall: '--firewall',
+        policy: '--policy',
+        subscription: '--subscription',
+        resourceGroup: '--resource-group',
+        output: '--output',
       }
-    }
-  }
-  for id in ($ip_groups | each {|id| $id | str lowercase } | uniq) {
-    $resources = ($resources | append (read-resource $id))
-  }
-  {resources: $resources} | to json --indent 2
-}`
-  return options.output === 'file' ? `${command} | save 'firewall-configuration.json'` : command
+    : {
+        firewall: '-FirewallName',
+        policy: '-PolicyName',
+        subscription: '-Subscription',
+        resourceGroup: '-ResourceGroup',
+        output: '-OutputFile',
+      }
+  const target = [
+    parameter(flags.firewall, options.firewallName, quote),
+    parameter(flags.policy, options.policyName, quote),
+  ]
+    .filter((value) => value !== '')
+    .join(' ')
+  const scope = [
+    parameter(flags.subscription, options.subscription, quote),
+    parameter(flags.resourceGroup, options.resourceGroup, quote),
+  ]
+    .filter((value) => value !== '')
+    .join(' ')
+  const output =
+    options.output === 'file' ? parameter(flags.output, 'firewall-configuration.json', quote) : ''
+  const groups = [target, scope, output].filter((value) => value !== '')
+  const runner = bash
+    ? 'bash azureargus-export.sh'
+    : `./azureargus-export.ps1${options.environment === 'powershell-cli' ? ' -UseAzureCli' : ''}`
+  const continuation = bash ? ' \\' : ' `'
+  const invocation = groups
+    .map((group, index) => `${index === 0 ? `${runner} ` : '  '}${group}`)
+    .join(`${continuation}\n`)
+  const source = `https://raw.githubusercontent.com/Visorian/azureargus/${sourceRevision.toLowerCase()}/public/cloud-shell`
+  const assignment = bash ? `src=${quote(source)}` : `$src = ${quote(source)}`
+  const download = bash
+    ? 'curl -fsSL "$src/export-firewall.sh" -o azureargus-export.sh &&'
+    : 'Invoke-WebRequest "$src/export-firewall.ps1" -OutFile azureargus-export.ps1 -ErrorAction Stop &&'
+  return [assignment, download, invocation].join('\n')
 }

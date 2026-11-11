@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { createFirewallExportCommand } from '~/utils/firewallExportCommand'
+import {
+  createFirewallExportCommand,
+  firewallExportSelectionError,
+  firewallExportSourceError,
+} from '~/utils/firewallExportCommand'
 import type { FirewallExportCommandOptions } from '~/utils/firewallExportCommand'
 
 const options = reactive<FirewallExportCommandOptions>({
+  environment: 'bash-cli',
   subscription: '',
   resourceGroup: '',
   firewallName: '',
   policyName: '',
   output: 'file',
 })
-const command = computed(() => createFirewallExportCommand(options))
+const appConfig = useAppConfig()
+const command = computed(() => createFirewallExportCommand(options, appConfig.sourceRevision))
+const commandError = computed(
+  () =>
+    firewallExportSourceError(appConfig.sourceRevision) ?? firewallExportSelectionError(options),
+)
 const commandInput = useTemplateRef('commandInput')
 const copying = ref(false)
 const copied = ref(false)
@@ -62,10 +72,23 @@ async function copyCommand() {
       >Get export command</UButton
     >
     <template #body>
+      <UFormField name="export-environment" label="Cloud Shell environment">
+        <USelect
+          id="export-environment"
+          v-model="options.environment"
+          :items="[
+            { label: 'Azure CLI in Bash', value: 'bash-cli' },
+            { label: 'Azure PowerShell', value: 'azure-powershell' },
+            { label: 'Azure CLI in PowerShell', value: 'powershell-cli' },
+          ]"
+          class="w-full"
+          :ui="{ base: 'min-h-11' }"
+        />
+      </UFormField>
       <div class="space-y-3">
         <p class="text-sm text-muted">
-          All filters are optional. Blank names export all policies in the chosen scope, using your
-          current Azure CLI subscription by default.
+          Enter a firewall name, a policy name, or both. Subscription and resource group are
+          optional.
         </p>
         <div class="grid gap-4 sm:grid-cols-2">
           <UFormField
@@ -109,7 +132,10 @@ async function copyCommand() {
             />
           </UFormField>
         </div>
-        <p class="text-xs text-muted">Provide either name, or both to combine their policies.</p>
+        <p class="text-xs text-muted">
+          A firewall includes its attached policy chain. A base policy also includes all child
+          policies.
+        </p>
       </div>
       <UFormField name="export-output" label="Output">
         <URadioGroup
@@ -127,10 +153,12 @@ async function copyCommand() {
           }"
         />
       </UFormField>
-      <div class="space-y-3">
+      <div v-if="command !== ''" class="space-y-3">
         <p class="text-sm">
-          Copy the entire command and run it in <strong>Nushell</strong> with Azure CLI installed.
-          Sign in first with <code>az login</code>.
+          Run these lines together in the
+          <strong>{{ options.environment === 'bash-cli' ? 'Bash' : 'PowerShell' }}</strong>
+          session in Azure Cloud Shell. They download this version's Azure Argus export helper
+          before running it. Cloud Shell is already authenticated.
         </p>
         <UFormField name="export-command" label="Export command">
           <UTextarea
@@ -138,7 +166,8 @@ async function copyCommand() {
             ref="commandInput"
             :model-value="command"
             readonly
-            :rows="8"
+            :rows="5"
+            wrap="soft"
             class="w-full min-w-0"
             :ui="{ base: 'max-h-56 resize-none font-mono text-sm sm:text-xs' }"
             :spellcheck="false"
@@ -147,11 +176,14 @@ async function copyCommand() {
         <p class="text-sm text-muted">
           {{
             options.output === 'file'
-              ? 'When it finishes, upload firewall-configuration.json. An existing file with that name is preserved.'
+              ? 'Download firewall-configuration.json from Cloud Shell, then upload it here. An existing file with that name is preserved.'
               : 'When it finishes, copy the complete JSON output into Configuration text, then select Load configuration.'
           }}
         </p>
       </div>
+      <p v-else class="rounded-md border border-default p-3 text-sm text-muted">
+        {{ commandError }}
+      </p>
     </template>
     <template #footer="{ close }">
       <p v-if="copyError" role="alert" class="text-sm text-error">{{ copyError }}</p>
@@ -168,6 +200,7 @@ async function copyCommand() {
         <UButton
           :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
           :loading="copying"
+          :disabled="command === ''"
           class="min-h-11"
           aria-live="polite"
           @click="copyCommand"

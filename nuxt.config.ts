@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import type { ServerResponse } from 'node:http'
 
 import type { Plugin } from 'vite'
@@ -18,6 +19,22 @@ const strictCompilerOptions = {
 function nonEmptyEnv(name: string): string | undefined {
   const value = process.env[name]
   return value === undefined || value === '' ? undefined : value
+}
+
+function sourceRevision(): string | undefined {
+  const revision = nonEmptyEnv('VCS_REF')
+  if (revision !== undefined) {
+    return revision
+  }
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: import.meta.dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return undefined
+  }
 }
 
 function createMsalRedirectBridgePlugin(): Plugin {
@@ -120,6 +137,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   appConfig: {
     versionNumber: nonEmptyEnv('VERSION_NUMBER') ?? nonEmptyEnv('npm_package_version') ?? 'dev',
+    sourceRevision: sourceRevision(),
   },
   runtimeConfig: {
     ipCountry: {

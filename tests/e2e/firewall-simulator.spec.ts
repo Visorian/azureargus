@@ -5,6 +5,8 @@ import { FIREWALL_SIMULATOR_EXAMPLE } from '../../app/utils/firewallSimulatorExa
 import type { FirewallJsonObject } from '../../shared/types/firewallSimulator'
 import { mockTemporaryAzure } from './support/temporaryAzure'
 
+const LINE_BREAKS = /[\r\n]/u
+
 const policyScope =
   '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example/providers/Microsoft.Network/firewallPolicies'
 
@@ -327,7 +329,7 @@ test('loads a live policy chain through Azure sign-in and resolves IP groups in 
   expect(readPaths.filter((path) => path.includes('/ipgroups/'))).toHaveLength(2)
 })
 
-test('configures and copies a one-shot export command from an accessible modal', async ({
+test('configures and copies readable Cloud Shell commands from an accessible modal', async ({
   page,
   context,
 }) => {
@@ -337,17 +339,39 @@ test('configures and copies a one-shot export command from an accessible modal',
   await trigger.click()
   const dialog = page.getByRole('dialog', { name: 'Export Azure Firewall configuration' })
   await expect(dialog).toBeVisible()
+  const environment = dialog.getByLabel('Cloud Shell environment', { exact: true })
+  await expect(environment).toContainText('Azure CLI in Bash')
   const command = dialog.getByLabel('Export command', { exact: true })
-  const initial = await command.inputValue()
+  const copy = dialog.getByRole('button', { name: 'Copy command', exact: true })
+  await expect(copy).toBeDisabled()
+  await expect(command).toHaveCount(0)
+  await expect(
+    dialog.getByText('Enter a firewall or policy name to generate the command.', { exact: true }),
+  ).toBeVisible()
   await dialog.getByLabel('Subscription', { exact: true }).fill('demo')
   await dialog.getByLabel('Resource group', { exact: true }).fill('network')
-  await dialog.getByLabel('Firewall name', { exact: true }).fill('hub-firewall')
-  await dialog.getByLabel('Policy name', { exact: true }).fill('workload-policy')
+  const firewall = dialog.getByLabel('Firewall name', { exact: true })
+  const policy = dialog.getByLabel('Policy name', { exact: true })
+  await firewall.fill('hub-firewall')
+  await expect(copy).toBeEnabled()
+  await policy.fill('workload-policy')
   await dialog.getByRole('radio', { name: 'Text to paste', exact: true }).check()
+  const bash = await command.inputValue()
+  expect(bash).toContain('hub-firewall')
+  expect(bash).toContain('workload-policy')
+  await environment.click()
+  await page.getByRole('option', { name: 'Azure PowerShell', exact: true }).click()
+  const powershell = await command.inputValue()
+  await environment.click()
+  await page.getByRole('option', { name: 'Azure CLI in PowerShell', exact: true }).click()
   const generated = await command.inputValue()
-  expect(generated).not.toBe(initial)
-  expect(generated).toContain('hub-firewall')
-  expect(generated).toContain('workload-policy')
+  expect(new Set([bash, powershell, generated]).size).toBe(3)
+  for (const snippet of [bash, powershell, generated]) {
+    const lines = snippet.split(LINE_BREAKS)
+    expect(lines.length).toBeGreaterThanOrEqual(3)
+    expect(lines.length).toBeLessThanOrEqual(5)
+    expect(lines.every((line) => line.length < 200)).toBe(true)
+  }
   await dialog.getByRole('button', { name: 'Copy command', exact: true }).click()
   await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
   expect(await page.evaluate(async () => await navigator.clipboard.readText())).toBe(generated)
@@ -355,6 +379,18 @@ test('configures and copies a one-shot export command from an accessible modal',
   await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeInViewport()
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await firewall.fill('')
+  await expect(copy).toBeEnabled()
+  await policy.fill('*')
+  await expect(copy).toBeDisabled()
+  await expect(
+    dialog.getByText('Enter exact firewall and policy names. Wildcards are not supported.', {
+      exact: true,
+    }),
+  ).toBeVisible()
+  await policy.fill(' ')
+  await expect(copy).toBeDisabled()
+  await expect(command).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await expect(trigger).toBeFocused()

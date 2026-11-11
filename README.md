@@ -69,12 +69,16 @@ collection groups, and referenced IP groups. It uses the same browser Azure sign
 as delegated Log Analytics and requires read access to those resources. It does not change Azure
 resources. Import and simulation also work without Azure sign-in.
 
-For offline imports, choose **Get export command**. Optionally enter a firewall name, a policy name,
-or both. The modal also accepts a subscription and resource group, and generates a single Nushell
-block that uses your signed-in Azure CLI session. Choose a JSON file to upload or text to paste.
-With both names empty, it exports all policies in the selected subscription or resource group.
-The command includes parent policies and referenced IP groups automatically and preserves an
-existing output file.
+For offline imports, choose **Get export command**. Enter a firewall name, a policy name, or both.
+Subscription and resource group are optional. Choose Azure CLI in Bash,
+Azure PowerShell, or Azure CLI in PowerShell, then run the three to five command lines together in
+your authenticated Azure Cloud Shell session. The commands download the Azure Argus export helper
+from the same published Git revision as the application, then run the saved script. Choose a JSON
+file to upload or text to paste. For file output, download `firewall-configuration.json` from Cloud
+Shell and upload it here.
+A firewall exports its attached policy chain. Selecting a base policy also includes all child
+policies. The command includes referenced IP groups automatically and preserves an existing output
+file.
 
 For manual imports, include the policies, their complete collection groups, and the IP groups.
 A policy export alone contains references rather than the rules. Separate JSON responses can be

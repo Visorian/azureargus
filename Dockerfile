@@ -11,8 +11,10 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 ARG VERSION_NUMBER
+ARG VCS_REF
 RUN test -n "$VERSION_NUMBER"
 ENV VERSION_NUMBER=$VERSION_NUMBER
+ENV VCS_REF=$VCS_REF
 
 RUN bun run geoip:update
 RUN bun run build
