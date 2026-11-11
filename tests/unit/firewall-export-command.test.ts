@@ -45,6 +45,7 @@ const resources = JSON.parse(fs.readFileSync(process.env.EXPORT_FIXTURE, 'utf8')
 resources.push({ id: '${scope}/azureFirewalls/workload-fw', name: 'workload-fw', type: 'Microsoft.Network/azureFirewalls', properties: { firewallPolicy: { id: '${scope}/firewallPolicies/workload' } } });
 resources.push({ id: '${scope}/firewallPolicies/empty', name: 'empty', type: 'Microsoft.Network/firewallPolicies', properties: { ruleCollectionGroups: [], childPolicies: [] } });
 if (process.env.EXPORT_AMBIGUOUS) { const base=resources.find(resource => resource.name === 'base'); resources.push({ ...base, id: base.id.replace('/resourceGroups/firewall-fixture/', '/resourceGroups/other-group/') }); }
+if (process.env.EXPORT_LARGE_GROUP) { const group=resources.find(resource => resource.type.toLowerCase().endsWith('/rulecollectiongroups')); const collection=group.properties.ruleCollections[0]; const rule=collection.rules[0]; collection.rules=Array.from({length:1000},(_,index)=>({...rule,name:'large-export-rule-'+index})); }
 fs.appendFileSync(process.env.EXPORT_REQUESTS, JSON.stringify(args) + '\\n');
 if (args[0] !== 'resource') process.exit(2);
 if (args[1] === 'list') {
@@ -97,15 +98,71 @@ afterEach(() => {
   }
 })
 
+const powershellSetup = `
+$ErrorActionPreference = 'Stop'
+function Invoke-WebRequest {
+  param($Uri, $OutFile, $ErrorAction)
+  if ($Uri -ne 'https://raw.githubusercontent.com/Visorian/azureargus/${revision}/public/cloud-shell/export-firewall.ps1') { throw 'Unexpected download URL' }
+  Copy-Item -LiteralPath $env:EXPORT_POWERSHELL_HELPER -Destination $OutFile
+}
+$global:azureArgusTestSubscription = 'original'
+$global:azureArgusTestContextName = 'original-context'
+function Get-AzContext { [pscustomobject]@{Subscription=$global:azureArgusTestSubscription; Name=$global:azureArgusTestContextName} }
+function Set-AzContext {
+  param($Subscription, $Scope)
+  $global:azureArgusTestSubscription = $Subscription
+  $global:azureArgusTestContextName = 'default-context'
+}
+function Select-AzContext {
+  param($Name, $Scope)
+  if ($Name -ne 'original-context') { throw 'Unknown context' }
+  $global:azureArgusTestSubscription = 'original'
+  $global:azureArgusTestContextName = $Name
+}
+function Get-AzResource {
+  param($ResourceType, $Name, $ResourceId, $ApiVersion, [switch]$ExpandProperties)
+  $resources = (Get-Content -Raw -LiteralPath $env:EXPORT_FIXTURE | ConvertFrom-Json).resources
+  if ($env:EXPORT_DENY_GROUPS -and $ResourceId -like '*/ruleCollectionGroups/*') { throw 'Access denied' }
+  $selected = if ($ResourceId) {
+    if ($ApiVersion -ne '2026-03-01' -or -not $ExpandProperties) { throw 'Expected full resource properties' }
+    $resources | Where-Object { $_.id -eq $ResourceId }
+  } else {
+    $resources | Where-Object { $_.type -eq $ResourceType -and $_.name -eq $Name }
+  }
+  foreach ($resource in $selected) {
+    [pscustomobject]@{ ResourceId=$resource.id; Name=$resource.name; ResourceType=$resource.type; Properties=$resource.properties }
+  }
+}
+`
+
+function runPowerShell(
+  boundary: ReturnType<typeof cliBoundary>,
+  body: string,
+  env: NodeJS.ProcessEnv = {},
+) {
+  return spawnSync(
+    'pwsh',
+    ['-NoProfile', '-NonInteractive', '-Command', `${powershellSetup}\n${body}`],
+    {
+      cwd: boundary.directory,
+      env: { ...boundary.env, ...env },
+      encoding: 'utf8',
+    },
+  )
+}
+
+it('requires an exact target and a published source revision', () => {
+  expect(buildCommand({ ...options, policyName: ' ' })).toBe('')
+  expect(buildCommand({ ...options, policyName: '*' })).toBe('')
+  expect(buildCommand({ ...options, firewallName: '*' })).toBe('')
+  expect(createFirewallExportCommand(options, undefined)).toBe('')
+  expect(createFirewallExportCommand(options, 'main')).toBe('')
+})
+
 it.each(environments)(
   'provides a readable %s snippet only for an exact selection and published revision',
   (environment) => {
     const settings = { ...options, environment }
-    expect(buildCommand({ ...settings, policyName: ' ' })).toBe('')
-    expect(buildCommand({ ...settings, policyName: '*' })).toBe('')
-    expect(buildCommand({ ...settings, firewallName: '*' })).toBe('')
-    expect(createFirewallExportCommand(settings, undefined)).toBe('')
-    expect(createFirewallExportCommand(settings, 'main')).toBe('')
     for (const output of ['text', 'file'] as const) {
       const snippet = buildCommand({ ...settings, output })
       const lines = snippet.split('\n')
@@ -185,10 +242,30 @@ it('passes quoted names as data without evaluating shell expressions', () => {
     env: { ...boundary.env, EXPORT_ALIAS: name },
     encoding: 'utf8',
   })
-  expect(exported.status).toBe(0)
   expect(existsSync(join(boundary.directory, 'injected'))).toBe(false)
+  expect(exported.status).toBe(0)
   const requests = readFileSync(boundary.env.EXPORT_REQUESTS, 'utf8')
   expect(requests).toContain(JSON.stringify(name))
+})
+
+it('exports collection groups larger than the operating system argument limit', () => {
+  const boundary = cliBoundary()
+  const exported = spawnSync('bash', ['-c', buildCommand(options)], {
+    cwd: boundary.directory,
+    env: { ...boundary.env, EXPORT_LARGE_GROUP: '1' },
+    encoding: 'utf8',
+  })
+  expect(exported.status).toBe(0)
+  expect(exported.stderr).toBe('')
+  expect(Buffer.byteLength(exported.stdout)).toBeGreaterThan(128 * 1024)
+  const snapshot = parseFirewallSnapshot(exported.stdout)
+  expect(
+    snapshot.policies
+      .flatMap((policy) => policy.groups)
+      .flatMap((group) => group.collections)
+      .flatMap((collection) => collection.rules)
+      .filter((rule) => rule.name.startsWith('large-export-rule-')),
+  ).toHaveLength(1000)
 })
 
 it('rejects ambiguous names before exporting multiple policy roots', () => {
@@ -236,39 +313,14 @@ it.each(['azure-powershell', 'powershell-cli'] as const)(
   'downloads and runs the %s helper against its resource boundary',
   (environment) => {
     const boundary = cliBoundary()
-    const setup = `
-$ErrorActionPreference = 'Stop'
-function Invoke-WebRequest {
-  param($Uri, $OutFile, $ErrorAction)
-  if ($Uri -ne 'https://raw.githubusercontent.com/Visorian/azureargus/${revision}/public/cloud-shell/export-firewall.ps1') { throw 'Unexpected download URL' }
-  Copy-Item -LiteralPath $env:EXPORT_POWERSHELL_HELPER -Destination $OutFile
-}
-function Set-AzContext { param($Subscription, $Scope) }
-function Get-AzResource {
-  param($ResourceType, $Name, $ResourceId, $ApiVersion, [switch]$ExpandProperties)
-  $resources = (Get-Content -Raw -LiteralPath $env:EXPORT_FIXTURE | ConvertFrom-Json).resources
-  $selected = if ($ResourceId) {
-    if ($ApiVersion -ne '2026-03-01' -or -not $ExpandProperties) { throw 'Expected full resource properties' }
-    $resources | Where-Object { $_.id -eq $ResourceId }
-  } else {
-    $resources | Where-Object { $_.type -eq $ResourceType -and $_.name -eq $Name }
-  }
-  foreach ($resource in $selected) {
-    [pscustomobject]@{ ResourceId=$resource.id; Name=$resource.name; ResourceType=$resource.type; Properties=$resource.properties }
-  }
-}
-`
-    const exported = spawnSync(
-      'pwsh',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `${setup}\n${buildCommand({ ...options, environment })}`,
-      ],
-      { cwd: boundary.directory, env: boundary.env, encoding: 'utf8' },
+
+    const exported = runPowerShell(
+      boundary,
+      `${buildCommand({ ...options, environment })}
+if ((Get-AzContext).Subscription -ne 'original' -or (Get-AzContext).Name -ne 'original-context') { throw 'Original context was not restored' }`,
     )
     expect(exported.status).toBe(0)
+    expect(existsSync(boundary.env.EXPORT_REQUESTS)).toBe(environment === 'powershell-cli')
     const snapshot = parseFirewallSnapshot(exported.stdout)
     expect(snapshot.policies.map((policy) => policy.name).toSorted()).toStrictEqual([
       'base',
@@ -285,6 +337,38 @@ function Get-AzResource {
     ])
   },
 )
+
+it('passes PowerShell quote delimiters and expressions as literal argument data', () => {
+  const boundary = cliBoundary()
+  const name = "base'’; $(New-Item injected); ‘suffix\nline"
+  const exported = runPowerShell(
+    boundary,
+    buildCommand({ ...options, environment: 'powershell-cli', policyName: name }),
+    { EXPORT_ALIAS: name },
+  )
+  expect(existsSync(join(boundary.directory, 'injected'))).toBe(false)
+  expect(exported.status).toBe(0)
+  expect(readFileSync(boundary.env.EXPORT_REQUESTS, 'utf8')).toContain(JSON.stringify(name))
+})
+
+it('restores the original PowerShell context after an Azure read fails', () => {
+  const boundary = cliBoundary()
+  const exported = runPowerShell(
+    boundary,
+    `
+try {
+  ${buildCommand({ ...options, environment: 'azure-powershell' })}
+  throw 'Expected the Azure read to fail'
+} catch {
+  if ($_.Exception.Message -notmatch 'Access denied') { throw }
+}
+if ((Get-AzContext).Subscription -ne 'original' -or (Get-AzContext).Name -ne 'original-context') { throw 'Original context was not restored' }
+`,
+    { EXPORT_DENY_GROUPS: '1' },
+  )
+  expect(exported.status).toBe(0)
+  expect(exported.stdout).toBe('')
+})
 
 it('does not run a stale helper when the download fails', () => {
   const boundary = cliBoundary()

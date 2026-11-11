@@ -21,12 +21,8 @@ if ($OutputFile -and (Test-Path -LiteralPath $OutputFile)) {
 }
 
 $cliScope = @()
-if ($Subscription) {
-    if ($UseAzureCli) {
-        $cliScope += @('--subscription', $Subscription)
-    } else {
-        Set-AzContext -Subscription $Subscription -Scope Process | Out-Null
-    }
+if ($Subscription -and $UseAzureCli) {
+    $cliScope += @('--subscription', $Subscription)
 }
 if ($ResourceGroup) {
     $cliScope += @('--resource-group', $ResourceGroup)
@@ -60,29 +56,40 @@ function Find-ExportResource([string]$Type, [string]$Name) {
     }
 }
 
-$policies = @()
-if ($PolicyName) {
-    $policies = @(Get-ExportResource (Find-ExportResource 'Microsoft.Network/firewallPolicies' $PolicyName))
-    if ($policies.Count -ne 1) {
-        throw 'Expected one policy. Check the name and resource group.'
+$originalContext = $null
+try {
+    if ($Subscription -and -not $UseAzureCli) {
+        $originalContext = Get-AzContext
+        Set-AzContext -Subscription $Subscription -Scope Process | Out-Null
     }
-    $policies = @(Get-ExportResource (@($policies.id) + @($policies.properties.childPolicies.id)))
-}
-if ($FirewallName) {
-    $firewalls = @(Get-ExportResource (Find-ExportResource 'Microsoft.Network/azureFirewalls' $FirewallName))
-    if ($firewalls.Count -ne 1 -or @($firewalls | Where-Object { -not $_.properties.firewallPolicy.id }).Count) {
-        throw 'Expected one policy-backed firewall. Check the name and resource group.'
+    $policies = @()
+    if ($PolicyName) {
+        $policies = @(Get-ExportResource (Find-ExportResource 'Microsoft.Network/firewallPolicies' $PolicyName))
+        if ($policies.Count -ne 1) {
+            throw 'Expected one policy. Check the name and resource group.'
+        }
+        $policies = @(Get-ExportResource (@($policies.id) + @($policies.properties.childPolicies.id)))
     }
-    $policies += @(Get-ExportResource $firewalls.properties.firewallPolicy.id)
-}
+    if ($FirewallName) {
+        $firewalls = @(Get-ExportResource (Find-ExportResource 'Microsoft.Network/azureFirewalls' $FirewallName))
+        if ($firewalls.Count -ne 1 -or @($firewalls | Where-Object { -not $_.properties.firewallPolicy.id }).Count) {
+            throw 'Expected one policy-backed firewall. Check the name and resource group.'
+        }
+        $policies += @(Get-ExportResource $firewalls.properties.firewallPolicy.id)
+    }
 
-$policies = (@($policies) + @(Get-ExportResource $policies.properties.basePolicy.id)) |
-    Sort-Object -Property id -Unique
-$groups = @(Get-ExportResource $policies.properties.ruleCollectionGroups.id)
-$ips = @(Get-ExportResource (@($groups.properties.ruleCollections.rules.sourceIpGroups) +
-    @($groups.properties.ruleCollections.rules.destinationIpGroups)))
-$result = @{ resources = @((@($policies) + @($groups) + @($ips)) |
-    Sort-Object -Property id -Unique) } | ConvertTo-Json -Depth 100
+    $policies = (@($policies) + @(Get-ExportResource $policies.properties.basePolicy.id)) |
+        Sort-Object -Property id -Unique
+    $groups = @(Get-ExportResource $policies.properties.ruleCollectionGroups.id)
+    $ips = @(Get-ExportResource (@($groups.properties.ruleCollections.rules.sourceIpGroups) +
+        @($groups.properties.ruleCollections.rules.destinationIpGroups)))
+    $result = @{ resources = @((@($policies) + @($groups) + @($ips)) |
+        Sort-Object -Property id -Unique) } | ConvertTo-Json -Depth 100
+} finally {
+    if ($originalContext) {
+        Select-AzContext -Name $originalContext.Name -Scope Process | Out-Null
+    }
+}
 if ($OutputFile) {
     $result | Out-File -LiteralPath $OutputFile -Encoding utf8 -NoClobber
 } else {

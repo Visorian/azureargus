@@ -194,7 +194,7 @@ async function loadAzure() {
     <div v-if="mode === 'import'" class="min-w-0 space-y-4">
       <div class="space-y-3">
         <p class="max-w-3xl text-sm text-muted">
-          Upload a configuration snapshot, or get a command to export one from Azure CLI.
+          Upload a configuration snapshot, or get a command to export one from Azure Cloud Shell.
         </p>
         <div ref="importActions" class="grid gap-2 sm:flex sm:flex-wrap">
           <UButton

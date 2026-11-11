@@ -81,8 +81,8 @@ parents=$(get_resources "$(jq -r '.[].properties.basePolicy.id // empty' <<< "$p
 policies=$(jq -cs 'add | unique_by(.id | ascii_downcase)' <<< "$policies"$'\n'"$parents")
 groups=$(get_resources "$(jq -r '.[].properties.ruleCollectionGroups[]?.id' <<< "$policies")")
 ips=$(get_resources "$(jq -r '.[].properties.ruleCollections[]?.rules[]? | .sourceIpGroups[]?, .destinationIpGroups[]?' <<< "$groups" | sort -fu)")
-result=$(jq -cn --argjson p "$policies" --argjson g "$groups" --argjson i "$ips" \
-  '{resources: ($p + $g + $i | unique_by(.id | ascii_downcase))}')
+result=$(printf '%s\n' "$policies" "$groups" "$ips" |
+  jq -cs '{resources: (add | unique_by(.id | ascii_downcase))}')
 if [[ -n "$output" ]]; then
   set -C
   printf '%s\n' "$result" > "$output"

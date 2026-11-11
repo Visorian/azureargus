@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useEventListener } from '@vueuse/core'
+
 import {
   createFirewallExportCommand,
   firewallExportSelectionError,
@@ -21,6 +23,7 @@ const commandError = computed(
     firewallExportSourceError(appConfig.sourceRevision) ?? firewallExportSelectionError(options),
 )
 const commandInput = useTemplateRef('commandInput')
+useEventListener('resize', () => commandInput.value?.autoResize())
 const copying = ref(false)
 const copied = ref(false)
 const copyError = ref<string | null>(null)
@@ -166,22 +169,28 @@ async function copyCommand() {
             ref="commandInput"
             :model-value="command"
             readonly
-            :rows="5"
+            autoresize
+            :rows="3"
             wrap="soft"
             class="w-full min-w-0"
-            :ui="{ base: 'max-h-56 resize-none font-mono text-sm sm:text-xs' }"
+            :ui="{ base: 'resize-none font-mono text-sm sm:text-xs' }"
             :spellcheck="false"
           />
         </UFormField>
         <p class="text-sm text-muted">
           {{
             options.output === 'file'
-              ? 'Download firewall-configuration.json from Cloud Shell, then upload it here. An existing file with that name is preserved.'
+              ? 'Download firewall-configuration.json from Cloud Shell, then upload it here. If that file already exists, the export stops. Rename or delete it before running the export again.'
               : 'When it finishes, copy the complete JSON output into Configuration text, then select Load configuration.'
           }}
         </p>
       </div>
-      <p v-else class="rounded-md border border-default p-3 text-sm text-muted">
+      <p
+        role="status"
+        :class="
+          commandError ? 'rounded-md border border-default p-3 text-sm text-muted' : 'sr-only'
+        "
+      >
         {{ commandError }}
       </p>
     </template>

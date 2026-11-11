@@ -1,6 +1,7 @@
 const LINE_BREAKS = /[\r\n]/u
 const WILDCARDS = /[*?[\]]/u
 const SOURCE_REVISION = /^[a-f0-9]{40}$/iu
+const POWERSHELL_QUOTES = /['‘’‚‛]/gu
 
 export type FirewallExportEnvironment = 'bash-cli' | 'azure-powershell' | 'powershell-cli'
 
@@ -45,7 +46,7 @@ function bashLiteral(value: string): string {
 }
 
 function powershellLiteral(value: string): string {
-  const quoted = `'${value.replaceAll("'", "''").replaceAll('\r', "'+[char]13+'").replaceAll('\n', "'+[char]10+'")}'`
+  const quoted = `'${value.replaceAll(POWERSHELL_QUOTES, '$&$&').replaceAll('\r', "'+[char]13+'").replaceAll('\n', "'+[char]10+'")}'`
   return LINE_BREAKS.test(value) ? `(${quoted})` : quoted
 }
 

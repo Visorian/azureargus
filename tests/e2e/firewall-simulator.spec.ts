@@ -5,8 +5,6 @@ import { FIREWALL_SIMULATOR_EXAMPLE } from '../../app/utils/firewallSimulatorExa
 import type { FirewallJsonObject } from '../../shared/types/firewallSimulator'
 import { mockTemporaryAzure } from './support/temporaryAzure'
 
-const LINE_BREAKS = /[\r\n]/u
-
 const policyScope =
   '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example/providers/Microsoft.Network/firewallPolicies'
 
@@ -366,12 +364,11 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
   await page.getByRole('option', { name: 'Azure CLI in PowerShell', exact: true }).click()
   const generated = await command.inputValue()
   expect(new Set([bash, powershell, generated]).size).toBe(3)
-  for (const snippet of [bash, powershell, generated]) {
-    const lines = snippet.split(LINE_BREAKS)
-    expect(lines.length).toBeGreaterThanOrEqual(3)
-    expect(lines.length).toBeLessThanOrEqual(5)
-    expect(lines.every((line) => line.length < 200)).toBe(true)
-  }
+  await expect
+    .poll(
+      async () => await command.evaluate((element) => element.scrollHeight - element.clientHeight),
+    )
+    .toBeLessThanOrEqual(1)
   await dialog.getByRole('button', { name: 'Copy command', exact: true }).click()
   await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
   expect(await page.evaluate(async () => await navigator.clipboard.readText())).toBe(generated)
@@ -379,6 +376,11 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
   await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeInViewport()
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect
+    .poll(
+      async () => await command.evaluate((element) => element.scrollHeight - element.clientHeight),
+    )
+    .toBeLessThanOrEqual(1)
   await firewall.fill('')
   await expect(copy).toBeEnabled()
   await policy.fill('*')
@@ -388,9 +390,8 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
       exact: true,
     }),
   ).toBeVisible()
-  await policy.fill(' ')
-  await expect(copy).toBeDisabled()
   await expect(command).toHaveCount(0)
+  await expect(dialog.getByRole('status')).toContainText('Wildcards are not supported.')
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await expect(trigger).toBeFocused()

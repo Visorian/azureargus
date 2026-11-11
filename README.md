@@ -78,7 +78,7 @@ file to upload or text to paste. For file output, download `firewall-configurati
 Shell and upload it here.
 A firewall exports its attached policy chain. Selecting a base policy also includes all child
 policies. The command includes referenced IP groups automatically and preserves an existing output
-file.
+file. Rename or remove it before running the export again.
 
 For manual imports, include the policies, their complete collection groups, and the IP groups.
 A policy export alone contains references rather than the rules. Separate JSON responses can be
