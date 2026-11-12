@@ -53,3 +53,15 @@ jobs:
 
       - name: Unit tests
         run: bun run test:unit
+
+      - name: Build
+        run: bun run build
+
+      - name: Check packaged server
+        run: |
+          set -euo pipefail
+          HOST=127.0.0.1 PORT=3000 node .output/server/index.mjs &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true; wait "$preview_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-connrefused --max-time 5 \
+            http://127.0.0.1:3000/firewall-simulator --output /dev/null
