@@ -170,10 +170,15 @@ watch(allLogsLensActive, (active) => ipCountryLookup.setActive(active), { immedi
 const clearingLogHistory = ref(false)
 const logHistoryEnabled = computed(() => logHistory.enabled.value)
 const logHistoryError = computed(() => logHistory.lastError.value)
-const analysisMode = ref<AnalysisMode>(
-  capabilities.value?.mode === 'managed' && !capabilities.value.eventHubAvailable
-    ? 'log-analysis'
-    : 'real-time-analysis',
+const analysisMode = ref<AnalysisMode>('real-time-analysis')
+watch(
+  capabilities,
+  (current) => {
+    if (current?.mode === 'managed' && !current.eventHubAvailable) {
+      analysisMode.value = 'log-analysis'
+    }
+  },
+  { immediate: true, once: true },
 )
 const logAnalysisActive = computed(() => analysisMode.value === 'log-analysis')
 const allLogsRealTimeActive = computed(

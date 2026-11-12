@@ -142,7 +142,7 @@ export function validateManagedEventHubStreamRequest(
   if (
     !keys.includes('consumerGroup') ||
     !keys.includes('lookbackMinutes') ||
-    keys.some((key) => !['consumerGroup', 'lookbackMinutes', 'resumeFrom'].includes(key))
+    keys.some((key) => key !== 'consumerGroup' && key !== 'lookbackMinutes' && key !== 'resumeFrom')
   ) {
     return false
   }

@@ -1,24 +1,2 @@
-# Installed by the `prepare` script (`lefthook install`).
-pre-commit:
-  piped: true
-  jobs:
-    - name: format
-      glob: '*.{js,mjs,cjs,ts,mts,cts,vue,json,jsonc,md,yml,yaml,css}'
-      run: bunx oxfmt --no-error-on-unmatched-pattern {staged_files}
-      stage_fixed: true
-    - name: oxlint
-      glob: '*.{js,mjs,cjs,ts,mts,cts,vue}'
-      run: bunx oxlint {staged_files}
-    - name: eslint
-      glob: '*.vue'
-      run: bunx eslint --max-warnings 0 --cache --cache-location node_modules/.cache/eslint/ {staged_files}
-
-commit-msg:
-  jobs:
-    - name: commitlint
-      run: bunx commitlint --edit {1}
-
-pre-push:
-  jobs:
-    - name: typecheck
-      run: bun run typecheck
+extends:
+  - node_modules/@visorian/code-standards/lefthook.yml

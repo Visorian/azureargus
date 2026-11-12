@@ -2,6 +2,10 @@
 
 ## Development
 
+Lint, formatting, compiler settings and Git hooks use `@visorian/code-standards`. Keep local
+configuration limited to project settings. The lint debt cap must not increase; lower it when
+existing warnings are fixed.
+
 ```bash
 bun run fmt:check
 bun run lint

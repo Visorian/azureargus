@@ -205,7 +205,7 @@ export async function mockTemporaryAzure(page: Page) {
         scope,
         token_type: 'Bearer',
       }
-      if (code) {
+      if ((code !== null && code !== '') || scopes.has('openid')) {
         response['id_token'] = jwt({
           aud: temporaryAzureClientId,
           exp: now + 3_600,
@@ -213,7 +213,7 @@ export async function mockTemporaryAzure(page: Page) {
           iss: `https://login.microsoftonline.com/${temporaryAzureTenantId}/v2.0`,
           name: 'Temporary User',
           nbf: now,
-          nonce: nonces.get(code),
+          nonce: code === null ? undefined : nonces.get(code),
           oid: '55555555-5555-4555-8555-555555555555',
           preferred_username: 'temporary@example.com',
           sub: 'temporary-user',

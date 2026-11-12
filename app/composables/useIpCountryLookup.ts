@@ -258,7 +258,7 @@ export function useIpCountryLookup() {
   const requestFetch = useRequestFetch()
   const client = createIpCountryLookupClient(
     async (body, signal) =>
-      await requestFetch<unknown>('/api/ip-country', {
+      await requestFetch('/api/ip-country', {
         body,
         method: 'POST',
         signal,

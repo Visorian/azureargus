@@ -7,15 +7,6 @@ const MSAL_REDIRECT_MODULE_ID = 'virtual:azure-argus-msal-redirect'
 const RESOLVED_MSAL_REDIRECT_MODULE_ID = `\0${MSAL_REDIRECT_MODULE_ID}`
 const MSAL_REDIRECT_ASSET_PATH = '/_nuxt/log-analytics-redirect.js'
 
-// Stricter than Nuxt's defaults; applied to every generated tsconfig (app, server, shared, node).
-const strictCompilerOptions = {
-  erasableSyntaxOnly: true,
-  noFallthroughCasesInSwitch: true,
-  noImplicitReturns: true,
-  noPropertyAccessFromIndexSignature: true,
-  noUncheckedSideEffectImports: true,
-}
-
 function nonEmptyEnv(name: string): string | undefined {
   const value = process.env[name]
   return value === undefined || value === '' ? undefined : value
@@ -125,16 +116,24 @@ if (parameters.get("state") === "azure-argus-admin-consent") {
 }
 
 export default defineNuxtConfig({
-  modules: ['@nuxt/ui', 'nuxt-oidc-auth'],
+  modules: ['@nuxt/ui', 'nuxt-oidc-auth', '@visorian/code-standards/nuxt'],
   ssr: false,
   devtools: { enabled: false },
   app: {
     head: {
       title: 'Azure Argus',
       htmlAttrs: { lang: 'en' },
+      meta: [
+        {
+          name: 'description',
+          content:
+            'Analyze Azure Firewall logs, troubleshoot DNS, and trace firewall policy rules.',
+        },
+      ],
     },
   },
   css: ['~/assets/css/main.css'],
+  ui: { experimental: { componentDetection: true } },
   appConfig: {
     versionNumber: nonEmptyEnv('VERSION_NUMBER') ?? nonEmptyEnv('npm_package_version') ?? 'dev',
     sourceRevision: sourceRevision(),
@@ -161,12 +160,9 @@ export default defineNuxtConfig({
       siteName: 'Azure Argus',
     },
   },
+  future: { compatibilityVersion: 5 },
+  experimental: { nitroAutoImports: true },
   compatibilityDate: '2026-07-09',
-  nitro: {
-    typescript: {
-      tsConfig: { compilerOptions: strictCompilerOptions },
-    },
-  },
   vite: {
     define: {
       global: 'globalThis',
@@ -210,9 +206,6 @@ export default defineNuxtConfig({
   },
   typescript: {
     typeCheck: true,
-    tsConfig: { compilerOptions: strictCompilerOptions },
-    sharedTsConfig: { compilerOptions: strictCompilerOptions },
-    nodeTsConfig: { compilerOptions: strictCompilerOptions },
   },
   icon: {
     clientBundle: {
