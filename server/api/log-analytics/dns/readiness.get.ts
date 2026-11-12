@@ -1,41 +1,41 @@
-import { requireUserSession } from "nuxt-oidc-auth/runtime/server/utils/session.js";
-import { createError } from "h3";
+import { createError } from 'h3'
+import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
-import { parseDeploymentCapabilities } from "../../../utils/deploymentCapabilities";
-import { executeDnsReadinessQuery } from "../../../../shared/utils/dnsLogAnalyticsQuery";
+import { executeDnsReadinessQuery } from '../../../../shared/utils/dnsLogAnalyticsQuery'
+import { parseDeploymentCapabilities } from '../../../utils/deploymentCapabilities'
 import {
   getLogAnalyticsAccessToken,
   parseLogAnalyticsRuntimeConfig,
-} from "../../../utils/logAnalyticsAuth";
+} from '../../../utils/logAnalyticsAuth'
 import {
   createIncomingRequestSignal,
-  throwLogAnalyticsUpstreamError,
-} from "../../../utils/logAnalyticsRoute";
+  createLogAnalyticsUpstreamError,
+} from '../../../utils/logAnalyticsRoute'
 
 export default defineEventHandler(async (event) => {
-  await requireUserSession(event, { errorBehavior: "throw" });
-  const runtimeConfig = useRuntimeConfig(event);
-  const capabilities = parseDeploymentCapabilities(runtimeConfig, process.env);
-  if (capabilities.mode !== "managed" || !capabilities.predefinedLogAnalyticsAvailable) {
+  await requireUserSession(event, { errorBehavior: 'throw' })
+  const runtimeConfig = useRuntimeConfig(event)
+  const capabilities = parseDeploymentCapabilities(runtimeConfig, process.env)
+  if (capabilities.mode !== 'managed' || !capabilities.predefinedLogAnalyticsAvailable) {
     throw createError({
-      statusCode: capabilities.mode === "invalid" ? 503 : 403,
-      message: "Managed Log Analytics is unavailable",
-    });
+      statusCode: capabilities.mode === 'invalid' ? 503 : 403,
+      message: 'Managed Log Analytics is unavailable',
+    })
   }
 
-  let config;
+  let config
   try {
-    config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics);
+    config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics)
   } catch (error) {
-    throwLogAnalyticsUpstreamError(event, error);
+    throw createLogAnalyticsUpstreamError(event, error)
   }
-  const incoming = createIncomingRequestSignal(event);
+  const incoming = createIncomingRequestSignal(event)
   try {
-    const token = await getLogAnalyticsAccessToken(config, incoming.signal);
-    return await executeDnsReadinessQuery(config, token, { signal: incoming.signal });
+    const token = await getLogAnalyticsAccessToken(config, incoming.signal)
+    return await executeDnsReadinessQuery(config, token, { signal: incoming.signal })
   } catch (error) {
-    throwLogAnalyticsUpstreamError(event, error);
+    throw createLogAnalyticsUpstreamError(event, error)
   } finally {
-    incoming.cleanup();
+    incoming.cleanup()
   }
-});
+})

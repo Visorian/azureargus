@@ -17,4 +17,4 @@ export const AZURE_DIAGNOSTICS_NETWORK_PROJECTION = `AzureDiagnostics
     Policy = tostring(column_ifexists("Policy_s", "")),
     RuleCollectionGroup = tostring(column_ifexists("RuleCollectionGroup_s", "")),
     RuleCollection = tostring(column_ifexists("RuleCollection_s", "")),
-    Rule = tostring(column_ifexists("Rule_s", ""))`;
+    Rule = tostring(column_ifexists("Rule_s", ""))`

@@ -1,179 +1,182 @@
-import type { EventPosition, ReceivedEventData } from "@azure/event-hubs";
-import type { ServerResponse } from "node:http";
+import type { ServerResponse } from 'node:http'
 
-import {
-  MANAGED_EVENT_HUB_LOOKBACK_MINUTES,
-  type ManagedEventHubLookbackMinutes,
-  type ManagedEventHubStreamEnvelope,
-  type ManagedEventHubStreamRequest,
-} from "../../shared/types/managedEventHub";
+import type { EventPosition, ReceivedEventData } from '@azure/event-hubs'
+
+import { MANAGED_EVENT_HUB_LOOKBACK_MINUTES } from '../../shared/types/managedEventHub'
+import type {
+  ManagedEventHubStreamEnvelope,
+  ManagedEventHubStreamRequest,
+} from '../../shared/types/managedEventHub'
 
 type ManagedEventHubReceivedEvent = Pick<
   ReceivedEventData,
-  "body" | "enqueuedTimeUtc" | "sequenceNumber" | "properties"
+  'body' | 'enqueuedTimeUtc' | 'sequenceNumber' | 'properties'
 > &
-  Partial<Pick<ReceivedEventData, "offset">>;
+  Partial<Pick<ReceivedEventData, 'offset'>>
 
 export interface ManagedEventHubClient {
-  close(): Promise<void>;
+  close(): Promise<void>
   subscribe(
     handlers: {
       processEvents(
         events: readonly ManagedEventHubReceivedEvent[],
         context: {
-          partitionId: string;
-          updateCheckpoint(event: ManagedEventHubReceivedEvent): Promise<void>;
+          partitionId: string
+          updateCheckpoint(event: ManagedEventHubReceivedEvent): Promise<void>
         },
-      ): Promise<void>;
-      processError(error: unknown): Promise<void>;
+      ): Promise<void>
+      processError(error: unknown): Promise<void>
     },
     options: {
-      maxBatchSize: number;
-      maxWaitTimeInSeconds: number;
-      startPosition: EventPosition | Record<string, EventPosition>;
+      maxBatchSize: number
+      maxWaitTimeInSeconds: number
+      startPosition: EventPosition | Record<string, EventPosition>
     },
-  ): ManagedEventHubSubscription;
+  ): ManagedEventHubSubscription
 }
 
 export interface ManagedEventHubSubscription {
-  close(): Promise<void>;
+  close(): Promise<void>
 }
 
 interface ManagedEventHubStreamOptions {
-  client: ManagedEventHubClient;
-  expectedPartitionIds: readonly string[];
-  request: ManagedEventHubStreamRequest;
-  sessionExpiresAt: number;
-  revalidateSession: () => Promise<boolean>;
-  signal?: AbortSignal;
-  heartbeatIntervalMs?: number;
-  sessionCheckIntervalMs?: number;
-  now?: () => number;
+  client: ManagedEventHubClient
+  expectedPartitionIds: readonly string[]
+  request: ManagedEventHubStreamRequest
+  sessionExpiresAt: number
+  revalidateSession: () => Promise<boolean>
+  signal?: AbortSignal
+  heartbeatIntervalMs?: number
+  sessionCheckIntervalMs?: number
+  now?: () => number
 }
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-const partitionIdPattern = /^(0|[1-9]\d*)$/;
-const STREAM_BUFFER_HIGH_WATER_MARK = 256 * 1024;
-const EVENT_HUB_MAX_BATCH_SIZE = 50;
-const EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2;
+const textEncoder = new TextEncoder()
+const textDecoder = new TextDecoder()
+const partitionIdPattern = /^(0|[1-9]\d*)$/
+const STREAM_BUFFER_HIGH_WATER_MARK = 256 * 1024
+const EVENT_HUB_MAX_BATCH_SIZE = 50
+const EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2
 
 function normalizeEventBodyForStream(body: unknown) {
-  return body instanceof Uint8Array ? textDecoder.decode(body) : body;
+  return body instanceof Uint8Array ? textDecoder.decode(body) : body
 }
 
 function containsControlCharacter(value: string) {
   for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 31 || code === 127) {
-      return true;
+    const code = value.codePointAt(index)
+    if (code !== undefined && (code <= 31 || code === 127)) {
+      return true
     }
   }
-  return false;
+  return false
 }
 
-function waitForResponseDrain(response: ServerResponse) {
-  return new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      response.off("close", onClose);
-      response.off("drain", onDrain);
-      response.off("error", onError);
-    };
-    const onClose = () => {
-      cleanup();
-      reject(new Error("Managed Event Hub response closed"));
-    };
-    const onDrain = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
+// The caller of a write observes its failure; the chain only orders later writes.
+async function settled(promise: Promise<unknown>): Promise<void> {
+  try {
+    await promise
+  } catch {
+    // Intentionally ignored, see above.
+  }
+}
 
-    response.once("close", onClose);
-    response.once("drain", onDrain);
-    response.once("error", onError);
-  });
+async function waitForResponseDrain(response: ServerResponse) {
+  await new Promise<void>((resolve, reject) => {
+    function cleanup() {
+      response.off('close', onClose)
+      response.off('drain', onDrain)
+      response.off('error', onError)
+    }
+    function onClose() {
+      cleanup()
+      reject(new Error('Managed Event Hub response closed'))
+    }
+    function onDrain() {
+      cleanup()
+      resolve()
+    }
+    function onError(error: Error) {
+      cleanup()
+      reject(error)
+    }
+
+    response.once('close', onClose)
+    response.once('drain', onDrain)
+    response.once('error', onError)
+  })
 }
 
 export async function pipeManagedEventHubStream(
   response: ServerResponse,
   stream: ReadableStream<Uint8Array>,
 ) {
-  const reader = stream.getReader();
+  const reader = stream.getReader()
   try {
     while (!response.destroyed && !response.writableEnded) {
-      const { done, value } = await reader.read();
+      const { done, value } = await reader.read()
       if (done) {
-        break;
+        break
       }
       if (!response.write(value)) {
-        await waitForResponseDrain(response);
+        await waitForResponseDrain(response)
       }
     }
   } finally {
-    reader.releaseLock();
+    reader.releaseLock()
   }
 
   if (!response.destroyed && !response.writableEnded) {
-    response.end();
+    response.end()
   }
 }
 
 export function validateManagedEventHubStreamRequest(
   value: unknown,
 ): value is ManagedEventHubStreamRequest {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
   }
 
-  const keys = Object.keys(value);
+  const keys = Object.keys(value)
   if (
-    !keys.includes("consumerGroup") ||
-    !keys.includes("lookbackMinutes") ||
-    keys.some((key) => !["consumerGroup", "lookbackMinutes", "resumeFrom"].includes(key))
+    !keys.includes('consumerGroup') ||
+    !keys.includes('lookbackMinutes') ||
+    keys.some((key) => key !== 'consumerGroup' && key !== 'lookbackMinutes' && key !== 'resumeFrom')
   ) {
-    return false;
+    return false
   }
 
-  const request = value as Record<string, unknown>;
-  const consumerGroup = request.consumerGroup;
+  const consumerGroup = 'consumerGroup' in value ? value.consumerGroup : undefined
+  const lookbackMinutes = 'lookbackMinutes' in value ? value.lookbackMinutes : undefined
+  const resumeFrom = 'resumeFrom' in value ? value.resumeFrom : undefined
   if (
     !(
-      typeof consumerGroup === "string" &&
+      typeof consumerGroup === 'string' &&
       consumerGroup === consumerGroup.trim() &&
       consumerGroup.length > 0 &&
       consumerGroup.length <= 256 &&
       !containsControlCharacter(consumerGroup) &&
-      typeof request.lookbackMinutes === "number" &&
-      MANAGED_EVENT_HUB_LOOKBACK_MINUTES.includes(
-        request.lookbackMinutes as ManagedEventHubLookbackMinutes,
-      )
+      MANAGED_EVENT_HUB_LOOKBACK_MINUTES.some((minutes) => minutes === lookbackMinutes)
     )
   ) {
-    return false;
+    return false
   }
 
-  if (request.resumeFrom === undefined) {
-    return true;
+  if (resumeFrom === undefined) {
+    return true
   }
-  if (
-    typeof request.resumeFrom !== "object" ||
-    request.resumeFrom === null ||
-    Array.isArray(request.resumeFrom)
-  ) {
-    return false;
+  if (typeof resumeFrom !== 'object' || resumeFrom === null || Array.isArray(resumeFrom)) {
+    return false
   }
 
-  return Object.entries(request.resumeFrom).every(
+  return Object.entries(resumeFrom).every(
     ([partitionId, sequenceNumber]) =>
       partitionIdPattern.test(partitionId) &&
-      typeof sequenceNumber === "number" &&
+      typeof sequenceNumber === 'number' &&
       Number.isSafeInteger(sequenceNumber) &&
       sequenceNumber >= 0,
-  );
+  )
 }
 
 function createStartPosition(
@@ -183,24 +186,24 @@ function createStartPosition(
 ): EventPosition | Record<string, EventPosition> {
   const lookbackPosition = {
     enqueuedOn: new Date(now() - request.lookbackMinutes * 60_000),
-  };
+  }
   if (!request.resumeFrom) {
-    return lookbackPosition;
+    return lookbackPosition
   }
 
   return Object.fromEntries(
     expectedPartitionIds.map((partitionId) => {
-      const sequenceNumber = request.resumeFrom?.[partitionId];
+      const sequenceNumber = request.resumeFrom?.[partitionId]
       return [
         partitionId,
         sequenceNumber === undefined ? lookbackPosition : { sequenceNumber, isInclusive: false },
-      ];
+      ]
     }),
-  );
+  )
 }
 
 export function encodeManagedEventHubEnvelope(envelope: ManagedEventHubStreamEnvelope) {
-  return textEncoder.encode(`${JSON.stringify(envelope)}\n`);
+  return textEncoder.encode(`${JSON.stringify(envelope)}\n`)
 }
 
 export function createManagedEventHubStream({
@@ -214,155 +217,204 @@ export function createManagedEventHubStream({
   sessionCheckIntervalMs = 30_000,
   now = Date.now,
 }: ManagedEventHubStreamOptions) {
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-  let subscription: ManagedEventHubSubscription | null = null;
-  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  let sessionTimer: ReturnType<typeof setInterval> | null = null;
-  let expiryTimer: ReturnType<typeof setTimeout> | null = null;
-  let demandResolve: (() => void) | null = null;
-  let closed = false;
-  let cleanupPromise: Promise<void> | null = null;
-  let writeChain = Promise.resolve();
-  let heartbeatPending = false;
-  let sessionCheckPending = false;
-  const pendingCatchUpPartitions = new Set(expectedPartitionIds);
-  const checkpointSequenceNumbers = new Map<string, number>();
-  let caughtUpWritten = false;
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+  let subscription: ManagedEventHubSubscription | null = null
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let sessionTimer: ReturnType<typeof setInterval> | null = null
+  let expiryTimer: ReturnType<typeof setTimeout> | null = null
+  let demandResolve: (() => void) | null = null
+  let closed = false
+  let cleanupPromise: Promise<void> | null = null
+  let writeChain = Promise.resolve()
+  let heartbeatPending = false
+  let sessionCheckPending = false
+  const pendingCatchUpPartitions = new Set(expectedPartitionIds)
+  const checkpointSequenceNumbers = new Map<string, number>()
+  let caughtUpWritten = false
 
   const releaseDemand = () => {
-    demandResolve?.();
-    demandResolve = null;
-  };
+    demandResolve?.()
+    demandResolve = null
+  }
+
+  const lacksDemand = () =>
+    !closed && controller?.desiredSize !== null && (controller?.desiredSize ?? 0) <= 0
+
+  const nextDemand = async () => {
+    await new Promise<void>((resolve) => {
+      demandResolve = resolve
+    })
+  }
 
   const waitForDemand = async () => {
-    while (!closed && controller?.desiredSize !== null && (controller?.desiredSize ?? 0) <= 0) {
-      await new Promise<void>((resolve) => {
-        demandResolve = resolve;
-      });
+    while (lacksDemand()) {
+      await nextDemand()
     }
-  };
+  }
 
-  const cleanup = () => {
+  const cleanup = async () => {
     if (cleanupPromise) {
-      return cleanupPromise;
+      await cleanupPromise
+      return
     }
 
-    closed = true;
-    releaseDemand();
-    signal?.removeEventListener("abort", cleanup);
+    closed = true
+    releaseDemand()
+    signal?.removeEventListener('abort', onAbort)
     if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
+      clearInterval(heartbeatTimer)
     }
     if (sessionTimer) {
-      clearInterval(sessionTimer);
+      clearInterval(sessionTimer)
     }
     if (expiryTimer) {
-      clearTimeout(expiryTimer);
+      clearTimeout(expiryTimer)
     }
 
-    const activeSubscription = subscription;
-    subscription = null;
+    const activeSubscription = subscription
+    subscription = null
     cleanupPromise = (async () => {
-      await Promise.allSettled([activeSubscription?.close(), client.close()]);
+      await Promise.allSettled([activeSubscription?.close(), client.close()])
       try {
-        controller?.close();
+        controller?.close()
       } catch {
         // Stream may already be cancelled by its consumer.
       }
-    })();
-    return cleanupPromise;
-  };
+    })()
+    await cleanupPromise
+  }
 
-  const write = (envelope: ManagedEventHubStreamEnvelope, waitForBackpressure = true) => {
-    const encoded = encodeManagedEventHubEnvelope(envelope);
-    const pendingWrite = writeChain.then(async () => {
-      if (closed || !controller) {
-        throw new Error("Managed Event Hub stream is closed");
-      }
-      controller.enqueue(encoded);
-      if (waitForBackpressure) {
-        await waitForDemand();
-      }
-    });
-    writeChain = pendingWrite.catch(() => undefined);
-    return pendingWrite;
-  };
+  // cleanup() never rejects: client closes are settled and controller.close() is guarded.
+  function onAbort() {
+    void cleanup()
+  }
+
+  const enqueueAfter = async (
+    previousWrite: Promise<void>,
+    encoded: Uint8Array,
+    waitForBackpressure: boolean,
+  ) => {
+    await previousWrite
+    if (closed || !controller) {
+      throw new Error('Managed Event Hub stream is closed')
+    }
+    controller.enqueue(encoded)
+    if (waitForBackpressure) {
+      await waitForDemand()
+    }
+  }
+
+  const write = async (envelope: ManagedEventHubStreamEnvelope, waitForBackpressure = true) => {
+    const encoded = encodeManagedEventHubEnvelope(envelope)
+    const pendingWrite = enqueueAfter(writeChain, encoded, waitForBackpressure)
+    writeChain = settled(pendingWrite)
+    await pendingWrite
+  }
+
+  const sendHeartbeat = async () => {
+    try {
+      await write({ type: 'heartbeat' })
+    } catch {
+      await cleanup()
+    } finally {
+      heartbeatPending = false
+    }
+  }
 
   const terminateForExpiredSession = async () => {
     if (closed) {
-      return;
+      return
     }
     try {
       controller?.enqueue(
-        encodeManagedEventHubEnvelope({ type: "error", message: "Session expired" }),
-      );
+        encodeManagedEventHubEnvelope({ type: 'error', message: 'Session expired' }),
+      )
     } catch {
       // Consumer closure is handled by cleanup.
     }
-    await cleanup();
-  };
+    await cleanup()
+  }
+
+  const checkSession = async () => {
+    try {
+      if (!(await revalidateSession())) {
+        await terminateForExpiredSession()
+      }
+    } catch {
+      await terminateForExpiredSession()
+    } finally {
+      sessionCheckPending = false
+    }
+  }
+
+  const reportSubscribeFailure = async () => {
+    try {
+      await write({ type: 'error', message: 'Event Hub receiver error' }, false)
+    } finally {
+      await cleanup()
+    }
+  }
 
   const stream = new ReadableStream<Uint8Array>(
     {
       start(streamController) {
-        controller = streamController;
+        controller = streamController
         if (signal?.aborted) {
-          void cleanup();
-          return;
+          void cleanup()
+          return
         }
-        signal?.addEventListener("abort", cleanup, { once: true });
+        signal?.addEventListener('abort', onAbort, { once: true })
 
         try {
           subscription = client.subscribe(
             {
               async processEvents(events, context) {
                 if (closed) {
-                  return;
+                  return
                 }
                 if (events.length === 0) {
                   if (caughtUpWritten || !pendingCatchUpPartitions.delete(context.partitionId)) {
-                    return;
+                    return
                   }
                   if (pendingCatchUpPartitions.size === 0) {
-                    caughtUpWritten = true;
-                    await write({ type: "caught-up" });
+                    caughtUpWritten = true
+                    await write({ type: 'caught-up' })
                   }
-                  return;
+                  return
                 }
                 await write({
-                  type: "events",
+                  type: 'events',
                   events: events.map((event) => ({
                     body: normalizeEventBodyForStream(event.body),
                     enqueuedTimeUtc: event.enqueuedTimeUtc.toISOString(),
                     partitionId: context.partitionId,
                     sequenceNumber: event.sequenceNumber,
+                    // The SDK passes the raw AMQP x-opt-offset annotation through untyped at runtime.
+                    // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- keep coercing to the string the browser parser requires
                     offset: event.offset === undefined ? undefined : String(event.offset),
                     applicationProperties: event.properties,
                   })),
-                });
+                })
                 const checkpointEvent = events.reduce((highest, event) =>
                   event.sequenceNumber > highest.sequenceNumber ? event : highest,
-                );
-                const checkpointSequenceNumber = checkpointSequenceNumbers.get(context.partitionId);
+                )
+                const checkpointSequenceNumber = checkpointSequenceNumbers.get(context.partitionId)
                 if (
                   checkpointSequenceNumber === undefined ||
                   checkpointEvent.sequenceNumber > checkpointSequenceNumber
                 ) {
-                  await context.updateCheckpoint(checkpointEvent);
-                  checkpointSequenceNumbers.set(
-                    context.partitionId,
-                    checkpointEvent.sequenceNumber,
-                  );
+                  await context.updateCheckpoint(checkpointEvent)
+                  checkpointSequenceNumbers.set(context.partitionId, checkpointEvent.sequenceNumber)
                 }
               },
               async processError() {
                 if (closed) {
-                  return;
+                  return
                 }
                 try {
-                  await write({ type: "error", message: "Event Hub receiver error" });
+                  await write({ type: 'error', message: 'Event Hub receiver error' })
                 } catch {
-                  await cleanup();
+                  await cleanup()
                 }
               },
             },
@@ -371,51 +423,40 @@ export function createManagedEventHubStream({
               maxWaitTimeInSeconds: EVENT_HUB_MAX_WAIT_TIME_SECONDS,
               startPosition: createStartPosition(expectedPartitionIds, request, now),
             },
-          );
+          )
         } catch {
-          void write({ type: "error", message: "Event Hub receiver error" }, false).finally(
-            cleanup,
-          );
-          return;
+          void reportSubscribeFailure()
+          return
         }
 
         heartbeatTimer = setInterval(() => {
           if (heartbeatPending) {
-            return;
+            return
           }
-          heartbeatPending = true;
-          void write({ type: "heartbeat" })
-            .catch(() => cleanup())
-            .finally(() => {
-              heartbeatPending = false;
-            });
-        }, heartbeatIntervalMs);
+          heartbeatPending = true
+          void sendHeartbeat()
+        }, heartbeatIntervalMs)
         sessionTimer = setInterval(() => {
           if (sessionCheckPending) {
-            return;
+            return
           }
-          sessionCheckPending = true;
-          void revalidateSession()
-            .then((valid) => (valid ? undefined : terminateForExpiredSession()))
-            .catch(() => terminateForExpiredSession())
-            .finally(() => {
-              sessionCheckPending = false;
-            });
-        }, sessionCheckIntervalMs);
+          sessionCheckPending = true
+          void checkSession()
+        }, sessionCheckIntervalMs)
         expiryTimer = setTimeout(
           () => void terminateForExpiredSession(),
           Math.max(0, sessionExpiresAt * 1_000 - now()),
-        );
+        )
       },
       pull() {
-        releaseDemand();
+        releaseDemand()
       },
       async cancel() {
-        await cleanup();
+        await cleanup()
       },
     },
     new ByteLengthQueuingStrategy({ highWaterMark: STREAM_BUFFER_HIGH_WATER_MARK }),
-  );
+  )
 
-  return { cleanup, stream };
+  return { cleanup, stream }
 }

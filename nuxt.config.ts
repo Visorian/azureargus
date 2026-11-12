@@ -1,60 +1,95 @@
-import type { Plugin } from "vite";
+import { execFileSync } from 'node:child_process'
+import type { ServerResponse } from 'node:http'
 
-const MSAL_REDIRECT_MODULE_ID = "virtual:azure-argus-msal-redirect";
-const RESOLVED_MSAL_REDIRECT_MODULE_ID = `\0${MSAL_REDIRECT_MODULE_ID}`;
-const MSAL_REDIRECT_ASSET_PATH = "/_nuxt/log-analytics-redirect.js";
+import type { Plugin } from 'vite'
+
+const MSAL_REDIRECT_MODULE_ID = 'virtual:azure-argus-msal-redirect'
+const RESOLVED_MSAL_REDIRECT_MODULE_ID = `\0${MSAL_REDIRECT_MODULE_ID}`
+const MSAL_REDIRECT_ASSET_PATH = '/_nuxt/log-analytics-redirect.js'
+
+function nonEmptyEnv(name: string): string | undefined {
+  const value = process.env[name]
+  return value === undefined || value === '' ? undefined : value
+}
+
+function sourceRevision(): string | undefined {
+  const revision = nonEmptyEnv('VCS_REF')
+  if (revision !== undefined) {
+    return revision
+  }
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: import.meta.dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return undefined
+  }
+}
 
 function createMsalRedirectBridgePlugin(): Plugin {
-  let isBuild = false;
+  let isBuild = false
 
   return {
-    name: "azure-argus:msal-redirect-bridge",
+    name: 'azure-argus:msal-redirect-bridge',
     configResolved(config) {
-      isBuild = config.command === "build";
+      isBuild = config.command === 'build'
     },
     configureServer(server) {
-      server.middlewares.use(MSAL_REDIRECT_ASSET_PATH, async (_request, response, next) => {
-        const result = await server.transformRequest(MSAL_REDIRECT_MODULE_ID);
-        if (!result) {
-          next();
-          return;
+      const serveBridge = async (
+        response: ServerResponse,
+        next: (error?: unknown) => void,
+      ): Promise<void> => {
+        try {
+          const result = await server.transformRequest(MSAL_REDIRECT_MODULE_ID)
+          if (!result) {
+            next()
+            return
+          }
+          response.setHeader('content-type', 'text/javascript; charset=utf-8')
+          response.end(result.code)
+        } catch (error) {
+          next(error)
         }
-        response.setHeader("content-type", "text/javascript; charset=utf-8");
-        response.end(result.code);
-      });
+      }
+      server.middlewares.use(MSAL_REDIRECT_ASSET_PATH, (_request, response, next) => {
+        void serveBridge(response, next)
+      })
     },
     buildStart() {
       if (!isBuild) {
-        return;
+        return
       }
       this.emitFile({
-        type: "chunk",
+        type: 'chunk',
         id: MSAL_REDIRECT_MODULE_ID,
-        fileName: "_nuxt/log-analytics-redirect.js",
-      });
+        fileName: '_nuxt/log-analytics-redirect.js',
+      })
     },
     generateBundle(_options, bundle) {
-      const bridgeChunk = bundle[MSAL_REDIRECT_ASSET_PATH.slice(1)];
-      if (bridgeChunk?.type !== "chunk") {
-        this.error("MSAL redirect bridge chunk was not generated");
+      const bridgeChunk = bundle[MSAL_REDIRECT_ASSET_PATH.slice(1)]
+      if (bridgeChunk?.type !== 'chunk') {
+        this.error('MSAL redirect bridge chunk was not generated')
       }
       // Nuxt injects emitted entry chunks into every SPA page, so retain the
       // bundled file while removing its application-entry semantics.
-      delete bundle[bridgeChunk.fileName];
+      // oxlint-disable-next-line typescript/no-dynamic-delete -- Rollup removes chunks by deleting them from the bundle.
+      delete bundle[bridgeChunk.fileName]
       this.emitFile({
-        type: "prebuilt-chunk",
+        type: 'prebuilt-chunk',
         fileName: bridgeChunk.fileName,
         code: bridgeChunk.code,
         map: bridgeChunk.map ?? undefined,
         isEntry: false,
-      });
+      })
     },
     resolveId(id) {
-      return id === MSAL_REDIRECT_MODULE_ID ? RESOLVED_MSAL_REDIRECT_MODULE_ID : null;
+      return id === MSAL_REDIRECT_MODULE_ID ? RESOLVED_MSAL_REDIRECT_MODULE_ID : null
     },
     load(id) {
       if (id !== RESOLVED_MSAL_REDIRECT_MODULE_ID) {
-        return null;
+        return null
       }
       return `const parameters = new URLSearchParams(window.location.search);
 if (parameters.get("state") === "azure-argus-admin-consent") {
@@ -75,91 +110,102 @@ if (parameters.get("state") === "azure-argus-admin-consent") {
       message.textContent = "Azure authentication response could not be processed. Close this window and try again.";
     }
   });
-}`;
+}`
     },
-  };
+  }
 }
 
 export default defineNuxtConfig({
-  modules: ["@nuxt/ui", "nuxt-oidc-auth"],
+  modules: ['@nuxt/ui', 'nuxt-oidc-auth', '@visorian/code-standards/nuxt'],
   ssr: false,
   devtools: { enabled: false },
-  css: ["~/assets/css/main.css"],
   app: {
     head: {
-      title: "Azure Argus",
-      htmlAttrs: { lang: "en" },
+      title: 'Azure Argus',
+      htmlAttrs: { lang: 'en' },
+      meta: [
+        {
+          name: 'description',
+          content:
+            'Analyze Azure Firewall logs, troubleshoot DNS, and trace firewall policy rules.',
+        },
+      ],
     },
   },
-  compatibilityDate: "2026-07-09",
+  css: ['~/assets/css/main.css'],
+  ui: { experimental: { componentDetection: true } },
   appConfig: {
-    versionNumber: process.env.VERSION_NUMBER || process.env.npm_package_version || "dev",
+    versionNumber: nonEmptyEnv('VERSION_NUMBER') ?? nonEmptyEnv('npm_package_version') ?? 'dev',
+    sourceRevision: sourceRevision(),
   },
   runtimeConfig: {
     ipCountry: {
-      databasePath: ".data/dbip-country-lite.mmdb",
+      databasePath: '.data/dbip-country-lite.mmdb',
     },
     eventHub: {
-      connectionString: "",
-      name: "",
+      connectionString: '',
+      name: '',
     },
     logAnalytics: {
-      tenantId: "",
-      clientId: "",
-      clientSecret: "",
-      workspaceId: "",
+      tenantId: '',
+      clientId: '',
+      clientSecret: '',
+      workspaceId: '',
     },
     public: {
       defaultLookbackMinutes: 15,
       logAnalyticsDelegated: {
-        clientId: "",
+        clientId: '',
       },
-      siteName: "Azure Argus",
+      siteName: 'Azure Argus',
     },
   },
-  typescript: {
-    typeCheck: true,
-  },
+  future: { compatibilityVersion: 5 },
+  experimental: { nitroAutoImports: true },
+  compatibilityDate: '2026-07-09',
   vite: {
     define: {
-      global: "globalThis",
+      global: 'globalThis',
     },
     resolve: {
       alias: {
-        buffer: "buffer",
-        os: "os-browserify/browser",
-        path: "path-browserify",
-        process: "process/browser",
+        buffer: 'buffer',
+        os: 'os-browserify/browser',
+        path: 'path-browserify',
+        process: 'process/browser',
       },
     },
     optimizeDeps: {
-      exclude: ["@azure/msal-browser/redirect-bridge"],
-      include: ["buffer", "os-browserify/browser", "path-browserify", "process"],
+      exclude: ['@azure/msal-browser/redirect-bridge'],
+      include: ['buffer', 'os-browserify/browser', 'path-browserify', 'process'],
     },
     plugins: [
       createMsalRedirectBridgePlugin(),
       {
-        name: "azure-argus:vite-checker-runtime-shim",
-        apply: "serve",
-        enforce: "pre",
+        name: 'azure-argus:vite-checker-runtime-shim',
+        apply: 'serve',
+        enforce: 'pre',
         resolveId(id) {
           if (
-            id === "/@vite-plugin-checker-runtime-entry" ||
-            id.endsWith("/@vite-plugin-checker-runtime-entry")
+            id === '/@vite-plugin-checker-runtime-entry' ||
+            id.endsWith('/@vite-plugin-checker-runtime-entry')
           ) {
-            return "virtual:@vite-plugin-checker-runtime-entry";
+            return 'virtual:@vite-plugin-checker-runtime-entry'
           }
           if (
-            id === "/@vite-plugin-checker-runtime" ||
-            id.endsWith("/@vite-plugin-checker-runtime")
+            id === '/@vite-plugin-checker-runtime' ||
+            id.endsWith('/@vite-plugin-checker-runtime')
           ) {
-            return "virtual:@vite-plugin-checker-runtime";
+            return 'virtual:@vite-plugin-checker-runtime'
           }
 
-          return null;
+          return null
         },
       },
     ],
+  },
+  typescript: {
+    typeCheck: true,
   },
   icon: {
     clientBundle: {
@@ -167,21 +213,21 @@ export default defineNuxtConfig({
     },
   },
   oidc: {
-    defaultProvider: "entra",
+    defaultProvider: 'entra',
     providers: {
       entra: {
-        clientId: "",
-        clientSecret: "",
-        redirectUri: "",
-        authorizationUrl: "",
-        tokenUrl: "",
-        logoutUrl: "",
+        clientId: '',
+        clientSecret: '',
+        redirectUri: '',
+        authorizationUrl: '',
+        tokenUrl: '',
+        logoutUrl: '',
         nonce: true,
         pkce: true,
         state: true,
-        scope: ["openid", "profile", "email", "offline_access"],
-        responseType: "code id_token",
-        optionalClaims: ["preferred_username", "family_name", "given_name"],
+        scope: ['openid', 'profile', 'email', 'offline_access'],
+        responseType: 'code id_token',
+        optionalClaims: ['preferred_username', 'family_name', 'given_name'],
       },
     },
     session: {
@@ -194,4 +240,4 @@ export default defineNuxtConfig({
       customLoginPage: true,
     },
   },
-});
+})

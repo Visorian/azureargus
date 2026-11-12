@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useElementSize, useMediaQuery } from "@vueuse/core";
-import { RecycleScroller } from "vue-virtual-scroller";
+import { useElementSize, useMediaQuery } from '@vueuse/core'
+import { RecycleScroller } from 'vue-virtual-scroller'
 
 import type {
   DnsEntry,
@@ -10,238 +10,262 @@ import type {
   DnsOutcome,
   DnsSort,
   DnsSourceStatus,
-} from "#shared/types/dns";
-import { DNS_OUTCOME_LABELS } from "#shared/utils/dns";
-import type { MobileQueryState } from "~/components/logs/LogAnalysisToolbar.vue";
-import type { LogHourCycle } from "~/composables/useLogTimeFormat";
+} from '#shared/types/dns'
+import { DNS_OUTCOME_LABELS } from '#shared/utils/dns'
+import type { MobileQueryState } from '~/components/logs/LogAnalysisToolbar.vue'
+import type { LogHourCycle } from '~/composables/useLogTimeFormat'
 
+const filters = defineModel<DnsFilters>('filters', { required: true })
+const sort = defineModel<DnsSort>('sort', { required: true })
+const showUnidentifiedTransports = defineModel<boolean>('showUnidentifiedTransports', {
+  required: true,
+})
 const props = withDefaults(
   defineProps<{
-    hourCycle?: LogHourCycle;
-    timeZone?: string;
-    entries: DnsEntry[];
-    sources: DnsSourceStatus[];
-    status: "idle" | "loading" | "success" | "error";
-    error: string | null;
-    entriesTruncated: boolean;
-    transportsTruncated: boolean;
-    logAnalysis: boolean;
-    canApplyFilters: boolean;
-    queryState?: MobileQueryState | null;
-    filterOptions: DnsFilterOptions;
-    selectedEntryId: string | null;
+    hourCycle?: LogHourCycle
+    timeZone?: string
+    entries: DnsEntry[]
+    sources: DnsSourceStatus[]
+    status: 'idle' | 'loading' | 'success' | 'error'
+    error: string | null
+    entriesTruncated: boolean
+    transportsTruncated: boolean
+    logAnalysis: boolean
+    canApplyFilters: boolean
+    queryState?: MobileQueryState | null
+    filterOptions: DnsFilterOptions
+    selectedEntryId: string | null
   }>(),
-  { hourCycle: "h23", timeZone: "UTC", queryState: null },
-);
+  { hourCycle: 'h23', timeZone: 'UTC', queryState: null },
+)
 const emit = defineEmits<{
-  interaction: [event: Event];
-  run: [];
-  settings: [event: MouseEvent];
-  apply: [];
-  reset: [];
-  select: [entry: DnsEntry];
-}>();
-const filters = defineModel<DnsFilters>("filters", { required: true });
-const sort = defineModel<DnsSort>("sort", { required: true });
-const showUnidentifiedTransports = defineModel<boolean>("showUnidentifiedTransports", {
-  required: true,
-});
+  interaction: [event: Event]
+  run: []
+  settings: [event: MouseEvent]
+  apply: []
+  reset: []
+  select: [entry: DnsEntry]
+}>()
 defineSlots<{
-  "query-controls"?: (props: { mobile: boolean }) => unknown;
-}>();
-const isMobile = useMediaQuery("(max-width: 1023px)");
-const tablet = useMediaQuery("(min-width: 768px)");
-const entryViewport = useTemplateRef("entryViewport");
-const { width: entryWidth } = useElementSize(entryViewport);
-const mobileColumns = computed(() => (tablet.value ? 2 : 1));
-const toolbar = useTemplateRef("toolbar");
-const root = useTemplateRef("root");
-let selectedTriggerId = "";
+  queryControls?: (props: { mobile: boolean }) => unknown
+}>()
+const isMobile = useMediaQuery('(max-width: 1023px)')
+const tablet = useMediaQuery('(min-width: 768px)')
+const entryViewport = useTemplateRef('entryViewport')
+const { width: entryWidth } = useElementSize(entryViewport)
+const mobileColumns = computed(() => (tablet.value ? 2 : 1))
+const toolbar = useTemplateRef('toolbar')
+const root = useTemplateRef('root')
+let selectedTriggerId = ''
 const activeFilterCount = computed(
   () =>
-    Object.entries(filters.value).filter(([key, value]) => key !== "search" && value.trim() !== "")
+    Object.entries(filters.value).filter(([key, value]) => key !== 'search' && value.trim() !== '')
       .length,
-);
+)
 const dnsEntryGridClass = computed(() =>
-  props.hourCycle === "h12"
-    ? "min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]"
-    : "min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]",
-);
+  props.hourCycle === 'h12'
+    ? 'min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]'
+    : 'min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]',
+)
 type SortSelection =
-  | "timestamp-desc"
-  | "timestamp-asc"
-  | "queryName-asc"
-  | "queryName-desc"
-  | "duration-asc"
-  | "duration-desc"
-  | "observations-asc"
-  | "observations-desc";
+  | 'timestamp-desc'
+  | 'timestamp-asc'
+  | 'queryName-asc'
+  | 'queryName-desc'
+  | 'duration-asc'
+  | 'duration-desc'
+  | 'observations-asc'
+  | 'observations-desc'
 const sortItems = [
-  { label: "Newest first", value: "timestamp-desc", key: "timestamp", direction: "desc" },
-  { label: "Oldest first", value: "timestamp-asc", key: "timestamp", direction: "asc" },
-  { label: "Query name A–Z", value: "queryName-asc", key: "queryName", direction: "asc" },
-  { label: "Query name Z–A", value: "queryName-desc", key: "queryName", direction: "desc" },
+  { label: 'Newest first', value: 'timestamp-desc', key: 'timestamp', direction: 'desc' },
+  { label: 'Oldest first', value: 'timestamp-asc', key: 'timestamp', direction: 'asc' },
+  { label: 'Query name A–Z', value: 'queryName-asc', key: 'queryName', direction: 'asc' },
+  { label: 'Query name Z–A', value: 'queryName-desc', key: 'queryName', direction: 'desc' },
   {
-    label: "Shortest transaction first",
-    value: "duration-asc",
-    key: "duration",
-    direction: "asc",
+    label: 'Shortest transaction first',
+    value: 'duration-asc',
+    key: 'duration',
+    direction: 'asc',
   },
   {
-    label: "Longest transaction first",
-    value: "duration-desc",
-    key: "duration",
-    direction: "desc",
+    label: 'Longest transaction first',
+    value: 'duration-desc',
+    key: 'duration',
+    direction: 'desc',
   },
   {
-    label: "Fewest observations first",
-    value: "observations-asc",
-    key: "observations",
-    direction: "asc",
+    label: 'Fewest observations first',
+    value: 'observations-asc',
+    key: 'observations',
+    direction: 'asc',
   },
   {
-    label: "Most observations first",
-    value: "observations-desc",
-    key: "observations",
-    direction: "desc",
+    label: 'Most observations first',
+    value: 'observations-desc',
+    key: 'observations',
+    direction: 'desc',
   },
-] satisfies Array<{
-  label: string;
-  value: SortSelection;
-  key: DnsSort["key"];
-  direction: DnsSort["direction"];
-}>;
+] satisfies {
+  label: string
+  value: SortSelection
+  key: DnsSort['key']
+  direction: DnsSort['direction']
+}[]
 
 function selectedSortValue(value: DnsSort): SortSelection {
-  if (value.key === "timestamp")
-    return value.direction === "desc" ? "timestamp-desc" : "timestamp-asc";
-  if (value.key === "queryName")
-    return value.direction === "asc" ? "queryName-asc" : "queryName-desc";
-  if (value.key === "duration") return value.direction === "asc" ? "duration-asc" : "duration-desc";
-  return value.direction === "asc" ? "observations-asc" : "observations-desc";
+  if (value.key === 'timestamp') {
+    return value.direction === 'desc' ? 'timestamp-desc' : 'timestamp-asc'
+  }
+  if (value.key === 'queryName') {
+    return value.direction === 'asc' ? 'queryName-asc' : 'queryName-desc'
+  }
+  if (value.key === 'duration') {
+    return value.direction === 'asc' ? 'duration-asc' : 'duration-desc'
+  }
+  return value.direction === 'asc' ? 'observations-asc' : 'observations-desc'
 }
 
 const sortSelection = computed<SortSelection>({
   get: () => selectedSortValue(sort.value),
   set: (value) => {
-    const selected = sortItems.find((item) => item.value === value);
-    if (!selected) return;
-    sort.value = { key: selected.key, direction: selected.direction };
+    const selected = sortItems.find((item) => item.value === value)
+    if (!selected) {
+      return
+    }
+    sort.value = { key: selected.key, direction: selected.direction }
   },
-});
+})
 
-function filterModel(key: "queryType" | "protocol" | "outcome" | "source") {
+function filterModel(key: 'queryType' | 'protocol' | 'outcome' | 'source') {
   return computed<string | null>({
     get: () => filters.value[key] || null,
     set: (value) => {
-      filters.value[key] = value ?? "";
+      filters.value[key] = value ?? ''
     },
-  });
+  })
 }
 
-const queryTypeFilter = filterModel("queryType");
-const protocolFilter = filterModel("protocol");
-const sourceFilter = filterModel("source");
+const queryTypeFilter = filterModel('queryType')
+const protocolFilter = filterModel('protocol')
+const sourceFilter = filterModel('source')
 
 function isDnsOutcome(value: string): value is DnsOutcome {
-  return Object.hasOwn(DNS_OUTCOME_LABELS, value);
+  return Object.hasOwn(DNS_OUTCOME_LABELS, value)
 }
 
 const outcomeFilter = computed<DnsOutcome | null>({
   get: () => (isDnsOutcome(filters.value.outcome) ? filters.value.outcome : null),
   set: (value) => {
-    filters.value.outcome = value ?? "";
+    filters.value.outcome = value ?? ''
   },
-});
+})
 const outcomeItems = computed(() =>
   props.filterOptions.outcomes.map((value) => ({
     label: DNS_OUTCOME_LABELS[value],
     value,
   })),
-);
+)
 const emptyEntryMessage = computed(() => {
-  if (props.status === "loading") return "Loading DNS entries…";
-  if (props.error) return "DNS query failed.";
-  if (props.status === "idle" && props.logAnalysis) return "Run DNS query to load entries.";
-  const unavailable = props.sources.filter((source) => source.availability !== "available");
-  if (props.sources.length > 0 && unavailable.length === props.sources.length) {
-    return "No DNS sources are available for this query.";
+  if (props.status === 'loading') {
+    return 'Loading DNS entries…'
   }
-  if (unavailable.length > 0) return "No entries returned by available DNS sources.";
-  if (props.entriesTruncated) return "No entries retained within bounded DNS query results.";
-  return "No matching DNS entries.";
-});
+  if (props.error) {
+    return 'DNS query failed.'
+  }
+  if (props.status === 'idle' && props.logAnalysis) {
+    return 'Run DNS query to load entries.'
+  }
+  const unavailable = props.sources.filter((source) => source.availability !== 'available')
+  if (props.sources.length > 0 && unavailable.length === props.sources.length) {
+    return 'No DNS sources are available for this query.'
+  }
+  if (unavailable.length > 0) {
+    return 'No entries returned by available DNS sources.'
+  }
+  if (props.entriesTruncated) {
+    return 'No entries retained within bounded DNS query results.'
+  }
+  return 'No matching DNS entries.'
+})
 const sourceWarnings = computed(() =>
   props.sources
-    .filter((source) => source.availability !== "available")
+    .filter((source) => source.availability !== 'available')
     .map((source) => ({
       key: source.source,
       text: source.warning ?? `${source.source} source unavailable`,
     })),
-);
+)
 
 function selectEntry(entry: DnsEntry) {
-  selectedTriggerId = entry.id;
-  emit("select", entry);
+  selectedTriggerId = entry.id
+  emit('select', entry)
 }
 
 function restoreFocus() {
   const target =
     root.value?.querySelector<HTMLElement>(`[data-dns-entry="${CSS.escape(selectedTriggerId)}"]`) ??
-    root.value?.querySelector<HTMLInputElement>("input");
-  target?.focus({ preventScroll: true });
+    root.value?.querySelector<HTMLInputElement>('input')
+  target?.focus({ preventScroll: true })
 }
 
-defineExpose({ restoreFocus });
+defineExpose({ restoreFocus })
 
 function openQuery(event: MouseEvent) {
   if (props.queryState?.canRun) {
-    toolbar.value?.openFilters();
+    toolbar.value?.openFilters()
   } else {
-    emit("settings", event);
+    emit('settings', event)
   }
 }
 
-function outcomeClass(value: DnsEntry["outcome"]) {
-  if (value === "dns-error" || value === "blocked" || value === "transport-error") {
-    return "text-red-700 dark:text-red-400";
+function outcomeClass(value: DnsEntry['outcome']) {
+  if (value === 'dns-error' || value === 'blocked' || value === 'transport-error') {
+    return 'text-red-700 dark:text-red-400'
   }
-  if (value === "pending") {
-    return "text-amber-800 dark:text-amber-300";
+  if (value === 'pending') {
+    return 'text-amber-800 dark:text-amber-300'
   }
-  return "text-default";
+  return 'text-default'
 }
 
-function outcomeLabel(value: DnsEntry["outcome"]) {
-  return DNS_OUTCOME_LABELS[value];
+function outcomeLabel(value: DnsEntry['outcome']) {
+  return DNS_OUTCOME_LABELS[value]
 }
 
 function duration(seconds: number | undefined) {
-  if (seconds === undefined) return "-";
-  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)} µs`;
-  if (seconds < 1) return `${(seconds * 1_000).toFixed(2)} ms`;
-  return `${seconds.toFixed(2)} s`;
+  if (seconds === undefined) {
+    return '-'
+  }
+  if (seconds < 0.001) {
+    return `${Math.round(seconds * 1_000_000)} µs`
+  }
+  if (seconds < 1) {
+    return `${(seconds * 1_000).toFixed(2)} ms`
+  }
+  return `${seconds.toFixed(2)} s`
 }
 
-function endpoint(observation: DnsObservation, side: "client" | "server") {
-  const ip = side === "client" ? observation.clientIp : observation.serverIp;
-  const port = side === "client" ? observation.clientPort : observation.serverPort;
-  return [ip, port].filter(Boolean).join(":") || "-";
+function endpoint(observation: DnsObservation, side: 'client' | 'server') {
+  const ip = side === 'client' ? observation.clientIp : observation.serverIp
+  const port = side === 'client' ? observation.clientPort : observation.serverPort
+  return [ip, port].filter(Boolean).join(':') || '-'
 }
 
 function destination(entry: DnsEntry) {
-  if (entry.destination) return entry.destination;
+  if (entry.destination) {
+    return entry.destination
+  }
   const observation = entry.observations.find(
     (item) => Boolean(item.serverIp) || Boolean(item.serverPort),
-  );
-  return observation ? endpoint(observation, "server") : "-";
+  )
+  return observation ? endpoint(observation, 'server') : '-'
 }
 
-function completeness(value: DnsEntry["completeness"]) {
+function completeness(value: DnsEntry['completeness']) {
   return value
-    .split("-")
+    .split('-')
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
+    .join(' ')
 }
 </script>
 
@@ -346,8 +370,8 @@ function completeness(value: DnsEntry["completeness"]) {
           />
         </div>
       </template>
-      <template v-if="$slots['query-controls']" #query="{ mobile }">
-        <slot name="query-controls" :mobile="mobile" />
+      <template v-if="$slots['queryControls']" #query="{ mobile }">
+        <slot name="queryControls" :mobile="mobile" />
       </template>
     </LogsLogAnalysisToolbar>
 
@@ -477,12 +501,12 @@ function completeness(value: DnsEntry["completeness"]) {
                     >
                     <span
                       class="line-clamp-3 font-mono text-sm leading-[18px] font-medium wrap-anywhere"
-                      >{{ item.displayText ?? item.queryName ?? "Not observed" }}</span
+                      >{{ item.displayText ?? item.queryName ?? 'Not observed' }}</span
                     >
                     <span class="flex min-w-0 items-center gap-2 text-muted"
                       ><span class="shrink-0">Client</span
                       ><span class="truncate font-mono text-default">{{
-                        item.client || "Not observed"
+                        item.client || 'Not observed'
                       }}</span></span
                     >
                     <span class="flex min-w-0 items-center gap-2 text-muted"
@@ -493,7 +517,7 @@ function completeness(value: DnsEntry["completeness"]) {
                     >
                     <span class="mt-auto flex items-center justify-between text-muted"
                       ><span
-                        >{{ item.queryType ?? "-" }} · {{ item.protocol ?? "-" }} ·
+                        >{{ item.queryType ?? '-' }} · {{ item.protocol ?? '-' }} ·
                         {{ duration(item.durationSeconds) }}</span
                       ><UIcon name="i-lucide-chevron-right" class="size-4"
                     /></span>
@@ -508,12 +532,12 @@ function completeness(value: DnsEntry["completeness"]) {
                       :time-zone="timeZone"
                     />
                     <span class="truncate font-mono">{{
-                      item.displayText ?? item.queryName ?? "Not observed"
+                      item.displayText ?? item.queryName ?? 'Not observed'
                     }}</span>
-                    <span>{{ item.queryType ?? "-" }}</span>
-                    <span>{{ item.protocol ?? "-" }}</span>
+                    <span>{{ item.queryType ?? '-' }}</span>
+                    <span>{{ item.protocol ?? '-' }}</span>
                     <span class="truncate font-mono" :title="item.client || '-'">
-                      {{ item.client || "-" }}
+                      {{ item.client || '-' }}
                     </span>
                     <span class="truncate font-mono" :title="destination(item)">
                       {{ destination(item) }}

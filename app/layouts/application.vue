@@ -1,41 +1,45 @@
 <script setup lang="ts">
-const runtimeConfig = useRuntimeConfig();
-const anonymousMode = useAnonymousMode();
-const deployment = useDeploymentCapabilities();
-const { loggedIn, logout, user } = useOidcAuth();
+defineSlots<{
+  default?: () => unknown
+}>()
+
+const runtimeConfig = useRuntimeConfig()
+const anonymousMode = useAnonymousMode()
+const deployment = useDeploymentCapabilities()
+const { loggedIn, logout, user } = useOidcAuth()
 
 const identityLabel = computed(() => {
   if (anonymousMode.enabled.value) {
-    return "Temporary session";
+    return 'Temporary session'
   }
 
-  const profile = user.value;
-  if (profile && typeof profile === "object") {
-    const claims = profile as unknown as Record<string, unknown>;
-    const preferredUsername = claims.preferred_username;
-    const email = claims.email;
-    const name = claims.name;
+  const profile: unknown = user.value
+  if (typeof profile === 'object' && profile !== null) {
+    const preferredUsername =
+      'preferred_username' in profile ? profile.preferred_username : undefined
+    const email = 'email' in profile ? profile.email : undefined
+    const name = 'name' in profile ? profile.name : undefined
 
-    if (typeof preferredUsername === "string") {
-      return preferredUsername;
+    if (typeof preferredUsername === 'string') {
+      return preferredUsername
     }
-    if (typeof email === "string") {
-      return email;
+    if (typeof email === 'string') {
+      return email
     }
-    if (typeof name === "string") {
-      return name;
+    if (typeof name === 'string') {
+      return name
     }
   }
 
-  return loggedIn.value ? "Authenticated" : "Not signed in";
-});
+  return loggedIn.value ? 'Authenticated' : 'Not signed in'
+})
 
 async function leave() {
-  if (deployment.capabilities.value?.mode !== "managed") {
-    return;
+  if (deployment.capabilities.value?.mode !== 'managed') {
+    return
   }
 
-  await logout("entra", "/login");
+  await logout('entra', '/login')
 }
 </script>
 
@@ -44,22 +48,55 @@ async function leave() {
     class="flex h-dvh flex-col overflow-hidden bg-brand-gray-50 text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50"
   >
     <header
+      :aria-label="runtimeConfig.public.siteName"
       class="shrink-0 border-b border-brand-gray-200 bg-white dark:border-brand-gray-800 dark:bg-brand-gray-900"
     >
-      <div class="flex h-12 items-center justify-between px-4 sm:h-14">
+      <div
+        class="flex min-h-12 flex-wrap items-center justify-between gap-x-2 gap-y-1 px-4 py-1 sm:min-h-14"
+      >
         <div class="flex items-center gap-3">
           <div class="grid size-8 place-items-center rounded-md bg-brand-blue-600 text-white">
             <UIcon name="i-lucide-shield" class="size-4" />
           </div>
-          <div>
+          <div class="hidden sm:block">
             <p class="text-sm font-semibold">{{ runtimeConfig.public.siteName }}</p>
             <p class="hidden text-xs text-brand-gray-600 sm:block dark:text-brand-gray-300">
               Azure Firewall Analytics
             </p>
           </div>
         </div>
+        <nav
+          aria-label="Main navigation"
+          class="flex items-center gap-1"
+          :class="
+            deployment.capabilities.value?.mode === 'managed'
+              ? 'order-last w-full sm:order-none sm:w-auto'
+              : 'w-auto'
+          "
+        >
+          <UButton
+            to="/logs"
+            :aria-current="$route.path === '/logs' ? 'page' : undefined"
+            color="neutral"
+            :variant="$route.path === '/logs' ? 'soft' : 'ghost'"
+            size="sm"
+            class="min-h-11"
+            >Logs &amp; DNS</UButton
+          >
+          <UButton
+            to="/firewall-simulator"
+            aria-label="Rule simulator"
+            :aria-current="$route.path === '/firewall-simulator' ? 'page' : undefined"
+            color="neutral"
+            :variant="$route.path === '/firewall-simulator' ? 'soft' : 'ghost'"
+            size="sm"
+            class="min-h-11"
+            ><span class="sm:hidden">Simulator</span
+            ><span class="hidden sm:inline">Rule simulator</span>
+          </UButton>
+        </nav>
         <div class="flex items-center gap-3">
-          <span class="hidden text-xs text-brand-gray-600 dark:text-brand-gray-300 sm:inline">
+          <span class="hidden text-xs text-brand-gray-600 sm:inline dark:text-brand-gray-300">
             {{ identityLabel }}
           </span>
           <UColorModeButton class="min-h-11 min-w-11" />

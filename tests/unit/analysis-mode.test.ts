@@ -1,37 +1,38 @@
-import { ref } from "vue";
-import { onBeforeRouteLeave } from "vue-router";
+import { ref } from 'vue'
 
-import { useAnalysisMode } from "../../app/composables/useAnalysisMode";
+import { useAnalysisMode } from '../../app/composables/useAnalysisMode'
 
-vi.mock("vue-router", () => ({
-  onBeforeRouteLeave: vi.fn<typeof onBeforeRouteLeave>(),
-}));
+type RouteLeaveGuard = () => unknown
+
+const routeLeaveGuards = vi.hoisted((): RouteLeaveGuard[] => [])
+
+vi.mock('vue-router', () => ({
+  onBeforeRouteLeave: (guard: RouteLeaveGuard) => {
+    routeLeaveGuards.push(guard)
+  },
+}))
 
 function createVoidMock() {
-  return vi.fn<() => void>();
+  return vi.fn<() => void>()
 }
 
 function createAsyncVoidMock() {
-  return vi.fn<() => Promise<void>>(async () => undefined);
+  return vi.fn<() => Promise<void>>(async () => {})
 }
 
-function createDeferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
+function createDeferred(): PromiseWithResolvers<void> {
+  return Promise.withResolvers()
 }
 
 beforeEach(() => {
-  vi.mocked(onBeforeRouteLeave).mockClear();
-});
+  routeLeaveGuards.length = 0
+})
 
-describe("analysis mode orchestration", () => {
-  it("pauses Real-time without disconnecting before activating Log Analysis", async () => {
-    const pauseRealTime = createVoidMock();
-    const disconnectRealTime = createAsyncVoidMock();
-    const mode = ref<"real-time-analysis" | "log-analysis">("real-time-analysis");
+describe('analysis mode orchestration', () => {
+  it('pauses Real-time without disconnecting before activating Log Analysis', async () => {
+    const pauseRealTime = createVoidMock()
+    const disconnectRealTime = createAsyncVoidMock()
+    const mode = ref<'real-time-analysis' | 'log-analysis'>('real-time-analysis')
     const state = useAnalysisMode({
       abortLogAnalysis: createVoidMock(),
       canUseLogAnalysis: ref(true),
@@ -41,17 +42,17 @@ describe("analysis mode orchestration", () => {
       mode,
       pauseRealTime,
       resetRealTime: createAsyncVoidMock(),
-    });
+    })
 
-    await expect(state.setMode("log-analysis")).resolves.toBe(true);
-    expect(pauseRealTime).toHaveBeenCalledOnce();
-    expect(disconnectRealTime).not.toHaveBeenCalled();
-    expect(mode.value).toBe("log-analysis");
-  });
+    await expect(state.setMode('log-analysis')).resolves.toBe(true)
+    expect(pauseRealTime).toHaveBeenCalledOnce()
+    expect(disconnectRealTime).not.toHaveBeenCalled()
+    expect(mode.value).toBe('log-analysis')
+  })
 
-  it("blocks Log Analysis without sign-in", async () => {
-    const disconnectRealTime = createAsyncVoidMock();
-    const mode = ref<"real-time-analysis" | "log-analysis">("real-time-analysis");
+  it('blocks Log Analysis without sign-in', async () => {
+    const disconnectRealTime = createAsyncVoidMock()
+    const mode = ref<'real-time-analysis' | 'log-analysis'>('real-time-analysis')
     const state = useAnalysisMode({
       abortLogAnalysis: createVoidMock(),
       canUseLogAnalysis: ref(false),
@@ -61,18 +62,18 @@ describe("analysis mode orchestration", () => {
       mode,
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
-    });
+    })
 
-    await expect(state.setMode("log-analysis")).resolves.toBe(false);
-    expect(disconnectRealTime).not.toHaveBeenCalled();
-    expect(mode.value).toBe("real-time-analysis");
-    expect(state.lastError.value).toBe("Log Analytics is unavailable.");
-  });
+    await expect(state.setMode('log-analysis')).resolves.toBe(false)
+    expect(disconnectRealTime).not.toHaveBeenCalled()
+    expect(mode.value).toBe('real-time-analysis')
+    expect(state.lastError.value).toBe('Log Analytics is unavailable.')
+  })
 
-  it("aborts Log Analysis work before returning to Real-time", async () => {
-    const abortLogAnalysis = createVoidMock();
-    const closeDetail = createVoidMock();
-    const mode = ref<"real-time-analysis" | "log-analysis">("log-analysis");
+  it('aborts Log Analysis work before returning to Real-time', async () => {
+    const abortLogAnalysis = createVoidMock()
+    const closeDetail = createVoidMock()
+    const mode = ref<'real-time-analysis' | 'log-analysis'>('log-analysis')
     const state = useAnalysisMode({
       abortLogAnalysis,
       canUseLogAnalysis: ref(true),
@@ -82,16 +83,16 @@ describe("analysis mode orchestration", () => {
       mode,
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
-    });
+    })
 
-    await expect(state.setMode("real-time-analysis")).resolves.toBe(true);
-    expect(abortLogAnalysis).toHaveBeenCalledOnce();
-    expect(closeDetail).toHaveBeenCalledOnce();
-    expect(mode.value).toBe("real-time-analysis");
-  });
+    await expect(state.setMode('real-time-analysis')).resolves.toBe(true)
+    expect(abortLogAnalysis).toHaveBeenCalledOnce()
+    expect(closeDetail).toHaveBeenCalledOnce()
+    expect(mode.value).toBe('real-time-analysis')
+  })
 
-  it("keeps Real-time active when pausing fails", async () => {
-    const mode = ref<"real-time-analysis" | "log-analysis">("real-time-analysis");
+  it('keeps Real-time active when pausing fails', async () => {
+    const mode = ref<'real-time-analysis' | 'log-analysis'>('real-time-analysis')
     const state = useAnalysisMode({
       abortLogAnalysis: createVoidMock(),
       canUseLogAnalysis: ref(true),
@@ -100,47 +101,49 @@ describe("analysis mode orchestration", () => {
       disconnectRealTime: createAsyncVoidMock(),
       mode,
       pauseRealTime: vi.fn<() => void>(() => {
-        throw new Error("pause failed");
+        throw new Error('pause failed')
       }),
       resetRealTime: createAsyncVoidMock(),
-    });
+    })
 
-    await expect(state.setMode("log-analysis")).resolves.toBe(false);
-    expect(mode.value).toBe("real-time-analysis");
-    expect(state.lastError.value).toBe("pause failed");
-  });
+    await expect(state.setMode('log-analysis')).resolves.toBe(false)
+    expect(mode.value).toBe('real-time-analysis')
+    expect(state.lastError.value).toBe('pause failed')
+  })
 
-  it("aborts Log work and awaits Real-time teardown before route leave completes", async () => {
-    const abortLogAnalysis = createVoidMock();
-    const disconnect = createDeferred();
-    const disconnectRealTime = vi.fn<() => Promise<void>>(() => disconnect.promise);
+  it('aborts Log work and awaits Real-time teardown before route leave completes', async () => {
+    const abortLogAnalysis = createVoidMock()
+    const disconnect = createDeferred()
+    const disconnectRealTime = vi.fn<() => Promise<void>>(async () => {
+      await disconnect.promise
+    })
     useAnalysisMode({
       abortLogAnalysis,
       canUseLogAnalysis: ref(true),
       canUseRealTime: ref(true),
       closeDetail: createVoidMock(),
       disconnectRealTime,
-      mode: ref("real-time-analysis"),
+      mode: ref('real-time-analysis'),
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
-    });
-    const guard = vi.mocked(onBeforeRouteLeave).mock.calls.at(-1)?.[0];
+    })
+    const guard = routeLeaveGuards.at(-1)
 
-    expect(guard).toBeDefined();
+    expect(guard).toBeDefined()
     if (!guard) {
-      throw new Error("Route leave guard was not registered.");
+      throw new Error('Route leave guard was not registered.')
     }
-    const leave = Reflect.apply(guard, undefined, []);
-    expect(abortLogAnalysis).toHaveBeenCalledOnce();
-    expect(disconnectRealTime).toHaveBeenCalledOnce();
+    const leave = guard()
+    expect(abortLogAnalysis).toHaveBeenCalledOnce()
+    expect(disconnectRealTime).toHaveBeenCalledOnce()
 
-    disconnect.resolve();
-    await expect(leave).resolves.toBeUndefined();
-  });
+    disconnect.resolve()
+    await expect(leave).resolves.toBeUndefined()
+  })
 
-  it("resets Real-time once after Log Analysis is actually used", async () => {
-    const resetRealTime = createAsyncVoidMock();
-    const mode = ref<"real-time-analysis" | "log-analysis">("real-time-analysis");
+  it('resets Real-time once after Log Analysis is actually used', async () => {
+    const resetRealTime = createAsyncVoidMock()
+    const mode = ref<'real-time-analysis' | 'log-analysis'>('real-time-analysis')
     const state = useAnalysisMode({
       abortLogAnalysis: createVoidMock(),
       canUseLogAnalysis: ref(true),
@@ -150,17 +153,17 @@ describe("analysis mode orchestration", () => {
       mode,
       pauseRealTime: createVoidMock(),
       resetRealTime,
-    });
+    })
 
-    await state.setMode("log-analysis");
-    await expect(state.commitLogAnalysis()).resolves.toBe(true);
-    await expect(state.commitLogAnalysis()).resolves.toBe(false);
-    expect(resetRealTime).toHaveBeenCalledOnce();
+    await state.setMode('log-analysis')
+    await expect(state.commitLogAnalysis()).resolves.toBe(true)
+    await expect(state.commitLogAnalysis()).resolves.toBe(false)
+    expect(resetRealTime).toHaveBeenCalledOnce()
 
-    await state.setMode("real-time-analysis");
-    await expect(state.commitLogAnalysis()).resolves.toBe(false);
-    await state.setMode("log-analysis");
-    await expect(state.commitLogAnalysis()).resolves.toBe(true);
-    expect(resetRealTime).toHaveBeenCalledTimes(2);
-  });
-});
+    await state.setMode('real-time-analysis')
+    await expect(state.commitLogAnalysis()).resolves.toBe(false)
+    await state.setMode('log-analysis')
+    await expect(state.commitLogAnalysis()).resolves.toBe(true)
+    expect(resetRealTime).toHaveBeenCalledTimes(2)
+  })
+})

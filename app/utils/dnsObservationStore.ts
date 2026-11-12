@@ -1,26 +1,26 @@
-import type { DnsEntry, DnsObservation } from "#shared/types/dns";
-import { createDnsEntries } from "#shared/utils/dns";
-import type { FirewallLogRecord } from "#shared/types/firewall";
+import type { DnsEntry, DnsObservation } from '#shared/types/dns'
+import type { FirewallLogRecord } from '#shared/types/firewall'
+import { createDnsEntries } from '#shared/utils/dns'
 
 export interface DnsObservationStoreSnapshot {
-  entries: DnsEntry[];
-  transports: DnsObservation[];
-  evictedEntryIds: string[];
-  evictedTransportIds: string[];
+  entries: DnsEntry[]
+  transports: DnsObservation[]
+  evictedEntryIds: string[]
+  evictedTransportIds: string[]
+}
+
+function newestFirst<T extends { id: string; timestamp: string }>(left: T, right: T) {
+  const timestampOrder = right.timestamp.localeCompare(left.timestamp)
+  return timestampOrder || right.id.localeCompare(left.id)
 }
 
 export function createDnsObservationStore(maxEntries = 10_000, maxTransports = maxEntries) {
-  const entries = new Map<string, DnsEntry>();
-  const transports = new Map<string, DnsObservation>();
-
-  function newestFirst<T extends { id: string; timestamp: string }>(left: T, right: T) {
-    const timestampOrder = right.timestamp.localeCompare(left.timestamp);
-    return timestampOrder || right.id.localeCompare(left.id);
-  }
+  const entries = new Map<string, DnsEntry>()
+  const transports = new Map<string, DnsObservation>()
 
   function removeId(id: string) {
-    entries.delete(id);
-    transports.delete(id);
+    entries.delete(id)
+    transports.delete(id)
   }
 
   function snapshot(
@@ -32,49 +32,55 @@ export function createDnsObservationStore(maxEntries = 10_000, maxTransports = m
       transports: [...transports.values()].toSorted(newestFirst),
       evictedEntryIds,
       evictedTransportIds,
-    };
+    }
   }
 
   function pushRecords(records: readonly FirewallLogRecord[]) {
     for (const record of records) {
-      if (!record.dns) continue;
-      removeId(record.dns.id);
-      if (record.dns.source === "network-rule") {
-        transports.set(record.dns.id, record.dns);
+      if (!record.dns) {
+        continue
+      }
+      removeId(record.dns.id)
+      if (record.dns.source === 'network-rule') {
+        transports.set(record.dns.id, record.dns)
       } else {
-        const entry = createDnsEntries([record.dns])[0];
+        const entry = createDnsEntries([record.dns])[0]
         if (entry) {
-          entries.set(record.dns.id, entry);
+          entries.set(record.dns.id, entry)
         }
       }
     }
 
-    const evictedEntryIds: string[] = [];
-    const evictedTransportIds: string[] = [];
+    const evictedEntryIds: string[] = []
+    const evictedTransportIds: string[] = []
     while (entries.size > maxEntries) {
-      const evicted = entries.keys().next().value;
-      if (typeof evicted !== "string") break;
-      entries.delete(evicted);
-      evictedEntryIds.push(evicted);
+      const evicted = entries.keys().next().value
+      if (typeof evicted !== 'string') {
+        break
+      }
+      entries.delete(evicted)
+      evictedEntryIds.push(evicted)
     }
     while (transports.size > maxTransports) {
-      const evicted = transports.keys().next().value;
-      if (typeof evicted !== "string") break;
-      transports.delete(evicted);
-      evictedTransportIds.push(evicted);
+      const evicted = transports.keys().next().value
+      if (typeof evicted !== 'string') {
+        break
+      }
+      transports.delete(evicted)
+      evictedTransportIds.push(evicted)
     }
-    return { evictedEntryIds, evictedTransportIds };
+    return { evictedEntryIds, evictedTransportIds }
   }
 
   function clear() {
-    entries.clear();
-    transports.clear();
-    return snapshot();
+    entries.clear()
+    transports.clear()
+    return snapshot()
   }
 
   return {
     clear,
     pushRecords,
     snapshot,
-  };
+  }
 }

@@ -1,36 +1,38 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, watch } from 'vue'
 
-import type { IpCountryLookupClient } from "~/composables/useIpCountryLookup";
-import { countryCodeToFlag, countryCodeToName } from "~/utils/countryFlag";
-import { isRfc1918Ipv4Address } from "~/utils/ipAddress";
+import type { IpCountryLookupClient } from '~/composables/useIpCountryLookup'
+import { countryCodeToFlag, countryCodeToName } from '~/utils/countryFlag'
+import { isRfc1918Ipv4Address } from '~/utils/ipAddress'
 
 const props = defineProps<{
-  destination?: string;
-  lookup: IpCountryLookupClient;
-}>();
+  destination?: string
+  lookup: IpCountryLookupClient
+}>()
 
 watch(
   () => props.destination,
   (destination) => {
     if (!isRfc1918Ipv4Address(destination)) {
-      props.lookup.queue(destination);
+      props.lookup.queue(destination)
     }
   },
   { immediate: true },
-);
+)
 
-const internal = computed(() => isRfc1918Ipv4Address(props.destination));
-const countryCode = computed(() => props.lookup.getCountryCode(props.destination));
-const flag = computed(() => countryCodeToFlag(countryCode.value));
-const countryName = computed(() => countryCodeToName(countryCode.value));
-const accessibleLabel = computed(() =>
-  internal.value
-    ? "Internal address (RFC 1918)"
-    : countryName.value && countryCode.value
-      ? `GeoIP country: ${countryName.value} (${countryCode.value})`
-      : undefined,
-);
+const internal = computed(() => isRfc1918Ipv4Address(props.destination))
+const countryCode = computed(() => props.lookup.getCountryCode(props.destination))
+const flag = computed(() => countryCodeToFlag(countryCode.value))
+const countryName = computed(() => countryCodeToName(countryCode.value))
+const accessibleLabel = computed((): string | undefined => {
+  if (internal.value) {
+    return 'Internal address (RFC 1918)'
+  }
+  if (countryName.value && countryCode.value) {
+    return `GeoIP country: ${countryName.value} (${countryCode.value})`
+  }
+  return undefined
+})
 </script>
 
 <template>

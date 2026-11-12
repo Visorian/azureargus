@@ -1,55 +1,55 @@
-import type { FirewallLogRecord } from "../../shared/types/firewall";
-import { toPersistedFirewallLogRecord } from "../../app/utils/logHistoryRecord";
+import { toPersistedFirewallLogRecord } from '../../app/utils/logHistoryRecord'
+import type { FirewallLogRecord } from '../../shared/types/firewall'
 
 function createLog(overrides: Partial<FirewallLogRecord> = {}): FirewallLogRecord {
   return {
-    id: "id",
-    timestamp: "2026-07-09T12:00:00.000Z",
-    category: "AZFWNetworkRule",
-    action: "Allow",
-    protocol: "TCP",
-    message: "Allow TCP",
-    raw: { secret: "raw payload" },
-    searchableText: "allow tcp",
+    id: 'id',
+    timestamp: '2026-07-09T12:00:00.000Z',
+    category: 'AZFWNetworkRule',
+    action: 'Allow',
+    protocol: 'TCP',
+    message: 'Allow TCP',
+    raw: { secret: 'raw payload' },
+    searchableText: 'allow tcp',
     ...overrides,
-  };
+  }
 }
 
-describe("log history record mapping", () => {
-  it("persists only the log history contract", () => {
+describe('log history record mapping', () => {
+  it('persists only the log history contract', () => {
     const logWithExtraFields: FirewallLogRecord & {
-      accessToken: string;
-      connectionString: string;
-      consumerGroup: string;
-      sharedAccessKey: string;
+      accessToken: string
+      connectionString: string
+      consumerGroup: string
+      sharedAccessKey: string
     } = {
       ...createLog(),
-      accessToken: "token",
-      connectionString: "Endpoint=sb://example/;SharedAccessKey=secret",
-      consumerGroup: "$Default",
-      policy: "hub-policy",
-      ruleCollectionGroup: "hub-collection-group",
-      sharedAccessKey: "secret",
-    };
+      accessToken: 'token',
+      connectionString: 'Endpoint=sb://example/;SharedAccessKey=secret',
+      consumerGroup: '$Default',
+      policy: 'hub-policy',
+      ruleCollectionGroup: 'hub-collection-group',
+      sharedAccessKey: 'secret',
+    }
 
-    const persisted = toPersistedFirewallLogRecord(logWithExtraFields);
+    const persisted = toPersistedFirewallLogRecord(logWithExtraFields)
 
     expect(persisted).toEqual({
-      action: "Allow",
-      category: "AZFWNetworkRule",
-      id: "id",
-      message: "Allow TCP",
-      policy: "hub-policy",
-      protocol: "TCP",
-      ruleCollectionGroup: "hub-collection-group",
-      searchableText: "allow tcp",
-      timestamp: "2026-07-09T12:00:00.000Z",
-    });
-  });
+      action: 'Allow',
+      category: 'AZFWNetworkRule',
+      id: 'id',
+      message: 'Allow TCP',
+      policy: 'hub-policy',
+      protocol: 'TCP',
+      ruleCollectionGroup: 'hub-collection-group',
+      searchableText: 'allow tcp',
+      timestamp: '2026-07-09T12:00:00.000Z',
+    })
+  })
 
-  it("does not persist raw payloads by default", () => {
-    const persisted = toPersistedFirewallLogRecord(createLog());
+  it('does not persist raw payloads by default', () => {
+    const persisted = toPersistedFirewallLogRecord(createLog())
 
-    expect(Object.hasOwn(persisted, "raw")).toBe(false);
-  });
-});
+    expect(Object.hasOwn(persisted, 'raw')).toBe(false)
+  })
+})

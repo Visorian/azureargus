@@ -1,33 +1,31 @@
-import e18e from "@e18e/eslint-plugin";
-import { defineConfig } from "oxlint";
+import { defineOxlintConfig } from '@visorian/code-standards/oxlint'
 
-export default defineConfig({
-  ignorePatterns: [
-    ".data",
-    ".nuxt",
-    ".output",
-    ".playwright-cli",
-    "coverage",
-    "node_modules",
-    "playwright-report",
-    "test-results",
-  ],
-  jsPlugins: ["@e18e/eslint-plugin"],
-  options: {
-    typeAware: true,
-    typeCheck: true,
+export default defineOxlintConfig({
+  debt: {
+    maxWarnings: 817,
+    rules: [
+      'anti-slop/no-module-mocking',
+      'anti-slop/no-unsafe-dictionary-type',
+      'eslint/no-await-in-loop',
+      'eslint/require-unicode-regexp',
+      'typescript/explicit-module-boundary-types',
+      'typescript/method-signature-style',
+      'typescript/prefer-nullish-coalescing',
+      'typescript/strict-boolean-expressions',
+      'vitest/prefer-strict-equal',
+      'vitest/require-mock-type-parameters',
+    ],
   },
   overrides: [
     {
-      files: ["tests/**/*"],
+      files: ['tests/**'],
       rules: {
-        "e18e/prefer-array-from-map": "warn",
+        // Streams and correlators are not arrays; combining push calls changes their behaviour.
+        'unicorn/prefer-single-call': [
+          'error',
+          { ignore: ['request.push', 'correlator.push', 'excessLegacy.correlator.push'] },
+        ],
       },
     },
   ],
-  plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "node", "promise", "vitest", "vue"],
-  rules: {
-    ...e18e.configs.recommended.rules,
-    "e18e/prefer-static-regex": "warn",
-  },
-});
+})

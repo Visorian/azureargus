@@ -5,95 +5,117 @@ import type {
   DnsObservation,
   DnsRelatedEvidence,
   DnsRelatedSourceKind,
-} from "#shared/types/dns";
+} from '#shared/types/dns'
 import {
   DNS_CLASS_LABELS,
   DNS_FLAG_LABELS,
   DNS_OUTCOME_LABELS,
   DNS_QUERY_TYPE_LABELS,
   DNS_RCODE_LABELS,
-} from "#shared/utils/dns";
-import type { LogHourCycle } from "~/composables/useLogTimeFormat";
+} from '#shared/utils/dns'
+import type { LogHourCycle } from '~/composables/useLogTimeFormat'
 
+const open = defineModel<boolean>('open', { required: true })
 const props = withDefaults(
   defineProps<{
-    entry: DnsEntry | null;
-    detail: DnsDetailQueryResponse | null;
-    error: string | null;
-    loading: boolean;
-    hourCycle?: LogHourCycle;
-    timeZone?: string;
+    entry: DnsEntry | null
+    detail: DnsDetailQueryResponse | null
+    error: string | null
+    loading: boolean
+    hourCycle?: LogHourCycle
+    timeZone?: string
   }>(),
-  { hourCycle: "h23", timeZone: "UTC" },
-);
-const open = defineModel<boolean>("open", { required: true });
-const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
-const toast = useToast();
-const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? []);
-const relatedEvidence = computed(() => props.detail?.relatedEvidence ?? []);
+  { hourCycle: 'h23', timeZone: 'UTC' },
+)
+const emit = defineEmits<{ closeAutoFocus: [event: Event] }>()
+const toast = useToast()
+const observations = computed(() => props.detail?.observations ?? props.entry?.observations ?? [])
+const relatedEvidence = computed(() => props.detail?.relatedEvidence ?? [])
 const modalTitle = computed(() => {
-  if (props.entry?.source === "network-rule") return "DNS transport detail";
-  if (props.entry?.source === "dns-flow-trace") return "DNS flow trace detail";
-  if (props.entry?.source === "internal-fqdn-failure") return "Internal FQDN failure detail";
-  return "DNS resolution detail";
-});
+  if (props.entry?.source === 'network-rule') {
+    return 'DNS transport detail'
+  }
+  if (props.entry?.source === 'dns-flow-trace') {
+    return 'DNS flow trace detail'
+  }
+  if (props.entry?.source === 'internal-fqdn-failure') {
+    return 'Internal FQDN failure detail'
+  }
+  return 'DNS resolution detail'
+})
 
 function forwardCloseAutoFocus(event: Event) {
-  emit("closeAutoFocus", event);
+  emit('closeAutoFocus', event)
 }
 
 function stageLabel(observation: DnsObservation) {
-  if (observation.stage === "proxy-exchange") return "Proxy exchange";
-  if (observation.stage === "dns-flow-trace") return "DNS flow trace";
-  if (observation.stage === "internal-resolution") return "Internal resolution failure";
-  return "Transport";
+  if (observation.stage === 'proxy-exchange') {
+    return 'Proxy exchange'
+  }
+  if (observation.stage === 'dns-flow-trace') {
+    return 'DNS flow trace'
+  }
+  if (observation.stage === 'internal-resolution') {
+    return 'Internal resolution failure'
+  }
+  return 'Transport'
 }
 
 function rawJson(item: DnsObservation | DnsRelatedEvidence) {
-  return JSON.stringify(item.raw, null, 2);
+  return JSON.stringify(item.raw, null, 2)
 }
 
 function rawRowCount(item: DnsObservation | DnsRelatedEvidence) {
-  return Math.min(Math.max(rawJson(item).split("\n").length, 6), 24);
+  return Math.min(Math.max(rawJson(item).split('\n').length, 6), 24)
 }
 
 function stageActor(observation: DnsObservation) {
-  if (observation.stage === "transport") return "Network rule";
-  if (observation.stage === "internal-resolution") return "Azure Firewall resolver";
-  return "Azure Firewall";
+  if (observation.stage === 'transport') {
+    return 'Network rule'
+  }
+  if (observation.stage === 'internal-resolution') {
+    return 'Azure Firewall resolver'
+  }
+  return 'Azure Firewall'
 }
 
 const relatedSourceLabels: Record<DnsRelatedSourceKind, string> = {
-  "application-rule": "Application rule",
-  "flow-trace": "TCP flow trace",
-  "nat-rule": "NAT rule",
-};
+  'application-rule': 'Application rule',
+  'flow-trace': 'TCP flow trace',
+  'nat-rule': 'NAT rule',
+}
 
-function duration(seconds: number | undefined) {
-  if (seconds === undefined) return undefined;
-  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)} µs`;
-  if (seconds < 1) return `${(seconds * 1_000).toFixed(2)} ms`;
-  return `${seconds.toFixed(2)} s`;
+function duration(seconds: number | undefined): string | undefined {
+  if (seconds === undefined) {
+    return undefined
+  }
+  if (seconds < 0.001) {
+    return `${Math.round(seconds * 1_000_000)} µs`
+  }
+  if (seconds < 1) {
+    return `${(seconds * 1_000).toFixed(2)} ms`
+  }
+  return `${seconds.toFixed(2)} s`
 }
 
 function outcomeLabel(observation: DnsObservation) {
-  return DNS_OUTCOME_LABELS[observation.outcome];
+  return DNS_OUTCOME_LABELS[observation.outcome]
 }
 
 async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
   try {
-    await navigator.clipboard.writeText(rawJson(item));
+    await navigator.clipboard.writeText(rawJson(item))
     toast.add({
-      title: "Raw message copied",
-      color: "success",
-      icon: "i-lucide-copy-check",
-    });
+      title: 'Raw message copied',
+      color: 'success',
+      icon: 'i-lucide-copy-check',
+    })
   } catch {
     toast.add({
-      title: "Could not copy raw message",
-      color: "error",
-      icon: "i-lucide-circle-alert",
-    });
+      title: 'Could not copy raw message',
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
   }
 }
 </script>
@@ -116,13 +138,13 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
           <div>
             <p class="text-xs text-brand-gray-500">DNS name or message</p>
             <p class="font-mono break-all">
-              {{ entry.displayText ?? entry.queryName ?? "Not observed" }}
+              {{ entry.displayText ?? entry.queryName ?? 'Not observed' }}
             </p>
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Type</p>
             <p>
-              {{ entry.queryType ?? "Not observed"
+              {{ entry.queryType ?? 'Not observed'
               }}<span v-if="entry.queryType && DNS_QUERY_TYPE_LABELS[entry.queryType]">
                 — {{ DNS_QUERY_TYPE_LABELS[entry.queryType] }}</span
               >
@@ -134,7 +156,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Client</p>
-            <p class="font-mono break-all">{{ entry.client || "-" }}</p>
+            <p class="font-mono break-all">{{ entry.client || '-' }}</p>
           </div>
           <div>
             <p class="text-xs text-brand-gray-500">Path</p>
@@ -306,7 +328,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                 </div>
                 <div v-if="observation.dnssecOk !== undefined">
                   <dt class="text-xs text-brand-gray-500">DNSSEC OK</dt>
-                  <dd>{{ observation.dnssecOk ? "Set" : "Not set" }}</dd>
+                  <dd>{{ observation.dnssecOk ? 'Set' : 'Not set' }}</dd>
                 </div>
                 <div v-if="observation.durationSeconds !== undefined">
                   <dt class="text-xs text-brand-gray-500">Azure-reported transaction duration</dt>
@@ -369,7 +391,7 @@ async function copyRaw(item: DnsObservation | DnsRelatedEvidence) {
                 </div>
                 <div v-for="flag in observation.responseFlags" :key="flag">
                   <dt class="text-xs text-brand-gray-500">Flag {{ flag }}</dt>
-                  <dd>{{ DNS_FLAG_LABELS[flag.toLowerCase()] ?? "Unknown flag" }}</dd>
+                  <dd>{{ DNS_FLAG_LABELS[flag.toLowerCase()] ?? 'Unknown flag' }}</dd>
                 </div>
               </dl>
             </section>

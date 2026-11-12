@@ -1,40 +1,40 @@
 <script setup lang="ts">
-import { useElementSize, useMediaQuery } from "@vueuse/core";
-import { RecycleScroller } from "vue-virtual-scroller";
+import { useElementSize, useMediaQuery } from '@vueuse/core'
+import { RecycleScroller } from 'vue-virtual-scroller'
 
-import type { FirewallLogRecord } from "#shared/types/firewall";
-import type { IpCountryLookupClient } from "~/composables/useIpCountryLookup";
-import type { LogHourCycle } from "~/composables/useLogTimeFormat";
+import type { FirewallLogRecord } from '#shared/types/firewall'
+import type { IpCountryLookupClient } from '~/composables/useIpCountryLookup'
+import type { LogHourCycle } from '~/composables/useLogTimeFormat'
 
 defineProps<{
-  formatTimestamp: (timestamp: string) => string;
-  lookup: IpCountryLookupClient;
-  logs: FirewallLogRecord[];
-  timeZone: string;
-  hourCycle: LogHourCycle;
-}>();
-const emit = defineEmits<{ select: [log: FirewallLogRecord] }>();
-const viewport = useTemplateRef("viewport");
-const { width } = useElementSize(viewport);
-const tablet = useMediaQuery("(min-width: 768px)");
-const columns = computed(() => (tablet.value ? 2 : 1));
+  formatTimestamp: (timestamp: string) => string
+  lookup: IpCountryLookupClient
+  logs: FirewallLogRecord[]
+  timeZone: string
+  hourCycle: LogHourCycle
+}>()
+const emit = defineEmits<{ select: [log: FirewallLogRecord] }>()
+const viewport = useTemplateRef('viewport')
+const { width } = useElementSize(viewport)
+const tablet = useMediaQuery('(min-width: 768px)')
+const columns = computed(() => (tablet.value ? 2 : 1))
 
 function destination(log: FirewallLogRecord) {
-  return log.destinationIp || log.dns?.queryName || log.message || log.category;
+  return log.destinationIp || log.dns?.queryName || log.message || log.category
 }
 
 function source(log: FirewallLogRecord) {
-  return log.sourceIp || log.dns?.clientIp || "Not recorded";
+  return log.sourceIp || log.dns?.clientIp || 'Not recorded'
 }
 
 function actionClass(action: string) {
-  if (action.toLowerCase() === "deny") {
-    return "text-red-700 dark:text-red-400";
+  if (action.toLowerCase() === 'deny') {
+    return 'text-red-700 dark:text-red-400'
   }
-  if (action.toLowerCase() === "allow") {
-    return "text-green-700 dark:text-green-400";
+  if (action.toLowerCase() === 'allow') {
+    return 'text-green-700 dark:text-green-400'
   }
-  return "text-default";
+  return 'text-default'
 }
 </script>
 
@@ -73,7 +73,7 @@ function actionClass(action: string) {
             class="text-muted"
           />
           <span class="font-semibold" :class="actionClass(item.action)">{{
-            item.action || "Unknown action"
+            item.action || 'Unknown action'
           }}</span>
         </span>
         <span
@@ -103,7 +103,7 @@ function actionClass(action: string) {
         <span class="mt-auto flex items-center justify-between gap-2 text-xs text-muted">
           <span class="truncate" :title="item.category">{{ item.category }}</span>
           <span class="flex shrink-0 items-center gap-2"
-            ><span class="font-mono">{{ item.protocol || "Unknown protocol" }}</span
+            ><span class="font-mono">{{ item.protocol || 'Unknown protocol' }}</span
             ><UIcon name="i-lucide-chevron-right" class="size-4"
           /></span>
         </span>

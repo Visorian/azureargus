@@ -1,136 +1,136 @@
-import type { LogAnalyticsQueryRequest } from "../../shared/types/logAnalytics";
-import { validateLogAnalyticsQueryRequest } from "../../shared/utils/logAnalyticsQuery";
+import type { LogAnalyticsQueryRequest } from '../../shared/types/logAnalytics'
+import { validateLogAnalyticsQueryRequest } from '../../shared/utils/logAnalyticsQuery'
 
 function createRequest(): LogAnalyticsQueryRequest {
   return {
-    from: "2026-07-10T10:00:00.000Z",
-    to: "2026-07-10T10:15:00.000Z",
+    from: '2026-07-10T10:00:00.000Z',
+    to: '2026-07-10T10:15:00.000Z',
     filters: {
-      search: "",
+      search: '',
       category: [],
-      action: "",
-      protocol: "",
-      source: "",
-      sourcePort: "",
-      destination: "",
-      destinationPort: "",
+      action: '',
+      protocol: '',
+      source: '',
+      sourcePort: '',
+      destination: '',
+      destinationPort: '',
     },
     limit: 1_000,
-    storage: "resource-specific",
-    sort: { key: "timestamp", direction: "desc" },
-  };
+    storage: 'resource-specific',
+    sort: { key: 'timestamp', direction: 'desc' },
+  }
 }
 
-describe("Log Analytics request contract", () => {
-  it("accepts the strict request shape", () => {
-    expect(validateLogAnalyticsQueryRequest(createRequest())).toBe(true);
+describe('Log Analytics request contract', () => {
+  it('accepts the strict request shape', () => {
+    expect(validateLogAnalyticsQueryRequest(createRequest())).toBe(true)
     expect(
       validateLogAnalyticsQueryRequest({
         ...createRequest(),
         filters: {
           ...createRequest().filters,
-          category: ["AZFWNetworkRule", "AZFWApplicationRule"],
+          category: ['AZFWNetworkRule', 'AZFWApplicationRule'],
         },
       }),
-    ).toBe(true);
-  });
+    ).toBe(true)
+  })
 
-  it("rejects unknown and missing fields", () => {
-    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), workspaceId: "workspace" })).toBe(
+  it('rejects unknown and missing fields', () => {
+    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), workspaceId: 'workspace' })).toBe(
       false,
-    );
+    )
 
-    const request = createRequest();
+    const request = createRequest()
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        filters: { ...request.filters, query: "arbitrary KQL" },
+        filters: { ...request.filters, query: 'arbitrary KQL' },
       }),
-    ).toBe(false);
+    ).toBe(false)
 
-    const { sort: _sort, ...withoutSort } = request;
-    expect(validateLogAnalyticsQueryRequest(withoutSort)).toBe(false);
+    const { sort: _sort, ...withoutSort } = request
+    expect(validateLogAnalyticsQueryRequest(withoutSort)).toBe(false)
 
-    const { storage: _storage, ...withoutStorage } = request;
-    expect(validateLogAnalyticsQueryRequest(withoutStorage)).toBe(false);
-    expect(validateLogAnalyticsQueryRequest({ ...request, storage: "all" })).toBe(false);
-  });
+    const { storage: _storage, ...withoutStorage } = request
+    expect(validateLogAnalyticsQueryRequest(withoutStorage)).toBe(false)
+    expect(validateLogAnalyticsQueryRequest({ ...request, storage: 'all' })).toBe(false)
+  })
 
-  it("rejects invalid or oversized ranges", () => {
+  it('rejects invalid or oversized ranges', () => {
     expect(
       validateLogAnalyticsQueryRequest({
         ...createRequest(),
-        from: "2026-07-10T10:15:00.000Z",
+        from: '2026-07-10T10:15:00.000Z',
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...createRequest(),
-        to: "2026-07-11T10:00:00.001Z",
+        to: '2026-07-11T10:00:00.001Z',
       }),
-    ).toBe(false);
-    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), from: "not-a-timestamp" })).toBe(
+    ).toBe(false)
+    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), from: 'not-a-timestamp' })).toBe(
       false,
-    );
-  });
+    )
+  })
 
-  it.each([99, 5_001, 1_000.5, Number.NaN])("rejects invalid query limit %s", (limit) => {
-    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), limit })).toBe(false);
-  });
+  it.each([99, 5_001, 1_000.5, Number.NaN])('rejects invalid query limit %s', (limit) => {
+    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), limit })).toBe(false)
+  })
 
-  it.each([100, 1_000, 5_000])("accepts bounded query limit %s", (limit) => {
-    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), limit })).toBe(true);
-  });
+  it.each([100, 1_000, 5_000])('accepts bounded query limit %s', (limit) => {
+    expect(validateLogAnalyticsQueryRequest({ ...createRequest(), limit })).toBe(true)
+  })
 
-  it("rejects oversized filters and non-allowlisted sorts", () => {
-    const request = createRequest();
+  it('rejects oversized filters and non-allowlisted sorts', () => {
+    const request = createRequest()
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        filters: { ...request.filters, search: "x".repeat(257) },
+        filters: { ...request.filters, search: 'x'.repeat(257) },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        filters: { ...request.filters, category: Array.from({ length: 33 }).fill("category") },
+        filters: { ...request.filters, category: Array.from({ length: 33 }).fill('category') },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        filters: { ...request.filters, category: ["x".repeat(257)] },
+        filters: { ...request.filters, category: ['x'.repeat(257)] },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        filters: { ...request.filters, category: [" "] },
+        filters: { ...request.filters, category: [' '] },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
         filters: { ...request.filters, category: [42] },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        filters: { ...request.filters, category: "AZFWNetworkRule" },
+        filters: { ...request.filters, category: 'AZFWNetworkRule' },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        sort: { key: "workspaceId", direction: "desc" },
+        sort: { key: 'workspaceId', direction: 'desc' },
       }),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       validateLogAnalyticsQueryRequest({
         ...request,
-        sort: { key: "timestamp", direction: "sideways" },
+        sort: { key: 'timestamp', direction: 'sideways' },
       }),
-    ).toBe(false);
-  });
-});
+    ).toBe(false)
+  })
+})

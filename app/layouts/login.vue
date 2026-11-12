@@ -1,6 +1,6 @@
 <template>
   <main
-    class="min-h-screen bg-brand-gray-950 text-brand-gray-50 grid place-items-center px-4 py-10"
+    class="grid min-h-screen place-items-center bg-brand-gray-950 px-4 py-10 text-brand-gray-50"
   >
     <section class="w-full max-w-md">
       <slot />

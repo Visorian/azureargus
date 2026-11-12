@@ -1,4 +1,2 @@
-commit-msg:
-  commands:
-    commitlint:
-      run: bunx commitlint --edit {1}
+extends:
+  - node_modules/@visorian/code-standards/lefthook.yml

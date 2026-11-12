@@ -1,0 +1,12 @@
+{
+  "extends": "@visorian/code-standards/tsconfig/strict.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}

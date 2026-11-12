@@ -1,30 +1,38 @@
 <script setup lang="ts">
 definePageMeta({
-  layout: "login",
+  layout: 'login',
   oidcAuth: false,
-});
+})
 
-const deployment = useDeploymentCapabilities();
-const retrying = ref(false);
-const errors = computed(() => deployment.capabilities.value?.errors ?? []);
+const deployment = useDeploymentCapabilities()
+const retrying = ref(false)
+const errors = computed(() => deployment.capabilities.value?.errors ?? [])
+
+async function loadCapabilities() {
+  try {
+    await deployment.load()
+  } catch {
+    // Error state is exposed by composable.
+  }
+}
 
 onMounted(() => {
-  if (deployment.capabilities.value === null && deployment.status.value === "idle") {
-    void deployment.load().catch(() => undefined);
+  if (deployment.capabilities.value === null && deployment.status.value === 'idle') {
+    void loadCapabilities()
   }
-});
+})
 
 async function retry() {
-  retrying.value = true;
+  retrying.value = true
   try {
-    const capabilities = await deployment.load(true);
-    if (capabilities.mode !== "invalid") {
-      await navigateTo(capabilities.mode === "anonymous" ? "/logs" : "/login");
+    const capabilities = await deployment.load(true)
+    if (capabilities.mode !== 'invalid') {
+      await navigateTo(capabilities.mode === 'anonymous' ? '/logs' : '/login')
     }
   } catch {
     // Error state is exposed by composable.
   } finally {
-    retrying.value = false;
+    retrying.value = false
   }
 }
 </script>
@@ -43,7 +51,7 @@ async function retry() {
         <li v-for="error in errors" :key="error.code">{{ error.message }}</li>
       </ul>
       <p v-else class="text-sm" role="alert">
-        {{ deployment.lastError.value ?? "Deployment configuration could not be loaded." }}
+        {{ deployment.lastError.value ?? 'Deployment configuration could not be loaded.' }}
       </p>
       <UButton label="Retry" icon="i-lucide-refresh-cw" :loading="retrying" @click="retry" />
     </div>

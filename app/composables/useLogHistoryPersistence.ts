@@ -1,171 +1,168 @@
-import {
-  createLogHistoryPersistenceQueue,
-  type LogHistoryPersistenceQueue,
-} from "~/utils/logHistoryPersistenceQueue";
-import type { LogHistoryRangeQuery, LogHistoryStoreApi } from "~/utils/logHistoryStore";
-import type { PersistedFirewallLogRecord } from "~/utils/logHistoryRecord";
-import type { FirewallLogRecord } from "#shared/types/firewall";
+import type { FirewallLogRecord } from '#shared/types/firewall'
+import { createLogHistoryPersistenceQueue } from '~/utils/logHistoryPersistenceQueue'
+import type { LogHistoryPersistenceQueue } from '~/utils/logHistoryPersistenceQueue'
+import type { PersistedFirewallLogRecord } from '~/utils/logHistoryRecord'
+import type { LogHistoryRangeQuery, LogHistoryStoreApi } from '~/utils/logHistoryStore'
 
-let sharedQueue: LogHistoryPersistenceQueue | null = null;
-let startupCleanupPromise: Promise<void> | null = null;
+let sharedQueue: LogHistoryPersistenceQueue | null = null
+let startupCleanupPromise: Promise<void> | null = null
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown log history persistence error.";
+  return error instanceof Error ? error.message : 'Unknown log history persistence error.'
 }
 
 function isIndexedDBAvailable() {
-  return typeof indexedDB !== "undefined";
+  return typeof indexedDB !== 'undefined'
 }
 
 function createBrowserLogHistoryStore(): LogHistoryStoreApi {
   return {
     async appendLogHistoryBatch(records, retention) {
       if (!isIndexedDBAvailable()) {
-        return;
+        return
       }
 
-      const store = await import("~/utils/logHistoryStore.client");
-      await store.appendLogHistoryBatch(records, retention);
+      const store = await import('~/utils/logHistoryStore.client')
+      await store.appendLogHistoryBatch(records, retention)
     },
     async clearLogHistory() {
       if (!isIndexedDBAvailable()) {
-        return;
+        return
       }
 
-      const store = await import("~/utils/logHistoryStore.client");
-      await store.clearLogHistory();
+      const store = await import('~/utils/logHistoryStore.client')
+      await store.clearLogHistory()
     },
     async deleteLogHistoryBefore(timestamp) {
       if (!isIndexedDBAvailable()) {
-        return 0;
+        return 0
       }
 
-      const store = await import("~/utils/logHistoryStore.client");
-      return store.deleteLogHistoryBefore(timestamp);
+      const store = await import('~/utils/logHistoryStore.client')
+      return await store.deleteLogHistoryBefore(timestamp)
     },
     async pruneLogHistory(retention, now) {
       if (!isIndexedDBAvailable()) {
-        return;
+        return
       }
 
-      const store = await import("~/utils/logHistoryStore.client");
-      await store.pruneLogHistory(retention, now);
+      const store = await import('~/utils/logHistoryStore.client')
+      await store.pruneLogHistory(retention, now)
     },
     async queryLogHistoryRange(query) {
       if (!isIndexedDBAvailable()) {
-        return [];
+        return []
       }
 
-      const store = await import("~/utils/logHistoryStore.client");
-      return store.queryLogHistoryRange(query);
+      const store = await import('~/utils/logHistoryStore.client')
+      return await store.queryLogHistoryRange(query)
     },
-  };
+  }
 }
 
 export function useLogHistoryPersistence() {
-  const enabled = useState("log-history-enabled", () => false);
-  const historyResults = useState<PersistedFirewallLogRecord[]>("log-history-results", () => []);
-  const lastError = useState<string | null>("log-history-last-error", () => null);
-  const store = createBrowserLogHistoryStore();
+  const enabled = useState('log-history-enabled', () => false)
+  const historyResults = useState<PersistedFirewallLogRecord[]>('log-history-results', () => [])
+  const lastError = useState<string | null>('log-history-last-error', () => null)
+  const store = createBrowserLogHistoryStore()
 
   if (sharedQueue === null) {
     if (!enabled.value) {
-      startupCleanupPromise = store
-        .clearLogHistory()
-        .then(() => {
-          historyResults.value = [];
-        })
-        .catch((error: unknown) => {
-          lastError.value = getErrorMessage(error);
-        })
-        .finally(() => {
-          startupCleanupPromise = null;
-        });
+      startupCleanupPromise = (async () => {
+        try {
+          await store.clearLogHistory()
+          historyResults.value = []
+        } catch (error: unknown) {
+          lastError.value = getErrorMessage(error)
+        } finally {
+          startupCleanupPromise = null
+        }
+      })()
     }
 
     sharedQueue = createLogHistoryPersistenceQueue({
       enabled: enabled.value,
       onError: (error) => {
-        enabled.value = false;
-        lastError.value = getErrorMessage(error);
+        enabled.value = false
+        lastError.value = getErrorMessage(error)
       },
       store: {
         ...store,
         async appendLogHistoryBatch(records, retention) {
-          await startupCleanupPromise;
-          await store.appendLogHistoryBatch(records, retention);
+          await startupCleanupPromise
+          await store.appendLogHistoryBatch(records, retention)
         },
       },
-    });
+    })
   }
 
   function enable() {
-    lastError.value = null;
-    enabled.value = true;
-    sharedQueue?.enable();
+    lastError.value = null
+    enabled.value = true
+    sharedQueue?.enable()
   }
 
   function disable() {
-    enabled.value = false;
-    sharedQueue?.disable();
+    enabled.value = false
+    sharedQueue?.disable()
   }
 
   async function clearStoredHistory() {
-    await store.clearLogHistory();
-    historyResults.value = [];
+    await store.clearLogHistory()
+    historyResults.value = []
   }
 
   async function disableAndClearHistory() {
-    enabled.value = false;
-    sharedQueue?.disable();
-    lastError.value = null;
+    enabled.value = false
+    sharedQueue?.disable()
+    lastError.value = null
 
     try {
-      await sharedQueue?.waitForIdle();
-      await clearStoredHistory();
+      await sharedQueue?.waitForIdle()
+      await clearStoredHistory()
     } catch (error: unknown) {
-      lastError.value = getErrorMessage(error);
+      lastError.value = getErrorMessage(error)
     }
   }
 
   function queueRecords(records: readonly FirewallLogRecord[]) {
     if (!enabled.value) {
-      return;
+      return
     }
 
-    sharedQueue?.queueRecords(records);
+    sharedQueue?.queueRecords(records)
   }
 
   async function flush() {
-    await sharedQueue?.flush();
+    await sharedQueue?.flush()
   }
 
   function clearQueueIfDisabled() {
-    sharedQueue?.clearQueueIfDisabled();
+    sharedQueue?.clearQueueIfDisabled()
   }
 
   async function queryHistoryRange(query: LogHistoryRangeQuery) {
-    lastError.value = null;
+    lastError.value = null
 
     try {
-      historyResults.value = await store.queryLogHistoryRange(query);
-      return historyResults.value;
+      historyResults.value = await store.queryLogHistoryRange(query)
+      return historyResults.value
     } catch (error: unknown) {
-      lastError.value = getErrorMessage(error);
-      historyResults.value = [];
-      return [];
+      lastError.value = getErrorMessage(error)
+      historyResults.value = []
+      return []
     }
   }
 
   async function clearHistory() {
-    lastError.value = null;
+    lastError.value = null
 
     try {
-      await clearStoredHistory();
-      return true;
+      await clearStoredHistory()
+      return true
     } catch (error: unknown) {
-      lastError.value = getErrorMessage(error);
-      return false;
+      lastError.value = getErrorMessage(error)
+      return false
     }
   }
 
@@ -181,5 +178,5 @@ export function useLogHistoryPersistence() {
     lastError,
     queueRecords,
     queryHistoryRange,
-  };
+  }
 }

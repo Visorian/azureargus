@@ -1,51 +1,52 @@
 <script setup lang="ts">
-import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from "#shared/types/azureAccess";
-import type { DnsReadinessSourceKind, DnsSourceReadiness } from "#shared/types/dns";
-import type { LogAnalyticsStorageKind } from "#shared/types/logAnalytics";
-import {
-  DNS_READINESS_SOURCE_DEFINITIONS,
-  hasDnsReadinessData,
-  type DnsReadinessSourceGroup,
-} from "#shared/utils/dnsReadiness";
-import type { DnsReadinessStatus } from "~/composables/useDnsSourceReadiness";
+import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
+import type { DnsReadinessSourceKind, DnsSourceReadiness } from '#shared/types/dns'
+import type { LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
+import { DNS_READINESS_SOURCE_DEFINITIONS, hasDnsReadinessData } from '#shared/utils/dnsReadiness'
+import type { DnsReadinessSourceGroup } from '#shared/utils/dnsReadiness'
 import {
   MAX_LOG_ANALYTICS_QUERY_LIMIT,
   MIN_LOG_ANALYTICS_QUERY_LIMIT,
-} from "#shared/utils/logAnalytics";
-import { isEntraId, LOG_ANALYTICS_WORKSPACES_URL } from "~/utils/logAnalyticsOnboarding";
+} from '#shared/utils/logAnalytics'
+import type { DnsReadinessStatus } from '~/composables/useDnsSourceReadiness'
+import { isEntraId, LOG_ANALYTICS_WORKSPACES_URL } from '~/utils/logAnalyticsOnboarding'
+
+const tenantId = defineModel<string>('tenantId', { required: true })
+
+const workspaceId = defineModel<string>('workspaceId', { required: true })
+
+const queryLimit = defineModel<number>('queryLimit', { required: true })
+
+const queryStorage = defineModel<LogAnalyticsStorageKind>('queryStorage', { required: true })
 
 const props = defineProps<{
-  adminConsentUrl: string | null;
-  dnsReadiness: DnsSourceReadiness[];
-  dnsReadinessStatus: DnsReadinessStatus;
-  lens: "all-logs" | "dns-troubleshooting";
-  temporary: boolean;
-  temporaryAccessError: string | null;
-  temporaryAccessStatus: "idle" | "loading" | "success" | "error";
-  temporaryLogAnalyticsAuthorized: boolean;
-  temporaryLogAnalyticsAuthorizing: boolean;
-  temporaryAuthError: string | null;
-  temporaryAuthStatus: "idle" | "connecting" | "connected" | "error";
-  temporaryAzureUsername: string;
-  tenantOptions: AzureAccessibleTenant[];
-  workspaceOptions: AzureAccessibleWorkspace[];
-}>();
+  adminConsentUrl: string | null
+  dnsReadiness: DnsSourceReadiness[]
+  dnsReadinessStatus: DnsReadinessStatus
+  lens: 'all-logs' | 'dns-troubleshooting'
+  temporary: boolean
+  temporaryAccessError: string | null
+  temporaryAccessStatus: 'idle' | 'loading' | 'success' | 'error'
+  temporaryLogAnalyticsAuthorized: boolean
+  temporaryLogAnalyticsAuthorizing: boolean
+  temporaryAuthError: string | null
+  temporaryAuthStatus: 'idle' | 'connecting' | 'connected' | 'error'
+  temporaryAzureUsername: string
+  tenantOptions: AzureAccessibleTenant[]
+  workspaceOptions: AzureAccessibleWorkspace[]
+}>()
 
 const emit = defineEmits<{
-  changeTenant: [tenantId: string];
-  changeWorkspace: [workspaceId: string];
-  connectAzure: [];
-  disconnectAzure: [];
-  authorizeLogAnalytics: [];
-  refreshAzureAccess: [];
-}>();
+  changeTenant: [tenantId: string]
+  changeWorkspace: [workspaceId: string]
+  connectAzure: []
+  disconnectAzure: []
+  authorizeLogAnalytics: []
+  refreshAzureAccess: []
+}>()
 
-const tenantId = defineModel<string>("tenantId", { required: true });
-const workspaceId = defineModel<string>("workspaceId", { required: true });
-const queryLimit = defineModel<number>("queryLimit", { required: true });
-const queryStorage = defineModel<LogAnalyticsStorageKind>("queryStorage", { required: true });
-const tenantValid = computed(() => isEntraId(tenantId.value));
-const workspaceValid = computed(() => isEntraId(workspaceId.value));
+const tenantValid = computed(() => isEntraId(tenantId.value))
+const workspaceValid = computed(() => isEntraId(workspaceId.value))
 const tenantItems = computed(() =>
   props.tenantOptions.map((tenant) => ({
     ...tenant,
@@ -53,44 +54,44 @@ const tenantItems = computed(() =>
       ? `${tenant.displayName} · ${tenant.defaultDomain}`
       : tenant.displayName,
   })),
-);
+)
 const workspaceItems = computed(() =>
   props.workspaceOptions.map((workspace) => ({
     ...workspace,
     label: `${workspace.name} · ${workspace.subscriptionName}`,
   })),
-);
+)
 function changeTenant(value: unknown) {
-  if (typeof value === "string" && value !== tenantId.value) {
-    emit("changeTenant", value);
+  if (typeof value === 'string' && value !== tenantId.value) {
+    emit('changeTenant', value)
   }
 }
 
 function changeWorkspace(value: unknown) {
-  if (typeof value === "string" && value !== workspaceId.value) {
-    emit("changeWorkspace", value);
+  if (typeof value === 'string' && value !== workspaceId.value) {
+    emit('changeWorkspace', value)
   }
 }
 
 type ReadinessIndicatorState =
-  | "available"
-  | "empty"
-  | "missing"
-  | "forbidden"
-  | "failed"
-  | "checking"
-  | "unchecked";
+  | 'available'
+  | 'empty'
+  | 'missing'
+  | 'forbidden'
+  | 'failed'
+  | 'checking'
+  | 'unchecked'
 
 interface ReadinessIndicator {
-  label: string;
-  state: ReadinessIndicatorState;
-  statusLabel: string;
+  label: string
+  state: ReadinessIndicatorState
+  statusLabel: string
 }
 
 interface ReadinessItem {
-  indicators: ReadinessIndicator[];
-  label: string;
-  mapping: string;
+  indicators: ReadinessIndicator[]
+  label: string
+  mapping: string
 }
 
 const readinessIndicatorStyle: Record<
@@ -98,40 +99,40 @@ const readinessIndicatorStyle: Record<
   { icon: string; iconClass?: string; text: string }
 > = {
   available: {
-    icon: "i-lucide-circle-check",
-    text: "text-green-700 dark:text-green-300",
+    icon: 'i-lucide-circle-check',
+    text: 'text-green-700 dark:text-green-300',
   },
   empty: {
-    icon: "i-lucide-circle-minus",
-    text: "text-brand-gray-500 dark:text-brand-gray-400",
+    icon: 'i-lucide-circle-minus',
+    text: 'text-brand-gray-500 dark:text-brand-gray-400',
   },
   missing: {
-    icon: "i-lucide-circle-minus",
-    text: "text-brand-gray-500 dark:text-brand-gray-400",
+    icon: 'i-lucide-circle-minus',
+    text: 'text-brand-gray-500 dark:text-brand-gray-400',
   },
   forbidden: {
-    icon: "i-lucide-lock-keyhole",
-    text: "text-amber-700 dark:text-amber-300",
+    icon: 'i-lucide-lock-keyhole',
+    text: 'text-amber-700 dark:text-amber-300',
   },
   failed: {
-    icon: "i-lucide-circle-x",
-    text: "text-red-700 dark:text-red-300",
+    icon: 'i-lucide-circle-x',
+    text: 'text-red-700 dark:text-red-300',
   },
   checking: {
-    icon: "i-lucide-loader-circle",
-    iconClass: "animate-spin",
-    text: "text-brand-blue-600 dark:text-brand-blue-300",
+    icon: 'i-lucide-loader-circle',
+    iconClass: 'animate-spin',
+    text: 'text-brand-blue-600 dark:text-brand-blue-300',
   },
   unchecked: {
-    icon: "i-lucide-circle-dashed",
-    text: "text-brand-gray-400 dark:text-brand-gray-500",
+    icon: 'i-lucide-circle-dashed',
+    text: 'text-brand-gray-400 dark:text-brand-gray-500',
   },
-};
+}
 
 const readinessColumns = [
-  { label: "Dedicated table", storage: "resource-specific" },
-  { label: "AzureDiagnostics", storage: "azure-diagnostics" },
-] as const satisfies readonly { label: string; storage: LogAnalyticsStorageKind }[];
+  { label: 'Dedicated table', storage: 'resource-specific' },
+  { label: 'AzureDiagnostics', storage: 'azure-diagnostics' },
+] as const satisfies readonly { label: string; storage: LogAnalyticsStorageKind }[]
 
 function sourceIndicator(
   source: DnsReadinessSourceKind,
@@ -140,29 +141,29 @@ function sourceIndicator(
 ): ReadinessIndicator {
   const readiness = props.dnsReadiness.find(
     (item) => item.source === source && item.storage === storage,
-  );
+  )
   if (!readiness) {
-    return props.dnsReadinessStatus === "loading"
-      ? { label, state: "checking", statusLabel: "checking" }
-      : { label, state: "unchecked", statusLabel: "not checked" };
+    return props.dnsReadinessStatus === 'loading'
+      ? { label, state: 'checking', statusLabel: 'checking' }
+      : { label, state: 'unchecked', statusLabel: 'not checked' }
   }
-  if (readiness.status === "success") {
-    if (storage === "azure-diagnostics" && readiness.sampleCount === 0) {
-      return { label, state: "empty", statusLabel: "no matching records" };
+  if (readiness.status === 'success') {
+    if (storage === 'azure-diagnostics' && readiness.sampleCount === 0) {
+      return { label, state: 'empty', statusLabel: 'no matching records' }
     }
-    return { label, state: "available", statusLabel: "available" };
+    return { label, state: 'available', statusLabel: 'available' }
   }
-  if (readiness.status === "missing") {
-    return { label, state: "missing", statusLabel: "not found" };
+  if (readiness.status === 'missing') {
+    return { label, state: 'missing', statusLabel: 'not found' }
   }
-  if (readiness.status === "forbidden") {
-    return { label, state: "forbidden", statusLabel: "access denied" };
+  if (readiness.status === 'forbidden') {
+    return { label, state: 'forbidden', statusLabel: 'access denied' }
   }
-  return { label, state: "failed", statusLabel: "check failed" };
+  return { label, state: 'failed', statusLabel: 'check failed' }
 }
 
 function sourceIndicators(source: DnsReadinessSourceKind): ReadinessIndicator[] {
-  return readinessColumns.map(({ label, storage }) => sourceIndicator(source, storage, label));
+  return readinessColumns.map(({ label, storage }) => sourceIndicator(source, storage, label))
 }
 
 function readinessMapping(
@@ -173,8 +174,8 @@ function readinessMapping(
   const storageMapping =
     resourceSpecificTable === azureDiagnosticsCategory
       ? resourceSpecificTable
-      : `${resourceSpecificTable} / ${azureDiagnosticsCategory}`;
-  return queryScope ? `${storageMapping} · ${queryScope}` : storageMapping;
+      : `${resourceSpecificTable} / ${azureDiagnosticsCategory}`
+  return queryScope ? `${storageMapping} · ${queryScope}` : storageMapping
 }
 
 function readinessItem(
@@ -188,15 +189,15 @@ function readinessItem(
     label: friendlyLabel,
     mapping: readinessMapping(resourceSpecificTable, azureDiagnosticsCategory, queryScope),
     indicators: sourceIndicators(source),
-  };
+  }
 }
 
 const readinessGroupLabels: Record<DnsReadinessSourceGroup, string> = {
-  dns: "DNS sources",
-  general: "General firewall logs",
-};
+  dns: 'DNS sources',
+  general: 'General firewall logs',
+}
 const readinessGroups = computed(() =>
-  (["dns", "general"] as const).map((group) => ({
+  (['dns', 'general'] as const).map((group) => ({
     label: readinessGroupLabels[group],
     items: DNS_READINESS_SOURCE_DEFINITIONS.filter((definition) => definition.group === group).map(
       (definition) =>
@@ -205,38 +206,38 @@ const readinessGroups = computed(() =>
           definition.source,
           definition.resourceSpecificTable,
           definition.azureDiagnosticsCategory,
-          "queryScope" in definition ? definition.queryScope : undefined,
+          'queryScope' in definition ? definition.queryScope : undefined,
         ),
     ),
   })),
-);
+)
 const resourceSpecificAvailable = computed(() =>
-  hasDnsReadinessData(props.dnsReadiness, "resource-specific"),
-);
+  hasDnsReadinessData(props.dnsReadiness, 'resource-specific'),
+)
 const azureDiagnosticsAvailable = computed(() =>
-  hasDnsReadinessData(props.dnsReadiness, "azure-diagnostics"),
-);
+  hasDnsReadinessData(props.dnsReadiness, 'azure-diagnostics'),
+)
 const queryStorageSelectionEnabled = computed(
   () => resourceSpecificAvailable.value && azureDiagnosticsAvailable.value,
-);
-const queryStorageItems: Array<{ label: string; value: LogAnalyticsStorageKind }> = [
-  { label: "Dedicated tables", value: "resource-specific" },
-  { label: "AzureDiagnostics", value: "azure-diagnostics" },
-];
-const readinessSourceCount = DNS_READINESS_SOURCE_DEFINITIONS.length;
+)
+const queryStorageItems: { label: string; value: LogAnalyticsStorageKind }[] = [
+  { label: 'Dedicated tables', value: 'resource-specific' },
+  { label: 'AzureDiagnostics', value: 'azure-diagnostics' },
+]
+const readinessSourceCount = DNS_READINESS_SOURCE_DEFINITIONS.length
 const resourceSpecificReadyCount = computed(
   () =>
     props.dnsReadiness.filter(
-      (item) => item.storage === "resource-specific" && item.status === "success",
+      (item) => item.storage === 'resource-specific' && item.status === 'success',
     ).length,
-);
+)
 const azureDiagnosticsReadyCount = computed(
   () =>
     props.dnsReadiness.filter(
       (item) =>
-        item.storage === "azure-diagnostics" && item.status === "success" && item.sampleCount > 0,
+        item.storage === 'azure-diagnostics' && item.status === 'success' && item.sampleCount > 0,
     ).length,
-);
+)
 </script>
 
 <template>
@@ -245,9 +246,9 @@ const azureDiagnosticsReadyCount = computed(
       <h2 class="text-sm font-semibold">Log Analytics settings</h2>
       <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
         {{
-          lens === "dns-troubleshooting"
-            ? "Query DNS diagnostics in configured Azure Firewall workspace."
-            : "Query configured Azure Firewall workspace."
+          lens === 'dns-troubleshooting'
+            ? 'Query DNS diagnostics in configured Azure Firewall workspace.'
+            : 'Query configured Azure Firewall workspace.'
         }}
       </p>
     </div>
@@ -315,7 +316,7 @@ const azureDiagnosticsReadyCount = computed(
               role="status"
               class="text-xs text-green-700 dark:text-green-300"
             >
-              Connected{{ temporaryAzureUsername ? ` as ${temporaryAzureUsername}` : "" }}.
+              Connected{{ temporaryAzureUsername ? ` as ${temporaryAzureUsername}` : '' }}.
             </p>
           </div>
         </li>
@@ -355,7 +356,7 @@ const azureDiagnosticsReadyCount = computed(
                 @update:model-value="changeTenant"
               />
             </UFormField>
-            <p v-if="tenantValid" class="break-all font-mono text-[0.6875rem] text-brand-gray-500">
+            <p v-if="tenantValid" class="font-mono text-[0.6875rem] break-all text-brand-gray-500">
               {{ tenantId }}
             </p>
             <div class="flex flex-wrap gap-2">
@@ -438,7 +439,7 @@ const azureDiagnosticsReadyCount = computed(
             </UFormField>
             <p
               v-if="workspaceValid"
-              class="break-all font-mono text-[0.6875rem] text-brand-gray-500"
+              class="font-mono text-[0.6875rem] break-all text-brand-gray-500"
             >
               {{ workspaceId }}
             </p>
@@ -565,7 +566,7 @@ const azureDiagnosticsReadyCount = computed(
             <th
               scope="rowgroup"
               colspan="3"
-              class="pb-1 pt-2 text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
+              class="pt-2 pb-1 text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
             >
               <span class="flex items-center gap-2">
                 <span
@@ -584,7 +585,7 @@ const azureDiagnosticsReadyCount = computed(
             <th scope="row" class="py-1.5 pr-2 text-left align-top font-medium">
               <span class="block leading-4">{{ item.label }}</span>
               <span
-                class="block break-words font-mono text-[0.6875rem] leading-4 font-normal text-brand-gray-500 dark:text-brand-gray-400"
+                class="block font-mono text-[0.6875rem] leading-4 font-normal break-words text-brand-gray-500 dark:text-brand-gray-400"
               >
                 {{ item.mapping }}
               </span>
@@ -598,15 +599,14 @@ const azureDiagnosticsReadyCount = computed(
                 role="img"
                 :aria-label="`${indicator.label}: ${indicator.statusLabel}`"
                 :title="`${indicator.label}: ${indicator.statusLabel}`"
-                :class="[
-                  'inline-flex size-5 items-center justify-center',
-                  readinessIndicatorStyle[indicator.state].text,
-                ]"
+                class="inline-flex size-5 items-center justify-center"
+                :class="[readinessIndicatorStyle[indicator.state].text]"
               >
                 <UIcon
                   :name="readinessIndicatorStyle[indicator.state].icon"
                   aria-hidden="true"
-                  :class="['size-3.5', readinessIndicatorStyle[indicator.state].iconClass]"
+                  class="size-3.5"
+                  :class="[readinessIndicatorStyle[indicator.state].iconClass]"
                 />
               </span>
             </td>

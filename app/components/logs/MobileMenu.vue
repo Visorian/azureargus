@@ -1,35 +1,35 @@
 <script setup lang="ts">
-import type { AnalysisMode } from "~/composables/useAnalysisMode";
+import type { AnalysisMode } from '~/composables/useAnalysisMode'
 
 defineProps<{
-  logAnalysis: boolean;
-  lens: "all-logs" | "dns-troubleshooting";
-  eventHubAvailable: boolean;
-  logAnalyticsAvailable: boolean;
-  logAnalyticsRequirement: string | null;
-  transitioning: boolean;
-}>();
+  logAnalysis: boolean
+  lens: 'all-logs' | 'dns-troubleshooting'
+  eventHubAvailable: boolean
+  logAnalyticsAvailable: boolean
+  logAnalyticsRequirement: string | null
+  transitioning: boolean
+}>()
 const emit = defineEmits<{
-  mode: [mode: AnalysisMode, event: MouseEvent];
-  lens: [lens: "all-logs" | "dns-troubleshooting"];
-  settings: [returnTarget: HTMLElement | undefined];
-}>();
-const open = ref(false);
+  mode: [mode: AnalysisMode, event: MouseEvent]
+  lens: [lens: 'all-logs' | 'dns-troubleshooting']
+  settings: [returnTarget: HTMLElement | undefined]
+}>()
+const open = ref(false)
 
 function selectMode(mode: AnalysisMode, event: MouseEvent) {
-  emit("mode", mode, event);
-  open.value = false;
+  emit('mode', mode, event)
+  open.value = false
 }
 
-function selectLens(lens: "all-logs" | "dns-troubleshooting") {
-  emit("lens", lens);
-  open.value = false;
+function selectLens(lens: 'all-logs' | 'dns-troubleshooting') {
+  emit('lens', lens)
+  open.value = false
 }
 
 async function openSettings() {
-  open.value = false;
-  await nextTick();
-  emit("settings", document.querySelector<HTMLElement>("#logs-workspace-menu") ?? undefined);
+  open.value = false
+  await nextTick()
+  emit('settings', document.querySelector<HTMLElement>('#logs-workspace-menu') ?? undefined)
 }
 </script>
 

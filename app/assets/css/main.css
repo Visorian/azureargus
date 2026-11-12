@@ -1,6 +1,6 @@
-@import "tailwindcss";
-@import "@nuxt/ui";
-@import "vue-virtual-scroller/index.css";
+@import 'tailwindcss';
+@import '@nuxt/ui';
+@import 'vue-virtual-scroller/index.css';
 
 @theme static {
   --color-brand-gray-50: hsl(216, 24%, 97%);
@@ -99,7 +99,7 @@
   bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
-.mobile-log-endpoint .country-flag[aria-hidden="true"] {
+.mobile-log-endpoint .country-flag[aria-hidden='true'] {
   display: none;
 }
 
@@ -123,28 +123,28 @@
   }
 
   .touch-control:is(button, a),
-  .touch-fields [data-slot="trailingClear"] {
+  .touch-fields [data-slot='trailingClear'] {
     min-height: 2.75rem;
     min-width: 2.75rem;
   }
 
-  .touch-fields [role="option"] {
+  .touch-fields [role='option'] {
     min-height: 2.75rem;
     align-items: center;
   }
 
   .touch-control,
   .touch-control > input,
-  .touch-fields input:not([type="checkbox"], [type="radio"]),
+  .touch-fields input:not([type='checkbox'], [type='radio']),
   .touch-fields textarea,
   .touch-fields select,
-  .touch-fields button[aria-haspopup="listbox"],
-  .touch-fields [role="combobox"] {
+  .touch-fields button[aria-haspopup='listbox'],
+  .touch-fields [role='combobox'] {
     min-height: 2.75rem;
   }
 
   .touch-control > input,
-  .touch-fields input:not([type="checkbox"], [type="radio"]),
+  .touch-fields input:not([type='checkbox'], [type='radio']),
   .touch-fields textarea,
   .touch-fields select {
     font-size: 1rem;
@@ -158,8 +158,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-slot="overlay"],
-  [data-slot="content"] {
+  [data-slot='overlay'],
+  [data-slot='content'] {
     animation-duration: 0s !important;
   }
 }

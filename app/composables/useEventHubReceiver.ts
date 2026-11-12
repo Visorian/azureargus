@@ -1,3 +1,11 @@
+import { computed, watch } from 'vue'
+import type { Ref } from 'vue'
+
+import type { FirewallLogRecord } from '#shared/types/firewall'
+import type { ManagedEventHubStreamRequest } from '#shared/types/managedEventHub'
+import { consumeManagedEventHubStream } from '~/utils/managedEventHubStream'
+import { createNetworkRuleCorrelator } from '~/utils/networkRuleCorrelation'
+
 import {
   DEFAULT_BUFFER_SIZE,
   getEventHubLookbackStart,
@@ -6,154 +14,151 @@ import {
   parseEventHubConnectionString,
   validateEventHubConnectionForm,
   validateEventHubReceiverSettings,
-  type EventHubConnectionForm,
-} from "./useEventHubConnection";
-import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from "./useFirewallLogParser";
-import { createLogBatcher } from "./useLogBatcher";
-import { compareFirewallLogs } from "./useLogSorting";
-import type { FirewallLogRecord } from "#shared/types/firewall";
-import type { ManagedEventHubStreamRequest } from "#shared/types/managedEventHub";
-import { consumeManagedEventHubStream } from "~/utils/managedEventHubStream";
-import { createNetworkRuleCorrelator } from "~/utils/networkRuleCorrelation";
-import { computed, watch, type Ref } from "vue";
+} from './useEventHubConnection'
+import type { EventHubConnectionForm } from './useEventHubConnection'
+import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from './useFirewallLogParser'
+import { createLogBatcher } from './useLogBatcher'
+import { compareFirewallLogs } from './useLogSorting'
 
-type ReceiverStatus = "idle" | "connecting" | "connected" | "reconnecting" | "paused" | "error";
-const LIVE_TAIL_THRESHOLD_MS = 30_000;
-const SEQUENCE_NUMBER_PATTERN = /^\d+$/;
-const MANUAL_EVENT_HUB_MAX_BATCH_SIZE = 50;
-const MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_BASE_DELAY_MS = 1_000;
-const RECONNECT_MAX_DELAY_MS = 8_000;
+type ReceiverStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'paused' | 'error'
+const LIVE_TAIL_THRESHOLD_MS = 30_000
+const SEQUENCE_NUMBER_PATTERN = /^\d+$/
+const MANUAL_EVENT_HUB_MAX_BATCH_SIZE = 50
+const MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2
+const MAX_RECONNECT_ATTEMPTS = 5
+const RECONNECT_BASE_DELAY_MS = 1_000
+const RECONNECT_MAX_DELAY_MS = 8_000
 
 export interface ReceiverSubscription {
-  close(): Promise<void>;
+  close(): Promise<void>
 }
 export interface EventHubLogEvent {
-  body: unknown;
-  enqueuedTimeUtc?: Date | string;
-  sequenceNumber?: number | string;
-  offset?: number | string;
-  properties?: Record<string, unknown>;
+  body: unknown
+  enqueuedTimeUtc?: Date | string
+  sequenceNumber?: number | string
+  offset?: number | string
+  properties?: Record<string, unknown>
 }
 
 interface ReceiverPartitionContext {
-  partitionId: string;
-  updateCheckpoint?(event: EventHubLogEvent): Promise<void>;
+  partitionId: string
+  updateCheckpoint?(event: EventHubLogEvent): Promise<void>
 }
 
 type ReceiverStartPosition =
   | { enqueuedOn: Date }
-  | Record<string, { enqueuedOn: Date } | { sequenceNumber: number; isInclusive: false }>;
+  | Record<string, { enqueuedOn: Date } | { sequenceNumber: number; isInclusive: false }>
 
 export interface EventHubReceiverClient {
-  close(): Promise<void>;
-  getPartitionIds?(): Promise<string[]>;
+  close(): Promise<void>
+  getPartitionIds?(): Promise<string[]>
   subscribe(
     handlers: {
       processEvents(
         events: readonly EventHubLogEvent[],
         context: ReceiverPartitionContext,
-      ): Promise<void>;
-      processError(error: unknown): Promise<void>;
+      ): Promise<void>
+      processError(error: unknown): Promise<void>
     },
     options: {
-      maxBatchSize: number;
-      maxWaitTimeInSeconds: number;
-      startPosition: ReceiverStartPosition;
+      maxBatchSize: number
+      maxWaitTimeInSeconds: number
+      startPosition: ReceiverStartPosition
     },
-  ): ReceiverSubscription;
+  ): ReceiverSubscription
 }
 
-export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => EventHubReceiverClient;
+export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => EventHubReceiverClient
 
 export interface EventHubReceiverOptions {
-  loadClientFactory?: () => Promise<CreateEventHubReceiverClient>;
-  managedFetch?: typeof fetch;
-  revalidateManagedSession?: () => Promise<boolean>;
-  uiPublishingEnabled?: Readonly<Ref<boolean>>;
+  loadClientFactory?: () => Promise<CreateEventHubReceiverClient>
+  managedFetch?: typeof fetch
+  revalidateManagedSession?: () => Promise<boolean>
+  uiPublishingEnabled?: Readonly<Ref<boolean>>
 }
 
 export interface NormalizedLogBatchSink {
-  onClear?(): void;
-  onRecords(records: readonly FirewallLogRecord[]): void;
+  onClear?(): void
+  onRecords(records: readonly FirewallLogRecord[]): void
 }
 
-export type EventHubConnectionMode = "manual" | "managed";
+export type EventHubConnectionMode = 'manual' | 'managed'
 
-let client: EventHubReceiverClient | null = null;
-let subscription: ReceiverSubscription | null = null;
-let connectionGeneration = 0;
-let disconnectPromise: Promise<void> | null = null;
-let managedStreamController: AbortController | null = null;
-let managedStreamPromise: Promise<void> | null = null;
+let client: EventHubReceiverClient | null = null
+let subscription: ReceiverSubscription | null = null
+let connectionGeneration = 0
+let disconnectPromise: Promise<void> | null = null
+let managedStreamController: AbortController | null = null
+let managedStreamPromise: Promise<void> | null = null
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown Event Hub receiver error.";
+  return error instanceof Error ? error.message : 'Unknown Event Hub receiver error.'
 }
 
 function getTeardownErrorMessages(error: unknown) {
   return error instanceof AggregateError
     ? error.errors.map(getErrorMessage)
-    : [getErrorMessage(error)];
+    : [getErrorMessage(error)]
 }
 
 function getSequenceNumber(event: EventHubLogEvent) {
-  if (typeof event.sequenceNumber === "number") {
+  if (typeof event.sequenceNumber === 'number') {
     return Number.isSafeInteger(event.sequenceNumber) && event.sequenceNumber >= 0
       ? event.sequenceNumber
-      : null;
+      : null
   }
 
   if (
-    typeof event.sequenceNumber !== "string" ||
+    typeof event.sequenceNumber !== 'string' ||
     !SEQUENCE_NUMBER_PATTERN.test(event.sequenceNumber)
   ) {
-    return null;
+    return null
   }
 
-  const sequenceNumber = Number(event.sequenceNumber);
-  return Number.isSafeInteger(sequenceNumber) ? sequenceNumber : null;
+  const sequenceNumber = Number(event.sequenceNumber)
+  return Number.isSafeInteger(sequenceNumber) ? sequenceNumber : null
 }
 
 function addFilterOption(options: string[], seen: Set<string>, value: string) {
-  const trimmed = value.trim();
-  const key = trimmed.toLowerCase();
+  const trimmed = value.trim()
+  const key = trimmed.toLowerCase()
   if (!trimmed || seen.has(key)) {
-    return false;
+    return false
   }
 
-  seen.add(key);
-  options.push(trimmed);
-  return true;
+  seen.add(key)
+  options.push(trimmed)
+  return true
 }
 
-function sortFilterOptions(options: string[]) {
-  return options.sort((left, right) =>
-    left.localeCompare(right, undefined, { sensitivity: "base" }),
-  );
+const filterOptionCollator = new Intl.Collator(undefined, { sensitivity: 'base' })
+
+function sortFilterOptions(options: readonly string[]) {
+  return options.toSorted((left, right) => filterOptionCollator.compare(left, right))
 }
 
 async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient> {
-  const { EventHubConsumerClient } = await import("@azure/event-hubs");
+  const { EventHubConsumerClient } = await import('@azure/event-hubs')
 
   return (form) => {
-    const eventHubName = getEventHubName(form);
+    const eventHubName = getEventHubName(form)
     const eventHubClient =
-      eventHubName && !parseEventHubConnectionString(form.connectionString).has("entitypath")
+      eventHubName && !parseEventHubConnectionString(form.connectionString).has('entitypath')
         ? new EventHubConsumerClient(
             form.consumerGroup.trim(),
             form.connectionString.trim(),
             eventHubName,
           )
-        : new EventHubConsumerClient(form.consumerGroup.trim(), form.connectionString.trim());
+        : new EventHubConsumerClient(form.consumerGroup.trim(), form.connectionString.trim())
 
     return {
-      close: () => eventHubClient.close(),
-      getPartitionIds: () => eventHubClient.getPartitionIds(),
+      close: async () => {
+        await eventHubClient.close()
+      },
+      getPartitionIds: async () => await eventHubClient.getPartitionIds(),
       subscribe: (handlers, options) => eventHubClient.subscribe(handlers, options),
-    };
-  };
+    }
+  }
 }
 
 export function getManualEventHubStartPosition(
@@ -161,22 +166,22 @@ export function getManualEventHubStartPosition(
   expectedPartitionIds: readonly string[],
   resumeFrom?: ReadonlyMap<string, number>,
 ): ReceiverStartPosition {
-  const lookbackPosition = { enqueuedOn: getEventHubLookbackStart(lookbackMinutes) };
+  const lookbackPosition = { enqueuedOn: getEventHubLookbackStart(lookbackMinutes) }
   if (!resumeFrom || expectedPartitionIds.length === 0) {
-    return lookbackPosition;
+    return lookbackPosition
   }
 
   return Object.fromEntries(
     expectedPartitionIds.map((partitionId) => {
-      const sequenceNumber = resumeFrom.get(partitionId);
+      const sequenceNumber = resumeFrom.get(partitionId)
       return [
         partitionId,
         sequenceNumber === undefined
           ? lookbackPosition
           : { sequenceNumber, isInclusive: false as const },
-      ];
+      ]
     }),
-  );
+  )
 }
 
 function eventToFirewallLogs(
@@ -195,7 +200,7 @@ function eventToFirewallLogs(
       index: baseIndex + index,
       eventRecordIndex: index,
     }),
-  );
+  )
 }
 
 export function eventsToFirewallLogs(
@@ -203,365 +208,374 @@ export function eventsToFirewallLogs(
   partitionId: string,
   startIndex: number,
 ) {
-  const records: FirewallLogRecord[] = [];
-  let nextIndex = startIndex;
+  const records: FirewallLogRecord[] = []
+  let nextIndex = startIndex
 
   for (const event of events) {
-    const eventRecords = eventToFirewallLogs(event, partitionId, nextIndex);
-    nextIndex += eventRecords.length;
-    records.push(...eventRecords);
+    const eventRecords = eventToFirewallLogs(event, partitionId, nextIndex)
+    nextIndex += eventRecords.length
+    records.push(...eventRecords)
   }
 
   return {
     nextIndex,
     records,
-  };
+  }
 }
 
 export function useEventHubReceiver({
   loadClientFactory = loadEventHubClientFactory,
   managedFetch = globalThis.fetch,
   revalidateManagedSession = async () => {
-    const auth = useOidcAuth();
-    await auth.fetch();
-    return auth.loggedIn.value;
+    const auth = useOidcAuth()
+    await auth.fetch()
+    return auth.loggedIn.value
   },
   uiPublishingEnabled,
 }: EventHubReceiverOptions = {}) {
-  const status = useState<ReceiverStatus>("event-hub-status", () => "idle");
-  const errors = useState<string[]>("event-hub-errors", () => []);
-  const receivedCount = useState("event-hub-received-count", () => 0);
-  const sourceRecordCount = useState("event-hub-source-record-count", () => receivedCount.value);
+  const status = useState<ReceiverStatus>('event-hub-status', () => 'idle')
+  const errors = useState<string[]>('event-hub-errors', () => [])
+  const receivedCount = useState('event-hub-received-count', () => 0)
+  const sourceRecordCount = useState('event-hub-source-record-count', () => receivedCount.value)
   const latestSourceTimestamp = useState<string | null>(
-    "event-hub-latest-source-timestamp",
+    'event-hub-latest-source-timestamp',
     () => null,
-  );
-  const caughtUp = useState("event-hub-caught-up", () => false);
-  const visibleLimit = useState("event-hub-visible-limit", () => DEFAULT_BUFFER_SIZE);
-  const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value));
-  const uiActive = uiPublishingEnabled ?? computed(() => true);
-  const buffer = useBoundedLogBuffer<FirewallLogRecord>("firewall-log-records", rawBufferSize, {
-    compare: (left, right) => compareFirewallLogs(right, left, "timestamp"),
+  )
+  const caughtUp = useState('event-hub-caught-up', () => false)
+  const visibleLimit = useState('event-hub-visible-limit', () => DEFAULT_BUFFER_SIZE)
+  const rawBufferSize = computed(() => getRawLogBufferSize(visibleLimit.value))
+  const uiActive = uiPublishingEnabled ?? computed(() => true)
+  const buffer = useBoundedLogBuffer<FirewallLogRecord>('firewall-log-records', rawBufferSize, {
+    compare: (left, right) => compareFirewallLogs(right, left, 'timestamp'),
     publishingEnabled: uiActive,
     publishedSize: visibleLimit,
-  });
-  const categoryOptions = useState<string[]>("event-hub-category-options", () => []);
-  const actionOptions = useState<string[]>("event-hub-action-options", () => []);
-  const protocolOptions = useState<string[]>("event-hub-protocol-options", () => []);
-  const categoryKeys = new Set(categoryOptions.value.map((value) => value.toLowerCase()));
-  const actionKeys = new Set(actionOptions.value.map((value) => value.toLowerCase()));
-  const protocolKeys = new Set(protocolOptions.value.map((value) => value.toLowerCase()));
-  const logHistoryPersistence = useLogHistoryPersistence();
-  const paused = computed(() => status.value === "paused");
-  const normalizedBatchSinks = new Set<NormalizedLogBatchSink>();
-  const resumeFrom = new Map<string, number>();
-  let nextRecordIndex = sourceRecordCount.value;
-  let reconnectAttempts = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let reconnectInFlight = false;
+  })
+  const categoryOptions = useState<string[]>('event-hub-category-options', () => [])
+  const actionOptions = useState<string[]>('event-hub-action-options', () => [])
+  const protocolOptions = useState<string[]>('event-hub-protocol-options', () => [])
+  const categoryKeys = new Set(categoryOptions.value.map((value) => value.toLowerCase()))
+  const actionKeys = new Set(actionOptions.value.map((value) => value.toLowerCase()))
+  const protocolKeys = new Set(protocolOptions.value.map((value) => value.toLowerCase()))
+  const logHistoryPersistence = useLogHistoryPersistence()
+  const paused = computed(() => status.value === 'paused')
+  const normalizedBatchSinks = new Set<NormalizedLogBatchSink>()
+  const resumeFrom = new Map<string, number>()
+  let nextRecordIndex = sourceRecordCount.value
+  let reconnectAttempts = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectInFlight = false
   let activeConnection: {
-    form: EventHubConnectionForm;
-    mode: EventHubConnectionMode;
-  } | null = null;
+    form: EventHubConnectionForm
+    mode: EventHubConnectionMode
+  } | null = null
 
   function getResumeFrom() {
-    const snapshot: Record<string, number> = {};
+    const snapshot: Record<string, number> = {}
     for (const [partitionId, sequenceNumber] of resumeFrom) {
-      snapshot[partitionId] = sequenceNumber;
+      snapshot[partitionId] = sequenceNumber
     }
-    return snapshot;
-  }
-
-  function receiveEvents(events: readonly EventHubLogEvent[], partitionId: string) {
-    const acceptedEvents: EventHubLogEvent[] = [];
-    const previousSequenceNumber = resumeFrom.get(partitionId);
-    let highestSequenceNumber = previousSequenceNumber;
-    let checkpointEvent: EventHubLogEvent | null = null;
-
-    for (const event of events) {
-      const sequenceNumber = getSequenceNumber(event);
-      if (sequenceNumber !== null) {
-        if (highestSequenceNumber !== undefined && sequenceNumber <= highestSequenceNumber) {
-          continue;
-        }
-        highestSequenceNumber = sequenceNumber;
-        checkpointEvent = event;
-      }
-      acceptedEvents.push(event);
-    }
-
-    if (acceptedEvents.length === 0) {
-      return null;
-    }
-
-    const result = eventsToFirewallLogs(acceptedEvents, partitionId, nextRecordIndex);
-    nextRecordIndex = result.nextIndex;
-    batcher.pushMany(result.records);
-
-    if (
-      highestSequenceNumber !== undefined &&
-      (previousSequenceNumber === undefined || highestSequenceNumber > previousSequenceNumber)
-    ) {
-      resumeFrom.set(partitionId, highestSequenceNumber);
-    }
-    return checkpointEvent;
+    return snapshot
   }
 
   function updateUiFilterOptions(records: readonly FirewallLogRecord[], rebuild = false) {
     if (rebuild) {
-      categoryOptions.value = [];
-      actionOptions.value = [];
-      protocolOptions.value = [];
-      categoryKeys.clear();
-      actionKeys.clear();
-      protocolKeys.clear();
+      categoryOptions.value = []
+      actionOptions.value = []
+      protocolOptions.value = []
+      categoryKeys.clear()
+      actionKeys.clear()
+      protocolKeys.clear()
     }
-    const nextCategories = [...categoryOptions.value];
-    const nextActions = [...actionOptions.value];
-    const nextProtocols = [...protocolOptions.value];
-    let categoriesChanged = false;
-    let actionsChanged = false;
-    let protocolsChanged = false;
+    const nextCategories = [...categoryOptions.value]
+    const nextActions = [...actionOptions.value]
+    const nextProtocols = [...protocolOptions.value]
+    let categoriesChanged = false
+    let actionsChanged = false
+    let protocolsChanged = false
     for (const record of records) {
       categoriesChanged =
-        addFilterOption(nextCategories, categoryKeys, record.category) || categoriesChanged;
-      actionsChanged = addFilterOption(nextActions, actionKeys, record.action) || actionsChanged;
+        addFilterOption(nextCategories, categoryKeys, record.category) || categoriesChanged
+      actionsChanged = addFilterOption(nextActions, actionKeys, record.action) || actionsChanged
       protocolsChanged =
-        addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged;
+        addFilterOption(nextProtocols, protocolKeys, record.protocol) || protocolsChanged
     }
-    if (categoriesChanged) categoryOptions.value = sortFilterOptions(nextCategories);
-    if (actionsChanged) actionOptions.value = sortFilterOptions(nextActions);
-    if (protocolsChanged) protocolOptions.value = sortFilterOptions(nextProtocols);
+    if (categoriesChanged) {
+      categoryOptions.value = sortFilterOptions(nextCategories)
+    }
+    if (actionsChanged) {
+      actionOptions.value = sortFilterOptions(nextActions)
+    }
+    if (protocolsChanged) {
+      protocolOptions.value = sortFilterOptions(nextProtocols)
+    }
   }
 
   watch(
     uiActive,
     (active) => {
-      if (active) updateUiFilterOptions(buffer.getRawItems(), true);
+      if (active) {
+        updateUiFilterOptions(buffer.getRawItems(), true)
+      }
     },
-    { flush: "sync" },
-  );
+    { flush: 'sync' },
+  )
 
   function observeReceivedRecords(records: readonly FirewallLogRecord[]) {
-    sourceRecordCount.value += records.length;
-    let nextLatestSourceTimestamp = latestSourceTimestamp.value;
-    let latestEnqueuedTimestamp: string | null = null;
+    sourceRecordCount.value += records.length
+    let nextLatestSourceTimestamp = latestSourceTimestamp.value
+    let latestEnqueuedTimestamp: string | null = null
 
     for (const record of records) {
       if (
         (nextLatestSourceTimestamp === null || record.timestamp > nextLatestSourceTimestamp) &&
         Date.parse(record.timestamp) > 0
       ) {
-        nextLatestSourceTimestamp = record.timestamp;
+        nextLatestSourceTimestamp = record.timestamp
       }
       if (
         record.enqueuedTimeUtc &&
         (latestEnqueuedTimestamp === null || record.enqueuedTimeUtc > latestEnqueuedTimestamp)
       ) {
-        latestEnqueuedTimestamp = record.enqueuedTimeUtc;
+        latestEnqueuedTimestamp = record.enqueuedTimeUtc
       }
     }
 
-    latestSourceTimestamp.value = nextLatestSourceTimestamp;
+    latestSourceTimestamp.value = nextLatestSourceTimestamp
     if (
       !caughtUp.value &&
       latestEnqueuedTimestamp !== null &&
       Date.now() - Date.parse(latestEnqueuedTimestamp) <= LIVE_TAIL_THRESHOLD_MS
     ) {
-      caughtUp.value = true;
+      caughtUp.value = true
     }
   }
 
   function publishAcceptedRecords(records: readonly FirewallLogRecord[]) {
     for (const sink of normalizedBatchSinks) {
       try {
-        sink.onRecords(records);
+        sink.onRecords(records)
       } catch (error: unknown) {
-        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
+        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
       }
     }
-    buffer.pushMany(records);
-    if (uiActive.value) updateUiFilterOptions(records);
-    receivedCount.value += records.length;
-    logHistoryPersistence.queueRecords(records);
+    buffer.pushMany(records)
+    if (uiActive.value) {
+      updateUiFilterOptions(records)
+    }
+    receivedCount.value += records.length
+    logHistoryPersistence.queueRecords(records)
   }
 
   const networkRuleCorrelator = createNetworkRuleCorrelator({
     maxCandidates: () => rawBufferSize.value,
     onRecords: publishAcceptedRecords,
-  });
+  })
   const batcher = createLogBatcher<FirewallLogRecord>({
     onFlush: (records) => {
-      observeReceivedRecords(records);
-      networkRuleCorrelator.push(records);
+      observeReceivedRecords(records)
+      networkRuleCorrelator.push(records)
     },
-  });
+  })
+
+  function receiveEvents(events: readonly EventHubLogEvent[], partitionId: string) {
+    const acceptedEvents: EventHubLogEvent[] = []
+    const previousSequenceNumber = resumeFrom.get(partitionId)
+    let highestSequenceNumber = previousSequenceNumber
+    let checkpointEvent: EventHubLogEvent | null = null
+
+    for (const event of events) {
+      const sequenceNumber = getSequenceNumber(event)
+      if (sequenceNumber !== null) {
+        if (highestSequenceNumber !== undefined && sequenceNumber <= highestSequenceNumber) {
+          continue
+        }
+        highestSequenceNumber = sequenceNumber
+        checkpointEvent = event
+      }
+      acceptedEvents.push(event)
+    }
+
+    if (acceptedEvents.length === 0) {
+      return null
+    }
+
+    const result = eventsToFirewallLogs(acceptedEvents, partitionId, nextRecordIndex)
+    nextRecordIndex = result.nextIndex
+    batcher.pushMany(result.records)
+
+    if (
+      highestSequenceNumber !== undefined &&
+      (previousSequenceNumber === undefined || highestSequenceNumber > previousSequenceNumber)
+    ) {
+      resumeFrom.set(partitionId, highestSequenceNumber)
+    }
+    return checkpointEvent
+  }
 
   function cancelReconnect() {
     if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
     }
   }
 
-  function teardown(setIdle = true) {
+  async function teardown(setIdle = true) {
     if (setIdle) {
-      status.value = "idle";
+      status.value = 'idle'
     }
 
     if (disconnectPromise) {
-      return disconnectPromise;
+      await disconnectPromise
+      return
     }
 
-    const activeSubscription = subscription;
-    const activeClient = client;
-    const activeManagedController = managedStreamController;
-    const activeManagedStream = managedStreamPromise;
-    subscription = null;
-    client = null;
-    managedStreamController = null;
-    managedStreamPromise = null;
+    const activeSubscription = subscription
+    const activeClient = client
+    const activeManagedController = managedStreamController
+    const activeManagedStream = managedStreamPromise
+    subscription = null
+    client = null
+    managedStreamController = null
+    managedStreamPromise = null
 
     const teardownPromise = (async () => {
-      const failures: unknown[] = [];
+      const failures: unknown[] = []
 
-      activeManagedController?.abort();
+      activeManagedController?.abort()
       if (activeManagedStream) {
         try {
-          await activeManagedStream;
+          await activeManagedStream
         } catch (error: unknown) {
           if (!activeManagedController?.signal.aborted) {
-            failures.push(error);
+            failures.push(error)
           }
         }
       }
 
       if (activeSubscription) {
         try {
-          await activeSubscription.close();
+          await activeSubscription.close()
         } catch (error: unknown) {
-          failures.push(error);
+          failures.push(error)
         }
       }
 
       if (activeClient) {
         try {
-          await activeClient.close();
+          await activeClient.close()
         } catch (error: unknown) {
-          failures.push(error);
+          failures.push(error)
         }
       }
 
       try {
-        batcher.flush();
+        batcher.flush()
       } catch (error: unknown) {
-        failures.push(error);
+        failures.push(error)
       }
 
       try {
-        networkRuleCorrelator.flush();
+        networkRuleCorrelator.flush()
       } catch (error: unknown) {
-        failures.push(error);
+        failures.push(error)
       }
 
       try {
-        buffer.flush();
+        buffer.flush()
       } catch (error: unknown) {
-        failures.push(error);
+        failures.push(error)
       }
 
       try {
-        await logHistoryPersistence.flush();
+        await logHistoryPersistence.flush()
       } catch (error: unknown) {
-        failures.push(error);
+        failures.push(error)
       }
 
       try {
-        logHistoryPersistence.clearQueueIfDisabled();
+        logHistoryPersistence.clearQueueIfDisabled()
       } catch (error: unknown) {
-        failures.push(error);
+        failures.push(error)
       }
 
       if (failures.length > 0) {
-        const messages = failures.map(getErrorMessage);
-        errors.value = [...messages, ...errors.value].slice(0, 5);
-        throw new AggregateError(failures, messages.join(" "));
+        const messages = failures.map((failure) => getErrorMessage(failure))
+        errors.value = [...messages, ...errors.value].slice(0, 5)
+        throw new AggregateError(failures, messages.join(' '))
       }
-    })();
+    })()
 
-    const serializedPromise = teardownPromise.finally(() => {
-      if (disconnectPromise === serializedPromise) {
-        disconnectPromise = null;
+    disconnectPromise = teardownPromise
+    try {
+      await teardownPromise
+    } finally {
+      if (disconnectPromise === teardownPromise) {
+        disconnectPromise = null
       }
-    });
-    disconnectPromise = serializedPromise;
-    return serializedPromise;
+    }
   }
 
   async function disconnect() {
-    const clearTemporarySession = activeConnection?.mode === "manual";
-    connectionGeneration += 1;
-    activeConnection = null;
-    reconnectAttempts = 0;
-    cancelReconnect();
-    resumeFrom.clear();
+    const clearTemporarySession = activeConnection?.mode === 'manual'
+    connectionGeneration += 1
+    activeConnection = null
+    reconnectAttempts = 0
+    cancelReconnect()
+    resumeFrom.clear()
 
-    let teardownSucceeded = false;
-    let teardownErrors: string[] = [];
+    let teardownSucceeded = false
+    let teardownErrors: string[] = []
     try {
-      await teardown();
-      teardownSucceeded = true;
+      await teardown()
+      teardownSucceeded = true
     } catch (error: unknown) {
-      teardownErrors = getTeardownErrorMessages(error);
-      throw error;
+      teardownErrors = getTeardownErrorMessages(error)
+      throw error
     } finally {
       if (clearTemporarySession) {
-        clear();
-        const historyCleared = await logHistoryPersistence.clearHistory();
+        clear()
+        const historyCleared = await logHistoryPersistence.clearHistory()
         if (teardownSucceeded) {
-          errors.value = historyCleared ? [] : ["Stored Event Hub history could not be cleared."];
+          errors.value = historyCleared ? [] : ['Stored Event Hub history could not be cleared.']
         } else {
           errors.value = historyCleared
             ? teardownErrors.slice(0, 5)
-            : ["Stored Event Hub history could not be cleared.", ...teardownErrors].slice(0, 5);
+            : ['Stored Event Hub history could not be cleared.', ...teardownErrors].slice(0, 5)
         }
       }
     }
   }
 
   function markRecovered() {
-    reconnectAttempts = 0;
+    reconnectAttempts = 0
   }
 
   function scheduleReconnect(generation: number) {
     if (
       generation !== connectionGeneration ||
       activeConnection === null ||
-      status.value === "idle" ||
-      status.value === "paused" ||
-      status.value === "error" ||
+      status.value === 'idle' ||
+      status.value === 'paused' ||
+      status.value === 'error' ||
       reconnectTimer ||
       reconnectInFlight
     ) {
-      return;
+      return
     }
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      errors.value = ["Event Hub reconnect attempts exhausted", ...errors.value].slice(0, 5);
-      status.value = "error";
-      return;
+      errors.value = ['Event Hub reconnect attempts exhausted', ...errors.value].slice(0, 5)
+      status.value = 'error'
+      return
     }
 
-    const delay = Math.min(
-      RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts,
-      RECONNECT_MAX_DELAY_MS,
-    );
-    reconnectAttempts += 1;
-    status.value = "reconnecting";
+    const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS)
+    reconnectAttempts += 1
+    status.value = 'reconnecting'
     reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      void reconnect(generation);
-    }, delay);
+      reconnectTimer = null
+      void reconnect(generation)
+    }, delay)
   }
 
   async function openConnection(
@@ -570,142 +584,143 @@ export function useEventHubReceiver({
     generation: number,
     isRetry: boolean,
   ) {
-    if (mode === "managed") {
-      const controller = new AbortController();
-      managedStreamController = controller;
+    if (mode === 'managed') {
+      const controller = new AbortController()
+      managedStreamController = controller
       const request: ManagedEventHubStreamRequest = {
         consumerGroup: form.consumerGroup.trim(),
         lookbackMinutes: form.lookbackMinutes,
-      };
-      if (isRetry) {
-        request.resumeFrom = getResumeFrom();
       }
-      const response = await managedFetch("/api/event-hub/stream", {
-        method: "POST",
-        credentials: "same-origin",
+      if (isRetry) {
+        request.resumeFrom = getResumeFrom()
+      }
+      const response = await managedFetch('/api/event-hub/stream', {
+        method: 'POST',
+        credentials: 'same-origin',
         headers: {
-          accept: "application/x-ndjson",
-          "content-type": "application/json",
+          accept: 'application/x-ndjson',
+          'content-type': 'application/json',
         },
         body: JSON.stringify(request),
         signal: controller.signal,
-      });
+      })
       if (!response.ok || response.body === null) {
-        throw new Error(`Managed Event Hub connection failed (${response.status})`);
+        throw new Error(`Managed Event Hub connection failed (${response.status})`)
       }
       if (generation !== connectionGeneration) {
-        controller.abort();
-        return false;
+        controller.abort()
+        return false
       }
 
-      status.value = "connected";
-      const streamPromise = consumeManagedEventHubStream(
+      status.value = 'connected'
+      const streamConsumption = consumeManagedEventHubStream(
         response.body,
         async (envelope) => {
           if (generation !== connectionGeneration) {
-            return;
+            return
           }
-          if (envelope.type === "heartbeat") {
-            markRecovered();
-            return;
+          if (envelope.type === 'heartbeat') {
+            markRecovered()
+            return
           }
-          if (envelope.type === "caught-up") {
-            markRecovered();
-            caughtUp.value = true;
-            return;
+          if (envelope.type === 'caught-up') {
+            markRecovered()
+            caughtUp.value = true
+            return
           }
-          if (envelope.type === "error") {
-            errors.value = [envelope.message, ...errors.value].slice(0, 5);
-            if (envelope.message === "Session expired") {
-              const sessionRecovered = await revalidateManagedSession().catch(() => false);
+          if (envelope.type === 'error') {
+            errors.value = [envelope.message, ...errors.value].slice(0, 5)
+            if (envelope.message === 'Session expired') {
+              const sessionRecovered = await revalidateManagedSession().catch(() => false)
               if (generation !== connectionGeneration) {
-                return;
+                return
               }
-              controller.abort();
+              controller.abort()
               if (sessionRecovered) {
-                scheduleReconnect(generation);
+                scheduleReconnect(generation)
               } else {
                 errors.value = [
-                  "Event Hub session expired. Sign in again to reconnect.",
+                  'Event Hub session expired. Sign in again to reconnect.',
                   ...errors.value,
-                ].slice(0, 5);
-                status.value = "error";
+                ].slice(0, 5)
+                status.value = 'error'
               }
             }
-            return;
+            return
           }
-          if (status.value !== "connected") {
-            return;
+          if (status.value !== 'connected') {
+            return
           }
 
-          markRecovered();
+          markRecovered()
           for (const event of envelope.events) {
             receiveEvents(
               [{ ...event, properties: event.applicationProperties }],
               event.partitionId,
-            );
+            )
           }
         },
         controller.signal,
       )
-        .then(() => {
+      const streamPromise = (async () => {
+        try {
+          await streamConsumption
           if (generation === connectionGeneration && !controller.signal.aborted) {
-            errors.value = ["Managed Event Hub stream ended", ...errors.value].slice(0, 5);
-            scheduleReconnect(generation);
+            errors.value = ['Managed Event Hub stream ended', ...errors.value].slice(0, 5)
+            scheduleReconnect(generation)
           }
-        })
-        .catch((error: unknown) => {
+        } catch (error: unknown) {
           if (generation === connectionGeneration && !controller.signal.aborted) {
-            errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-            scheduleReconnect(generation);
+            errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
+            scheduleReconnect(generation)
           }
-        })
-        .finally(() => {
+        } finally {
           if (managedStreamController === controller) {
-            managedStreamController = null;
-            managedStreamPromise = null;
+            managedStreamController = null
+            managedStreamPromise = null
           }
-        });
-      managedStreamPromise = streamPromise;
-      return true;
+        }
+      })()
+      managedStreamPromise = streamPromise
+      return true
     }
 
-    const createClient = await loadClientFactory();
+    const createClient = await loadClientFactory()
     if (generation !== connectionGeneration) {
-      return false;
+      return false
     }
 
-    const nextClient = createClient(form);
-    const expectedPartitionIds = (await nextClient.getPartitionIds?.()) ?? [];
+    const nextClient = createClient(form)
+    const expectedPartitionIds = (await nextClient.getPartitionIds?.()) ?? []
     if (generation !== connectionGeneration) {
-      await nextClient.close();
-      return false;
+      await nextClient.close()
+      return false
     }
-    client = nextClient;
+    client = nextClient
     subscription = nextClient.subscribe(
       {
         processEvents: async (events, context) => {
-          if (generation !== connectionGeneration || status.value !== "connected") {
-            return;
+          if (generation !== connectionGeneration || status.value !== 'connected') {
+            return
           }
 
-          markRecovered();
+          markRecovered()
           if (events.length === 0) {
-            caughtUp.value = true;
-            return;
+            caughtUp.value = true
+            return
           }
 
-          const checkpointEvent = receiveEvents(events, context.partitionId);
+          const checkpointEvent = receiveEvents(events, context.partitionId)
           if (checkpointEvent && context.updateCheckpoint) {
-            await context.updateCheckpoint(checkpointEvent);
+            await context.updateCheckpoint(checkpointEvent)
           }
         },
         processError: async (error) => {
           if (generation !== connectionGeneration) {
-            return;
+            return
           }
-          errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-          scheduleReconnect(generation);
+          errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
+          scheduleReconnect(generation)
         },
       },
       {
@@ -717,174 +732,179 @@ export function useEventHubReceiver({
           isRetry ? resumeFrom : undefined,
         ),
       },
-    );
-    status.value = "connected";
-    return true;
+    )
+    status.value = 'connected'
+    return true
   }
 
   async function reconnect(generation: number) {
     if (generation !== connectionGeneration || activeConnection === null) {
-      return;
+      return
     }
 
-    reconnectInFlight = true;
-    let retryFailed = false;
+    reconnectInFlight = true
+    let retryFailed = false
     try {
-      await teardown(false);
+      await teardown(false)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- disconnect() can clear activeConnection while teardown() is awaited
       if (generation !== connectionGeneration || activeConnection === null) {
-        return;
+        return
       }
-      status.value = "reconnecting";
+      status.value = 'reconnecting'
       const opened = await openConnection(
         activeConnection.form,
         activeConnection.mode,
         generation,
         true,
-      );
-      retryFailed = !opened;
+      )
+      retryFailed = !opened
     } catch (error: unknown) {
       if (generation === connectionGeneration) {
-        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5);
-        retryFailed = true;
+        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
+        retryFailed = true
       }
     } finally {
-      reconnectInFlight = false;
+      reconnectInFlight = false
     }
 
     if (retryFailed && generation === connectionGeneration) {
-      scheduleReconnect(generation);
+      scheduleReconnect(generation)
     }
   }
 
-  async function connect(form: EventHubConnectionForm, mode: EventHubConnectionMode = "manual") {
+  async function connect(form: EventHubConnectionForm, mode: EventHubConnectionMode = 'manual') {
     const validationErrors =
-      mode === "managed"
+      mode === 'managed'
         ? validateEventHubReceiverSettings(form)
-        : validateEventHubConnectionForm(form);
+        : validateEventHubConnectionForm(form)
     if (validationErrors.length > 0) {
-      errors.value = validationErrors;
-      return false;
+      errors.value = validationErrors
+      return false
     }
 
-    const generation = ++connectionGeneration;
-    cancelReconnect();
-    reconnectAttempts = 0;
-    resumeFrom.clear();
-    activeConnection = { form: { ...form }, mode };
+    const generation = ++connectionGeneration
+    cancelReconnect()
+    reconnectAttempts = 0
+    resumeFrom.clear()
+    activeConnection = { form: { ...form }, mode }
 
     try {
-      await teardown(false);
+      await teardown(false)
     } catch (error: unknown) {
-      activeConnection = null;
-      status.value = "error";
-      if (mode === "manual") {
-        clear();
-        const historyCleared = await logHistoryPersistence.clearHistory();
-        const teardownErrors = getTeardownErrorMessages(error);
+      activeConnection = null
+      status.value = 'error'
+      if (mode === 'manual') {
+        clear()
+        const historyCleared = await logHistoryPersistence.clearHistory()
+        const teardownErrors = getTeardownErrorMessages(error)
         errors.value = historyCleared
           ? teardownErrors.slice(0, 5)
-          : ["Stored Event Hub history could not be cleared.", ...teardownErrors].slice(0, 5);
+          : ['Stored Event Hub history could not be cleared.', ...teardownErrors].slice(0, 5)
       }
-      return false;
+      return false
     }
 
     if (generation !== connectionGeneration) {
-      return false;
+      return false
     }
 
-    if (mode === "manual") {
-      clear();
-      errors.value = [];
-      const historyCleared = await logHistoryPersistence.clearHistory();
+    if (mode === 'manual') {
+      clear()
+      errors.value = []
+      const historyCleared = await logHistoryPersistence.clearHistory()
       if (generation !== connectionGeneration) {
-        return false;
+        return false
       }
       if (!historyCleared) {
-        activeConnection = null;
-        status.value = "error";
-        errors.value = ["Stored Event Hub history could not be cleared."];
-        return false;
+        activeConnection = null
+        status.value = 'error'
+        errors.value = ['Stored Event Hub history could not be cleared.']
+        return false
       }
     }
 
-    status.value = "connecting";
-    errors.value = [];
-    visibleLimit.value = form.bufferSize;
-    latestSourceTimestamp.value = null;
-    caughtUp.value = false;
+    status.value = 'connecting'
+    errors.value = []
+    visibleLimit.value = form.bufferSize
+    latestSourceTimestamp.value = null
+    caughtUp.value = false
 
     try {
-      return await openConnection(form, mode, generation, false);
+      return await openConnection(form, mode, generation, false)
     } catch (error: unknown) {
       if (generation !== connectionGeneration) {
-        return false;
+        return false
       }
 
-      const connectionError = getErrorMessage(error);
+      const connectionError = getErrorMessage(error)
 
-      await teardown(false).catch(() => undefined);
+      try {
+        await teardown(false)
+      } catch {
+        // Best-effort cleanup; teardown() records its own failures in errors.
+      }
 
       if (generation === connectionGeneration) {
-        errors.value = [connectionError, ...errors.value].slice(0, 5);
-        status.value = "connected";
-        scheduleReconnect(generation);
+        errors.value = [connectionError, ...errors.value].slice(0, 5)
+        status.value = 'connected'
+        scheduleReconnect(generation)
       }
 
-      return false;
+      return false
     }
   }
 
   function pause() {
-    if (status.value === "connected") {
-      status.value = "paused";
+    if (status.value === 'connected') {
+      status.value = 'paused'
     }
   }
 
   function resume() {
-    if (status.value === "paused") {
-      status.value = "connected";
+    if (status.value === 'paused') {
+      status.value = 'connected'
     }
   }
 
   function clear() {
-    batcher.clear();
-    networkRuleCorrelator.clear();
-    logHistoryPersistence.clearQueueIfDisabled();
-    buffer.clear();
-    categoryOptions.value = [];
-    actionOptions.value = [];
-    protocolOptions.value = [];
-    categoryKeys.clear();
-    actionKeys.clear();
-    protocolKeys.clear();
-    receivedCount.value = 0;
-    sourceRecordCount.value = 0;
-    nextRecordIndex = 0;
-    latestSourceTimestamp.value = null;
+    batcher.clear()
+    networkRuleCorrelator.clear()
+    logHistoryPersistence.clearQueueIfDisabled()
+    buffer.clear()
+    categoryOptions.value = []
+    actionOptions.value = []
+    protocolOptions.value = []
+    categoryKeys.clear()
+    actionKeys.clear()
+    protocolKeys.clear()
+    receivedCount.value = 0
+    sourceRecordCount.value = 0
+    nextRecordIndex = 0
+    latestSourceTimestamp.value = null
     if (managedStreamController === null) {
-      caughtUp.value = false;
+      caughtUp.value = false
     }
     for (const sink of normalizedBatchSinks) {
-      sink.onClear?.();
+      sink.onClear?.()
     }
   }
 
   async function reset() {
-    const clearTemporarySession = activeConnection?.mode === "manual";
+    const clearTemporarySession = activeConnection?.mode === 'manual'
     if (clearTemporarySession) {
-      await disconnect();
-      return;
+      await disconnect()
+      return
     }
 
-    const disconnecting = disconnect();
-    clear();
-    errors.value = [];
-    await disconnecting;
+    const disconnecting = disconnect()
+    clear()
+    errors.value = []
+    await disconnecting
   }
 
   function addNormalizedBatchSink(sink: NormalizedLogBatchSink) {
-    normalizedBatchSinks.add(sink);
-    return () => normalizedBatchSinks.delete(sink);
+    normalizedBatchSinks.add(sink)
+    return () => normalizedBatchSinks.delete(sink)
   }
 
   return {
@@ -909,5 +929,5 @@ export function useEventHubReceiver({
     resume,
     clear,
     addNormalizedBatchSink,
-  };
+  }
 }

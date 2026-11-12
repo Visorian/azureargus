@@ -1,33 +1,33 @@
-import type { Ref } from "vue";
+import type { Ref } from 'vue'
 
 import type {
   FirewallLogRecord,
   FirewallLogSortDirection,
   FirewallLogSortKey,
   FirewallLogSortState,
-} from "#shared/types/firewall";
+} from '#shared/types/firewall'
 
 export function createDefaultLogSort(): FirewallLogSortState {
   return {
-    key: "timestamp",
-    direction: "desc",
-  };
+    key: 'timestamp',
+    direction: 'desc',
+  }
 }
 
 function normalizeSortValue(log: FirewallLogRecord, key: FirewallLogSortKey) {
-  if (key === "timestamp") {
-    return new Date(log.timestamp).getTime();
+  if (key === 'timestamp') {
+    return new Date(log.timestamp).getTime()
   }
 
-  return (log[key] ?? "").toLowerCase();
+  return (log[key] ?? '').toLowerCase()
 }
 
 function compareValues(left: number | string, right: number | string) {
-  if (typeof left === "number" && typeof right === "number") {
-    return left - right;
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right
   }
 
-  return String(left).localeCompare(String(right));
+  return String(left).localeCompare(String(right))
 }
 
 export function compareFirewallLogs(
@@ -35,22 +35,24 @@ export function compareFirewallLogs(
   right: FirewallLogRecord,
   key: FirewallLogSortKey,
 ) {
-  const result = compareValues(normalizeSortValue(left, key), normalizeSortValue(right, key));
-  return result === 0 ? left.id.localeCompare(right.id) : result;
+  const result = compareValues(normalizeSortValue(left, key), normalizeSortValue(right, key))
+  return result === 0 ? left.id.localeCompare(right.id) : result
 }
 
 export function sortFirewallLogs(logs: FirewallLogRecord[], sort: FirewallLogSortState) {
-  const direction = sort.direction === "asc" ? 1 : -1;
+  const direction = sort.direction === 'asc' ? 1 : -1
   const compare = (left: FirewallLogRecord, right: FirewallLogRecord) =>
-    compareFirewallLogs(left, right, sort.key) * direction;
+    compareFirewallLogs(left, right, sort.key) * direction
 
-  for (let index = 1; index < logs.length; index += 1) {
-    if (compare(logs[index - 1]!, logs[index]!) > 0) {
-      return logs.toSorted(compare);
+  let previous: FirewallLogRecord | undefined
+  for (const log of logs) {
+    if (previous !== undefined && compare(previous, log) > 0) {
+      return logs.toSorted(compare)
     }
+    previous = log
   }
 
-  return logs;
+  return logs
 }
 
 export function getNextSortDirection(
@@ -58,38 +60,38 @@ export function getNextSortDirection(
   key: FirewallLogSortKey,
 ): FirewallLogSortDirection {
   if (current.key === key) {
-    return current.direction === "asc" ? "desc" : "asc";
+    return current.direction === 'asc' ? 'desc' : 'asc'
   }
 
-  return key === "timestamp" ? "desc" : "asc";
+  return key === 'timestamp' ? 'desc' : 'asc'
 }
 
 export function useLogSorting(
   logs: Readonly<Ref<FirewallLogRecord[]>>,
   providedSort?: FirewallLogSortState,
 ) {
-  const sort = providedSort ?? reactive(createDefaultLogSort());
-  const sortedLogs = computed(() => sortFirewallLogs(logs.value, sort));
+  const sort = providedSort ?? reactive(createDefaultLogSort())
+  const sortedLogs = computed(() => sortFirewallLogs(logs.value, sort))
 
   function setSort(key: FirewallLogSortKey) {
-    sort.direction = getNextSortDirection(sort, key);
-    sort.key = key;
+    sort.direction = getNextSortDirection(sort, key)
+    sort.key = key
   }
 
   function getSortIcon(key: FirewallLogSortKey) {
     if (sort.key !== key) {
-      return "i-lucide-arrow-up-down";
+      return 'i-lucide-arrow-up-down'
     }
 
-    return sort.direction === "asc" ? "i-lucide-arrow-up" : "i-lucide-arrow-down";
+    return sort.direction === 'asc' ? 'i-lucide-arrow-up' : 'i-lucide-arrow-down'
   }
 
   function getAriaSort(key: FirewallLogSortKey) {
     if (sort.key !== key) {
-      return "none";
+      return 'none'
     }
 
-    return sort.direction === "asc" ? "ascending" : "descending";
+    return sort.direction === 'asc' ? 'ascending' : 'descending'
   }
 
   return {
@@ -98,5 +100,5 @@ export function useLogSorting(
     setSort,
     getSortIcon,
     getAriaSort,
-  };
+  }
 }

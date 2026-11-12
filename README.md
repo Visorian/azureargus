@@ -11,6 +11,7 @@ into your own Azure environment.
 - [Features](#features)
 - [Live Event Hub streaming](#live-event-hub-streaming)
 - [DNS analytics](#dns-analytics)
+- [Firewall rule simulator](#firewall-rule-simulator)
 - [Quick start](#quick-start)
   - [Use public hosted instance](#use-public-hosted-instance)
   - [Deploy your own instance](#deploy-your-own-instance)
@@ -36,6 +37,7 @@ into your own Azure environment.
 - Add or remove filters directly from filterable table values.
 - Optionally retain normalized logs in browser storage for local analysis.
 - Resolve public destination IPs to country flags.
+- Inspect effective firewall policy order and trace new connections, including inherited rules and IP groups.
 - Run without application login in [temporary mode](#temporary-mode), or use fixed data sources and
   OIDC login in [managed mode](#managed-mode).
 
@@ -46,6 +48,57 @@ into your own Azure environment.
 ## DNS analytics
 
 ![Azure Argus showing DNS activity and analysis controls](./docs/assets/azure-argus-dns-analytics.png)
+
+## Firewall rule simulator
+
+Open **Rule simulator** to see collections in processing order and test a new connection. Select a
+child policy to combine it with its base policy. Sibling policies remain separate. Azure rejects
+a base policy that itself inherits from another policy; deeper imported chains are flagged as
+indeterminate.
+
+Enter one source IPv4 address, destination IPv4 address, and port, then select **Simulate connection**.
+For application rules, choose the application protocol and enter the client's hostname in **Host / SNI**.
+**Inspect evaluation** opens the relevant collection; search filters the list without changing its
+processing positions. CIDRs and ranges are supported in policy rules and IP groups, while each
+connection test uses a single source address.
+Each import starts with blank source and destination fields. **Use example** fills a sample connection.
+
+Paste Azure CLI or REST JSON, upload JSON files together, or connect to Azure and enter policy or
+policy-backed firewall resource IDs. Live loading reads each selected policy, its ancestors, all
+collection groups, and referenced IP groups. It uses the same browser Azure sign-in configuration
+as delegated Log Analytics and requires read access to those resources. It does not change Azure
+resources. Import and simulation also work without Azure sign-in.
+
+For offline imports, choose **Get export command**. Enter a firewall name, a policy name, or both.
+Subscription and resource group are optional. Choose Azure CLI in Bash,
+Azure PowerShell, or Azure CLI in PowerShell, then run the three to five command lines together in
+your authenticated Azure Cloud Shell session. The commands download the Azure Argus export helper
+from the same published Git revision as the application, then run the saved script. Choose a JSON
+file to upload or text to paste. For file output, download `firewall-configuration.json` from Cloud
+Shell and upload it here.
+A firewall exports its attached policy chain. Selecting a base policy also includes all child
+policies. The command includes referenced IP groups automatically and preserves an existing output
+file. Rename or remove it before running the export again.
+
+For manual imports, include the policies, their complete collection groups, and the IP groups.
+A policy export alone contains references rather than the rules. Separate JSON responses can be
+pasted one after another or wrapped in a `resources` array. ARM template imports require resolved
+values. Definite results require a complete `ruleCollectionGroups` reference list on every policy.
+A template or projection without that list remains indeterminate, even if it contains nested groups.
+The export command and live loader include the list. **Download snapshot** saves a resource bundle for
+later import.
+
+The simulator evaluates new connections against configured DNAT, network, and application rules.
+It shows unresolved matches when a result depends on missing data, service tags, firewall DNS,
+URL or category classification, application destination addresses, geography, Kubernetes selectors,
+or built-in infrastructure rules. Threat intelligence, IDPS, TLS
+inspection, routing, and established connection state can affect actual traffic. Results describe
+configured-rule decisions rather than a guarantee that a connection will succeed.
+
+Collection order follows Microsoft's [rule processing documentation](https://learn.microsoft.com/en-us/azure/firewall/rule-processing).
+Parent DNAT collections are excluded from a child's effective rules according to the explicit
+[policy inheritance documentation](https://learn.microsoft.com/en-us/azure/firewall-manager/policy-overview),
+which conflicts with the parent DNAT entries in Microsoft's processing example.
 
 ## Quick start
 

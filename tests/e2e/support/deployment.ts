@@ -1,29 +1,29 @@
-import { type Page } from "@playwright/test";
+import type { Page } from '@playwright/test'
 
 export async function mockManagedDeployment(
   page: Page,
   availability: { eventHub: boolean; logAnalytics: boolean },
 ) {
-  await page.route("**/api/capabilities", async (route) => {
+  await page.route('**/api/capabilities', async (route) => {
     await route.fulfill({
-      contentType: "application/json",
+      contentType: 'application/json',
       json: {
-        mode: "managed",
+        mode: 'managed',
         eventHubAvailable: availability.eventHub,
         predefinedLogAnalyticsAvailable: availability.logAnalytics,
         temporaryLogAnalyticsAuthAvailable: false,
         errors: [],
       },
-    });
-  });
-  await page.route("**/api/_auth/session", async (route) => {
+    })
+  })
+  await page.route('**/api/_auth/session', async (route) => {
     await route.fulfill({
-      contentType: "application/json",
+      contentType: 'application/json',
       json: {
         expireAt: Math.floor(Date.now() / 1_000) + 3_600,
-        name: "Managed User",
-        provider: "entra",
+        name: 'Managed User',
+        provider: 'entra',
       },
-    });
-  });
+    })
+  })
 }

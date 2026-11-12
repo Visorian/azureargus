@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { useMediaQuery } from "@vueuse/core";
-import { RecycleScroller } from "vue-virtual-scroller";
+import { useMediaQuery } from '@vueuse/core'
+import { RecycleScroller } from 'vue-virtual-scroller'
 
-import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from "#shared/types/azureAccess";
+import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
 import type {
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
@@ -11,74 +11,69 @@ import type {
   DnsListQueryResponse,
   DnsReadinessResponse,
   DnsSort,
-} from "#shared/types/dns";
-import type { FirewallLogRecord, FirewallLogSortKey } from "#shared/types/firewall";
-import type { LogAnalyticsStorageKind } from "#shared/types/logAnalytics";
-import { hasDnsReadinessData } from "#shared/utils/dnsReadiness";
-import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from "#shared/utils/logAnalytics";
-import visorianNegative from "~/assets/img/visorian-negative.svg";
-import visorianPositive from "~/assets/img/visorian-positive.svg";
-import type { MobileQueryState } from "~/components/logs/LogAnalysisToolbar.vue";
-import type { AnalysisMode } from "~/composables/useAnalysisMode";
-import type { DnsReadinessTarget } from "~/composables/useDnsSourceReadiness";
-import {
-  validateEventHubConnectionForm,
-  type EventHubConnectionForm,
-} from "~/composables/useEventHubConnection";
+} from '#shared/types/dns'
+import type { FirewallLogRecord, FirewallLogSortKey } from '#shared/types/firewall'
+import type { LogAnalyticsQueryResponse, LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
+import { hasDnsReadinessData } from '#shared/utils/dnsReadiness'
+import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from '#shared/utils/logAnalytics'
+import visorianNegative from '~/assets/img/visorian-negative.svg'
+import visorianPositive from '~/assets/img/visorian-positive.svg'
+import type { MobileQueryState } from '~/components/logs/LogAnalysisToolbar.vue'
+import type { AnalysisMode } from '~/composables/useAnalysisMode'
+import type { DnsReadinessTarget } from '~/composables/useDnsSourceReadiness'
+import type { EventHubConnectionForm } from '~/composables/useEventHubConnection'
+import { validateEventHubConnectionForm } from '~/composables/useEventHubConnection'
 import {
   createDefaultLogFilters,
   isLogCategoryFilterValueActive,
   isLogFilterValueActive,
   toggleLogCategoryFilterValue,
   toggleLogFilterValue,
-} from "~/composables/useLogQuery";
-import { createDefaultLogSort } from "~/composables/useLogSorting";
-import { formatIcmpProtocol } from "~/utils/icmpProtocol";
-import {
-  createDefaultLogAnalysisDateRange,
-  LOG_ANALYSIS_CATEGORIES,
-  type LogAnalysisDateRange,
-} from "~/utils/logAnalysis";
-import { createLogAnalyticsAdminConsentUrl, isEntraId } from "~/utils/logAnalyticsOnboarding";
-import { createTemporaryLogAnalyticsClient } from "~/utils/temporaryLogAnalyticsClient.client";
+} from '~/composables/useLogQuery'
+import { createDefaultLogSort } from '~/composables/useLogSorting'
+import { formatIcmpProtocol } from '~/utils/icmpProtocol'
+import { createDefaultLogAnalysisDateRange, LOG_ANALYSIS_CATEGORIES } from '~/utils/logAnalysis'
+import type { LogAnalysisDateRange } from '~/utils/logAnalysis'
+import { createLogAnalyticsAdminConsentUrl, isEntraId } from '~/utils/logAnalyticsOnboarding'
+import { createTemporaryLogAnalyticsClient } from '~/utils/temporaryLogAnalyticsClient.client'
 
 definePageMeta({
-  layout: "application",
-});
+  layout: 'application',
+})
 
 interface LogTableColumn {
-  key: FirewallLogSortKey;
-  label: string;
+  key: FirewallLogSortKey
+  label: string
 }
 
 interface DetailField {
-  countryDestination?: string;
-  label: string;
-  value?: string;
-  mono?: boolean;
-  wide?: boolean;
+  countryDestination?: string
+  label: string
+  value?: string
+  mono?: boolean
+  wide?: boolean
 }
 
 interface DetailSection {
-  fields: DetailField[];
-  title?: string;
+  fields: DetailField[]
+  title?: string
 }
 
 interface LogsEmptyState {
-  description: string;
-  settingsActionLabel?: string;
-  title: string;
+  description: string
+  settingsActionLabel?: string
+  title: string
 }
 
 type QuickFilterKey =
-  | "category"
-  | "action"
-  | "protocol"
-  | "source"
-  | "sourcePort"
-  | "destination"
-  | "destinationPort";
-type LogsLens = "all-logs" | "dns-troubleshooting";
+  | 'category'
+  | 'action'
+  | 'protocol'
+  | 'source'
+  | 'sourcePort'
+  | 'destination'
+  | 'destinationPort'
+type LogsLens = 'all-logs' | 'dns-troubleshooting'
 
 const {
   browserTimeZone: logBrowserTimeZone,
@@ -88,127 +83,132 @@ const {
   timeZone: logTimeZone,
   use12Hour: use12HourTime,
   useLocalTime,
-} = useLogTimeFormat();
+} = useLogTimeFormat()
 const logTableColumns = computed<LogTableColumn[]>(() => [
-  { key: "timestamp", label: `Date (${logTimeZone.value})` },
-  { key: "category", label: "Category" },
-  { key: "action", label: "Action" },
-  { key: "protocol", label: "Protocol" },
-  { key: "sourceIp", label: "Source" },
-  { key: "sourcePort", label: "Src port" },
-  { key: "destinationIp", label: "Destination" },
-  { key: "destinationPort", label: "Dst port" },
-  { key: "rule", label: "Rule" },
-]);
+  { key: 'timestamp', label: `Date (${logTimeZone.value})` },
+  { key: 'category', label: 'Category' },
+  { key: 'action', label: 'Action' },
+  { key: 'protocol', label: 'Protocol' },
+  { key: 'sourceIp', label: 'Source' },
+  { key: 'sourcePort', label: 'Src port' },
+  { key: 'destinationIp', label: 'Destination' },
+  { key: 'destinationPort', label: 'Dst port' },
+  { key: 'rule', label: 'Rule' },
+])
 const quickFilterButtonClass =
-  "inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100";
+  'inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100'
 
-const runtimeConfig = useRuntimeConfig();
-const appConfig = useAppConfig();
-const deployment = useDeploymentCapabilities();
-const capabilities = computed(() => deployment.capabilities.value);
-const managedMode = computed(() => capabilities.value?.mode === "managed");
+const runtimeConfig = useRuntimeConfig()
+const appConfig = useAppConfig()
+const deployment = useDeploymentCapabilities()
+const capabilities = computed(() => deployment.capabilities.value)
+const managedMode = computed(() => capabilities.value?.mode === 'managed')
 const eventHubSourceAvailable = computed(
-  () => capabilities.value?.mode === "anonymous" || capabilities.value?.eventHubAvailable === true,
-);
+  () => capabilities.value?.mode === 'anonymous' || capabilities.value?.eventHubAvailable === true,
+)
 const logAnalyticsSourceAvailable = computed(() =>
-  capabilities.value?.mode === "anonymous"
+  capabilities.value?.mode === 'anonymous'
     ? capabilities.value.temporaryLogAnalyticsAuthAvailable
     : capabilities.value?.predefinedLogAnalyticsAvailable === true,
-);
-const versionNumber = appConfig.versionNumber as string;
-const activeLens = ref<LogsLens>("all-logs");
-const isMobile = useMediaQuery("(max-width: 1023px)");
-const logToolbar = useTemplateRef("logToolbar");
-const dnsView = useTemplateRef("dnsView");
-const allLogsLensActive = computed(() => activeLens.value === "all-logs");
-const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive });
+)
+const versionNumber = appConfig.versionNumber
+const activeLens = ref<LogsLens>('all-logs')
+const isMobile = useMediaQuery('(max-width: 1023px)')
+const logToolbar = useTemplateRef('logToolbar')
+const dnsView = useTemplateRef('dnsView')
+const allLogsLensActive = computed(() => activeLens.value === 'all-logs')
+const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive })
 const logTableGridClass = computed(() =>
   use12HourTime.value
-    ? "grid-cols-[14rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]"
-    : "grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]",
-);
-const logTableMinWidthClass = computed(() => (use12HourTime.value ? "min-w-360" : "min-w-352"));
+    ? 'grid-cols-[14rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]'
+    : 'grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]',
+)
+const logTableMinWidthClass = computed(() => (use12HourTime.value ? 'min-w-360' : 'min-w-352'))
 const connectionForm = reactive<EventHubConnectionForm>(
   createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
-);
+)
 const { enabled: rememberConnectionString, lastError: connectionStringPersistenceError } =
-  useEventHubConnectionPersistence(toRef(connectionForm, "connectionString"), {
-    active: computed(() => capabilities.value?.mode === "anonymous"),
-  });
-const connecting = ref(false);
+  useEventHubConnectionPersistence(toRef(connectionForm, 'connectionString'), {
+    active: computed(() => capabilities.value?.mode === 'anonymous'),
+  })
+const connecting = ref(false)
 const eventHubConnectionActive = computed(
   () =>
-    receiver.status.value === "connected" ||
-    receiver.status.value === "reconnecting" ||
-    receiver.status.value === "paused",
-);
-const settingsOpen = ref(false);
-let settingsReturnTarget: HTMLElement | null = null;
-const detailOpen = ref(false);
-const selectedLog = ref<FirewallLogRecord | null>(null);
-const toast = useToast();
-const requestFetch = useRequestFetch();
-const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth();
+    receiver.status.value === 'connected' ||
+    receiver.status.value === 'reconnecting' ||
+    receiver.status.value === 'paused',
+)
+const settingsOpen = ref(false)
+let settingsReturnTarget: HTMLElement | null = null
+const detailOpen = ref(false)
+const selectedLog = ref<FirewallLogRecord | null>(null)
+const toast = useToast()
+const requestFetch = useRequestFetch()
+const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth()
 const temporaryLogAnalyticsClient = createTemporaryLogAnalyticsClient({
   getLogAnalyticsAccessToken: temporaryLogAnalyticsAuth.getAccessToken,
   getManagementAccessToken: temporaryLogAnalyticsAuth.getManagementAccessToken,
-});
-const temporaryTenantId = ref("");
-const temporaryWorkspaceId = ref("");
-const temporaryTenants = ref<AzureAccessibleTenant[]>([]);
-const temporaryWorkspaces = ref<AzureAccessibleWorkspace[]>([]);
-const temporaryAzureUsername = ref("");
-const temporaryLogAnalyticsAuthorizing = ref(false);
-const temporaryAccessStatus = ref<"idle" | "loading" | "success" | "error">("idle");
-const temporaryAccessError = ref<string | null>(null);
-let temporaryAccessGeneration = 0;
-let temporaryAuthorizationGeneration = 0;
-let temporaryAccessController: AbortController | null = null;
+})
+const temporaryTenantId = ref('')
+const temporaryWorkspaceId = ref('')
+const temporaryTenants = ref<AzureAccessibleTenant[]>([])
+const temporaryWorkspaces = ref<AzureAccessibleWorkspace[]>([])
+const temporaryAzureUsername = ref('')
+const temporaryLogAnalyticsAuthorizing = ref(false)
+const temporaryAccessStatus = ref<'idle' | 'loading' | 'success' | 'error'>('idle')
+const temporaryAccessError = ref<string | null>(null)
+let temporaryAccessGeneration = 0
+let temporaryAuthorizationGeneration = 0
+let temporaryAccessController: AbortController | null = null
 onScopeDispose(() => {
-  temporaryAccessController?.abort();
-  temporaryAccessController = null;
-});
-const logHistory = useLogHistoryPersistence();
-const ipCountryLookup = useIpCountryLookup();
-watch(allLogsLensActive, (active) => ipCountryLookup.setActive(active), { immediate: true });
-const clearingLogHistory = ref(false);
-const logHistoryEnabled = computed(() => logHistory.enabled.value);
-const logHistoryError = computed(() => logHistory.lastError.value);
-const analysisMode = ref<AnalysisMode>(
-  capabilities.value?.mode === "managed" && !capabilities.value.eventHubAvailable
-    ? "log-analysis"
-    : "real-time-analysis",
-);
-const logAnalysisActive = computed(() => analysisMode.value === "log-analysis");
+  temporaryAccessController?.abort()
+  temporaryAccessController = null
+})
+const logHistory = useLogHistoryPersistence()
+const ipCountryLookup = useIpCountryLookup()
+watch(allLogsLensActive, (active) => ipCountryLookup.setActive(active), { immediate: true })
+const clearingLogHistory = ref(false)
+const logHistoryEnabled = computed(() => logHistory.enabled.value)
+const logHistoryError = computed(() => logHistory.lastError.value)
+const analysisMode = ref<AnalysisMode>('real-time-analysis')
+watch(
+  capabilities,
+  (current) => {
+    if (current?.mode === 'managed' && !current.eventHubAvailable) {
+      analysisMode.value = 'log-analysis'
+    }
+  },
+  { immediate: true, once: true },
+)
+const logAnalysisActive = computed(() => analysisMode.value === 'log-analysis')
 const allLogsRealTimeActive = computed(
-  () => !logAnalysisActive.value && activeLens.value === "all-logs",
-);
+  () => !logAnalysisActive.value && activeLens.value === 'all-logs',
+)
 const allLogsLogAnalysisActive = computed(
-  () => logAnalysisActive.value && activeLens.value === "all-logs",
-);
-const dnsLensActive = computed(() => activeLens.value === "dns-troubleshooting");
-const canUseLogAnalysis = logAnalyticsSourceAvailable;
+  () => logAnalysisActive.value && activeLens.value === 'all-logs',
+)
+const dnsLensActive = computed(() => activeLens.value === 'dns-troubleshooting')
+const canUseLogAnalysis = logAnalyticsSourceAvailable
 const logAnalyticsRequirement = computed(() => {
   if (logAnalyticsSourceAvailable.value) {
-    return null;
+    return null
   }
   return managedMode.value
-    ? "Log Analytics is not configured."
-    : "Temporary Log Analytics app registration is not configured.";
-});
-const temporaryLogAnalyticsMode = computed(() => capabilities.value?.mode === "anonymous");
-const temporaryTenantValid = computed(() => isEntraId(temporaryTenantId.value));
-const temporaryWorkspaceValid = computed(() => isEntraId(temporaryWorkspaceId.value));
+    ? 'Log Analytics is not configured.'
+    : 'Temporary Log Analytics app registration is not configured.'
+})
+const temporaryLogAnalyticsMode = computed(() => capabilities.value?.mode === 'anonymous')
+const temporaryTenantValid = computed(() => isEntraId(temporaryTenantId.value))
+const temporaryWorkspaceValid = computed(() => isEntraId(temporaryWorkspaceId.value))
 const temporaryAdminConsentUrl = computed(() =>
   import.meta.client
     ? createLogAnalyticsAdminConsentUrl(
         temporaryTenantId.value,
         runtimeConfig.public.logAnalyticsDelegated.clientId,
-        window.location.origin,
+        globalThis.location.origin,
       )
     : null,
-);
+)
 const canRunLogAnalytics = computed(
   () =>
     managedMode.value ||
@@ -216,11 +216,13 @@ const canRunLogAnalytics = computed(
       temporaryLogAnalyticsAuth.authorized.value &&
       temporaryTenantValid.value &&
       temporaryWorkspaceValid.value),
-);
+)
 const dnsReadinessTarget = computed<DnsReadinessTarget | null>(() => {
-  if (!import.meta.client) return null;
+  if (!import.meta.client) {
+    return null
+  }
   if (managedMode.value && logAnalyticsSourceAvailable.value) {
-    return { mode: "managed" };
+    return { mode: 'managed' }
   }
   if (
     temporaryLogAnalyticsMode.value &&
@@ -230,34 +232,34 @@ const dnsReadinessTarget = computed<DnsReadinessTarget | null>(() => {
     temporaryWorkspaceValid.value
   ) {
     return {
-      mode: "delegated",
+      mode: 'delegated',
       tenantId: temporaryTenantId.value.trim(),
       workspaceId: temporaryWorkspaceId.value.trim(),
-    };
+    }
   }
-  return null;
-});
+  return null
+})
 
 async function requestDnsReadiness(target: DnsReadinessTarget, signal: AbortSignal) {
-  if (target.mode === "managed") {
-    return requestFetch<DnsReadinessResponse>("/api/log-analytics/dns/readiness", { signal });
+  if (target.mode === 'managed') {
+    return requestFetch<DnsReadinessResponse>('/api/log-analytics/dns/readiness', { signal })
   }
-  return temporaryLogAnalyticsClient.dnsReadiness(target.tenantId, target.workspaceId, signal);
+  return temporaryLogAnalyticsClient.dnsReadiness(target.tenantId, target.workspaceId, signal)
 }
 
 const dnsSourceReadiness = useDnsSourceReadiness({
   request: requestDnsReadiness,
   target: dnsReadinessTarget,
-});
+})
 
 function temporaryLogAnalyticsRunRequirement() {
   if (!temporaryLogAnalyticsAuth.connected.value) {
-    return "Connect to Azure before running a query.";
+    return 'Connect to Azure before running a query.'
   }
   if (!temporaryTenantValid.value || !temporaryWorkspaceValid.value) {
-    return "Select an accessible workspace before running a query.";
+    return 'Select an accessible workspace before running a query.'
   }
-  return "Grant Log Analytics query permission before running a query.";
+  return 'Grant Log Analytics query permission before running a query.'
 }
 
 const realTimeQuery = useLogQuery(receiver.logs, {
@@ -267,30 +269,32 @@ const realTimeQuery = useLogQuery(receiver.logs, {
     version: receiver.snapshotVersion,
   },
   visibleLimit: receiver.visibleLimit,
-});
-const realTimeSorting = useLogSorting(realTimeQuery.filteredLogs);
-const logFilters = reactive(createDefaultLogFilters());
-const logSort = reactive(createDefaultLogSort());
-const logDraftRange = reactive(createDefaultLogAnalysisDateRange());
-const logAnalyticsQueryLimit = ref(DEFAULT_LOG_ANALYTICS_QUERY_LIMIT);
-const logAnalyticsStorage = ref<LogAnalyticsStorageKind>("resource-specific");
+})
+const realTimeSorting = useLogSorting(realTimeQuery.filteredLogs)
+const logFilters = reactive(createDefaultLogFilters())
+const logSort = reactive(createDefaultLogSort())
+const logDraftRange = reactive(createDefaultLogAnalysisDateRange())
+const logAnalyticsQueryLimit = ref(DEFAULT_LOG_ANALYTICS_QUERY_LIMIT)
+const logAnalyticsStorage = ref<LogAnalyticsStorageKind>('resource-specific')
 watch(
   dnsReadinessTarget,
   () => {
-    logAnalyticsStorage.value = "resource-specific";
+    logAnalyticsStorage.value = 'resource-specific'
   },
-  { flush: "sync" },
-);
+  { flush: 'sync' },
+)
 watch([dnsSourceReadiness.readiness, dnsSourceReadiness.status], ([readiness, status]) => {
-  if (status !== "success") return;
-  const resourceSpecificHasData = hasDnsReadinessData(readiness, "resource-specific");
-  const azureDiagnosticsHasData = hasDnsReadinessData(readiness, "azure-diagnostics");
-  if (azureDiagnosticsHasData && !resourceSpecificHasData) {
-    logAnalyticsStorage.value = "azure-diagnostics";
-  } else if (!azureDiagnosticsHasData) {
-    logAnalyticsStorage.value = "resource-specific";
+  if (status !== 'success') {
+    return
   }
-});
+  const resourceSpecificHasData = hasDnsReadinessData(readiness, 'resource-specific')
+  const azureDiagnosticsHasData = hasDnsReadinessData(readiness, 'azure-diagnostics')
+  if (azureDiagnosticsHasData && !resourceSpecificHasData) {
+    logAnalyticsStorage.value = 'azure-diagnostics'
+  } else if (!azureDiagnosticsHasData) {
+    logAnalyticsStorage.value = 'resource-specific'
+  }
+})
 const logQuery = useLogAnalyticsQuery({
   active: allLogsLogAnalysisActive,
   draftRange: logDraftRange,
@@ -299,30 +303,30 @@ const logQuery = useLogAnalyticsQuery({
   onBeforeReplace: closeDetail,
   onError: (message) => {
     if (isMobile.value) {
-      return;
+      return
     }
     toast.add({
       title: message,
-      color: "error",
-      icon: "i-lucide-circle-alert",
-    });
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
   },
   request: async (body, signal) => {
     if (managedMode.value) {
-      return requestFetch("/api/log-analytics/query", {
+      return requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
         body,
-        method: "POST",
+        method: 'POST',
         signal,
-      });
+      })
     }
 
-    const tenantId = temporaryTenantId.value.trim();
-    const workspaceId = temporaryWorkspaceId.value.trim();
-    return temporaryLogAnalyticsClient.query(tenantId, workspaceId, body, signal);
+    const tenantId = temporaryTenantId.value.trim()
+    const workspaceId = temporaryWorkspaceId.value.trim()
+    return temporaryLogAnalyticsClient.query(tenantId, workspaceId, body, signal)
   },
   sort: logSort,
   storage: logAnalyticsStorage,
-});
+})
 const {
   canApplyFilters: logCanApplyFilters,
   hasRun: logHasRun,
@@ -332,38 +336,38 @@ const {
   refinementPending: logRefinementPending,
   status: logQueryStatus,
   truncated: logResultsTruncated,
-} = logQuery;
+} = logQuery
 const logResultQuery = useLogQuery(logQuery.records, {
   active: allLogsLogAnalysisActive,
   datasetKey: logQuery.datasetVersion,
   filters: logFilters,
   visibleLimit: logQuery.visibleLimit,
-});
-const logResultSorting = useLogSorting(logResultQuery.filteredLogs, logSort);
+})
+const logResultSorting = useLogSorting(logResultQuery.filteredLogs, logSort)
 async function requestDnsList(body: DnsListQueryRequest, signal: AbortSignal) {
   if (managedMode.value) {
-    return requestFetch<DnsListQueryResponse>("/api/log-analytics/dns/list", {
+    return requestFetch<DnsListQueryResponse>('/api/log-analytics/dns/list', {
       body,
-      method: "POST",
+      method: 'POST',
       signal,
-    });
+    })
   }
-  const tenantId = temporaryTenantId.value.trim();
-  const workspaceId = temporaryWorkspaceId.value.trim();
-  return temporaryLogAnalyticsClient.dnsList(tenantId, workspaceId, body, signal);
+  const tenantId = temporaryTenantId.value.trim()
+  const workspaceId = temporaryWorkspaceId.value.trim()
+  return temporaryLogAnalyticsClient.dnsList(tenantId, workspaceId, body, signal)
 }
 
 async function requestDnsDetail(body: DnsDetailQueryRequest, signal: AbortSignal) {
   if (managedMode.value) {
-    return requestFetch<DnsDetailQueryResponse>("/api/log-analytics/dns/detail", {
+    return requestFetch<DnsDetailQueryResponse>('/api/log-analytics/dns/detail', {
       body,
-      method: "POST",
+      method: 'POST',
       signal,
-    });
+    })
   }
-  const tenantId = temporaryTenantId.value.trim();
-  const workspaceId = temporaryWorkspaceId.value.trim();
-  return temporaryLogAnalyticsClient.dnsDetail(tenantId, workspaceId, body, signal);
+  const tenantId = temporaryTenantId.value.trim()
+  const workspaceId = temporaryWorkspaceId.value.trim()
+  return temporaryLogAnalyticsClient.dnsDetail(tenantId, workspaceId, body, signal)
 }
 
 const dns = useDnsTroubleshooting({
@@ -375,17 +379,19 @@ const dns = useDnsTroubleshooting({
   requestDetail: requestDnsDetail,
   requestList: requestDnsList,
   storage: logAnalyticsStorage,
-});
+})
 const dnsDetailOpen = computed({
   get: () => dns.selectedEntry.value !== null,
   set: (open: boolean) => {
-    if (!open) dns.closeDetail();
+    if (!open) {
+      dns.closeDetail()
+    }
   },
-});
+})
 const modeState = useAnalysisMode({
   abortLogAnalysis: () => {
-    logQuery.abort();
-    dns.abort();
+    logQuery.abort()
+    dns.abort()
   },
   canUseLogAnalysis,
   canUseRealTime: eventHubSourceAvailable,
@@ -394,144 +400,145 @@ const modeState = useAnalysisMode({
   mode: analysisMode,
   pauseRealTime: receiver.pause,
   resetRealTime: resetEventHub,
-});
-const modeTransitioning = modeState.transitioning;
+})
+const modeTransitioning = modeState.transitioning
 const actionLabels: Record<string, string> = {
-  allow: "Allow",
-  deny: "Deny",
-  dnat: "DNAT",
-  snat: "SNAT",
-};
+  allow: 'Allow',
+  deny: 'Deny',
+  dnat: 'DNAT',
+  snat: 'SNAT',
+}
 
 const realTimeActions = computed(() => {
   return createCaseInsensitiveFilterOptions(
     receiver.actionOptions.value,
     (value) => actionLabels[value.toLowerCase()] ?? value,
-  );
-});
+  )
+})
 const realTimeProtocols = computed(() => {
   return createCaseInsensitiveFilterOptions(receiver.protocolOptions.value, (value) =>
     value.toUpperCase(),
-  );
-});
+  )
+})
 const activeFilters = computed(() =>
   logAnalysisActive.value ? logResultQuery.filters : realTimeQuery.filters,
-);
-function createClearableFilterModel(key: "action" | "protocol") {
+)
+function createClearableFilterModel(key: 'action' | 'protocol') {
   return computed<string | null>({
     get: () => activeFilters.value[key] || null,
     set: (value) => {
-      activeFilters.value[key] = value ?? "";
+      activeFilters.value[key] = value ?? ''
     },
-  });
+  })
 }
-const actionFilter = createClearableFilterModel("action");
-const protocolFilter = createClearableFilterModel("protocol");
+const actionFilter = createClearableFilterModel('action')
+const protocolFilter = createClearableFilterModel('protocol')
 const sortedLogs = computed(() =>
   logAnalysisActive.value ? logResultSorting.sortedLogs.value : realTimeSorting.sortedLogs.value,
-);
+)
 const activeFilterCount = computed(
   () =>
     Object.entries(activeFilters.value).filter(
       ([key, value]) =>
-        key !== "search" && (Array.isArray(value) ? value.length > 0 : value.trim() !== ""),
+        key !== 'search' && (Array.isArray(value) ? value.length > 0 : value.trim() !== ''),
     ).length,
-);
+)
 const activeSort = computed({
   get: () => (logAnalysisActive.value ? logResultSorting.sort : realTimeSorting.sort),
   set: (value) =>
     Object.assign(logAnalysisActive.value ? logResultSorting.sort : realTimeSorting.sort, value),
-});
+})
 const categories = computed(() =>
   logAnalysisActive.value ? [...LOG_ANALYSIS_CATEGORIES] : receiver.categoryOptions.value,
-);
+)
 const actions = computed(() =>
   logAnalysisActive.value ? logQuery.actionOptions.value : realTimeActions.value,
-);
+)
 const protocols = computed(() =>
   logAnalysisActive.value ? logQuery.protocolOptions.value : realTimeProtocols.value,
-);
-const activeStatus = computed(() =>
-  activeLens.value === "dns-troubleshooting" && logAnalysisActive.value
-    ? dns.status.value
-    : logAnalysisActive.value
-      ? logQuery.status.value
-      : receiver.status.value,
-);
+)
+const activeStatus = computed(() => {
+  if (!logAnalysisActive.value) {
+    return receiver.status.value
+  }
+  return activeLens.value === 'dns-troubleshooting' ? dns.status.value : logQuery.status.value
+})
 const showRealTimeLag = computed(
   () =>
     !logAnalysisActive.value &&
-    (receiver.status.value === "connected" || receiver.status.value === "paused") &&
+    (receiver.status.value === 'connected' || receiver.status.value === 'paused') &&
     receiver.latestSourceTimestamp.value !== null,
-);
+)
 const countLabel = computed(() => {
   if (!logAnalysisActive.value) {
-    return `${sortedLogs.value.length} visible / ${receiver.receivedCount.value} received`;
+    return `${sortedLogs.value.length} visible / ${receiver.receivedCount.value} received`
   }
 
-  const updating = logQuery.status.value === "refreshing" || logQuery.refinementPending.value;
+  const updating = logQuery.status.value === 'refreshing' || logQuery.refinementPending.value
   const suffix = logQuery.truncated.value
-    ? ` / first ${logQuery.limit.value?.toLocaleString() ?? ""}`
-    : "";
-  return `${sortedLogs.value.length} visible${suffix}${updating ? " / updating" : ""}`;
-});
+    ? ` / first ${logQuery.limit.value?.toLocaleString() ?? ''}`
+    : ''
+  return `${sortedLogs.value.length} visible${suffix}${updating ? ' / updating' : ''}`
+})
 const dnsCountLabel = computed(() => {
-  const transportCount = dns.unidentifiedTransportCount.value;
+  const transportCount = dns.unidentifiedTransportCount.value
   if (isMobile.value) {
-    const entryCount = dns.queriedEntryCount.value;
-    const entries = `${entryCount} ${entryCount === 1 ? "entry" : "entries"}`;
+    const entryCount = dns.queriedEntryCount.value
+    const entries = `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}`
     return transportCount > 0
-      ? `${entries} · ${transportCount} unidentified ${transportCount === 1 ? "transport" : "transports"}`
-      : entries;
+      ? `${entries} · ${transportCount} unidentified ${transportCount === 1 ? 'transport' : 'transports'}`
+      : entries
   }
   return `${dns.queriedEntryCount.value} queried entries · ${transportCount} unidentified ${
-    transportCount === 1 ? "transport" : "transports"
-  }`;
-});
+    transportCount === 1 ? 'transport' : 'transports'
+  }`
+})
 const logAppliedRangeLabel = computed(() => {
   if (logAppliedRange.value === null) {
-    return "";
+    return ''
   }
 
-  return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)} (${logTimeZone.value})`;
-});
+  return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)} (${logTimeZone.value})`
+})
 const dnsAppliedRangeLabel = computed(() => {
-  if (dns.appliedRange.value === null) return "";
-  return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)} (${logTimeZone.value})`;
-});
+  if (dns.appliedRange.value === null) {
+    return ''
+  }
+  return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)} (${logTimeZone.value})`
+})
 const activeAppliedRangeLabel = computed(() =>
-  activeLens.value === "dns-troubleshooting"
+  activeLens.value === 'dns-troubleshooting'
     ? dnsAppliedRangeLabel.value
     : logAppliedRangeLabel.value,
-);
+)
 const activeQueryStatus = computed(() =>
-  activeLens.value === "dns-troubleshooting" ? dns.status.value : logQueryStatus.value,
-);
+  activeLens.value === 'dns-troubleshooting' ? dns.status.value : logQueryStatus.value,
+)
 const activeRangeDirty = computed(() =>
-  activeLens.value === "dns-troubleshooting" ? dns.rangeDirty.value : logRangeDirty.value,
-);
+  activeLens.value === 'dns-troubleshooting' ? dns.rangeDirty.value : logRangeDirty.value,
+)
 const activeRangeError = computed(() =>
-  activeLens.value === "dns-troubleshooting" ? dns.rangeError.value : logRangeError.value,
-);
+  activeLens.value === 'dns-troubleshooting' ? dns.rangeError.value : logRangeError.value,
+)
 const activeResultsTruncated = computed(() =>
-  activeLens.value === "dns-troubleshooting" ? dns.truncated.value : logResultsTruncated.value,
-);
+  activeLens.value === 'dns-troubleshooting' ? dns.truncated.value : logResultsTruncated.value,
+)
 const mobileAppliedRangeLabel = computed(() => {
-  const range = dnsLensActive.value ? dns.appliedRange.value : logAppliedRange.value;
+  const range = dnsLensActive.value ? dns.appliedRange.value : logAppliedRange.value
   if (!range) {
-    return "";
+    return ''
   }
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
     timeZone: logTimeZone.value,
     hourCycle: logHourCycle.value,
-  });
-  return `${formatter.formatRange(new Date(range.from), new Date(range.to))} ${logTimeZone.value}`;
-});
+  })
+  return `${formatter.formatRange(new Date(range.from), new Date(range.to))} ${logTimeZone.value}`
+})
 const mobileQueryState = computed<MobileQueryState>(() => ({
   canRun: canRunLogAnalytics.value,
   hasRun: dnsLensActive.value ? dns.appliedRange.value !== null : logHasRun.value,
@@ -542,692 +549,703 @@ const mobileQueryState = computed<MobileQueryState>(() => ({
   rangeError: activeRangeError.value,
   pendingMessage:
     dnsLensActive.value && dns.filtersDirty.value && !activeRangeDirty.value
-      ? "Filtering loaded results. Run query to search the full range."
-      : "Changes not applied.",
+      ? 'Filtering loaded results. Run query to search the full range.'
+      : 'Changes not applied.',
   error: dnsLensActive.value ? dns.lastError.value : logQuery.lastError.value,
-}));
+}))
 const mobileStatusLabel = computed(() => {
   if (logAnalysisActive.value && mobileQueryState.value.error) {
-    return "Query failed";
+    return 'Query failed'
   }
   switch (activeStatus.value) {
-    case "idle": {
-      return logAnalysisActive.value ? "Ready to query" : "Not connected";
+    case 'idle': {
+      return logAnalysisActive.value ? 'Ready to query' : 'Not connected'
     }
-    case "connected": {
-      return showRealTimeLag.value && !receiver.caughtUp.value ? "Catching up" : "Live";
+    case 'connected': {
+      return showRealTimeLag.value && !receiver.caughtUp.value ? 'Catching up' : 'Live'
     }
-    case "success": {
-      return "Results ready";
+    case 'success': {
+      return 'Results ready'
     }
-    case "loading": {
-      return "Running query";
+    case 'loading': {
+      return 'Running query'
     }
-    case "refreshing": {
-      return "Updating results";
+    case 'refreshing': {
+      return 'Updating results'
     }
-    case "connecting": {
-      return "Connecting";
+    case 'connecting': {
+      return 'Connecting'
     }
-    case "reconnecting": {
-      return "Reconnecting";
+    case 'reconnecting': {
+      return 'Reconnecting'
     }
-    case "paused": {
-      return "Paused";
+    case 'paused': {
+      return 'Paused'
     }
-    case "error": {
-      return "Connection failed";
+    case 'error': {
+      return 'Connection failed'
     }
     default: {
-      return "Disconnected";
+      return 'Disconnected'
     }
   }
-});
+})
 const mobileSortKey = computed({
   get: () => activeSort.value.key,
   set: (key: FirewallLogSortKey) => {
-    activeSort.value = { ...activeSort.value, key };
+    activeSort.value = { ...activeSort.value, key }
   },
-});
+})
 function toggleMobileSortDirection() {
   activeSort.value = {
     ...activeSort.value,
-    direction: activeSort.value.direction === "desc" ? "asc" : "desc",
-  };
+    direction: activeSort.value.direction === 'desc' ? 'asc' : 'desc',
+  }
 }
 
 const parsedDetailSections = computed<DetailSection[]>(() => {
-  const log = selectedLog.value;
+  const log = selectedLog.value
   if (log === null) {
-    return [];
+    return []
   }
 
   const fields: DetailField[] = [
-    { label: "Timestamp", value: formatTime(log.timestamp), mono: true },
-    { label: "Category", value: log.category },
-    { label: "Action", value: log.action },
-    { label: "Protocol", value: formatIcmpProtocol(log.protocol) },
-    { label: "Policy", value: log.policy },
-    { label: "Rule collection group", value: log.ruleCollectionGroup },
-    { label: "Rule collection", value: log.ruleCollection },
-    { label: "Rule", value: log.rule },
-    { label: "Source IP", value: log.sourceIp, mono: true },
-    { label: "Source port", value: log.sourcePort, mono: true },
+    { label: 'Timestamp', value: formatTime(log.timestamp), mono: true },
+    { label: 'Category', value: log.category },
+    { label: 'Action', value: log.action },
+    { label: 'Protocol', value: formatIcmpProtocol(log.protocol) },
+    { label: 'Policy', value: log.policy },
+    { label: 'Rule collection group', value: log.ruleCollectionGroup },
+    { label: 'Rule collection', value: log.ruleCollection },
+    { label: 'Rule', value: log.rule },
+    { label: 'Source IP', value: log.sourceIp, mono: true },
+    { label: 'Source port', value: log.sourcePort, mono: true },
     {
       countryDestination: log.destinationIp,
-      label: "Destination IP",
+      label: 'Destination IP',
       value: log.destinationIp,
       mono: true,
     },
-    { label: "Destination port", value: log.destinationPort, mono: true },
-  ];
+    { label: 'Destination port', value: log.destinationPort, mono: true },
+  ]
 
-  const sections: DetailSection[] = [{ fields }];
+  const sections: DetailSection[] = [{ fields }]
 
   if (!logAnalysisActive.value) {
     const eventHubFields: DetailField[] = [
-      { label: "Sequence", value: log.sequenceNumber, mono: true },
+      { label: 'Sequence', value: log.sequenceNumber, mono: true },
       {
-        label: "Enqueued",
+        label: 'Enqueued',
         value: log.enqueuedTimeUtc ? formatTime(log.enqueuedTimeUtc) : undefined,
         mono: true,
       },
-    ].filter((field) => field.value !== undefined && field.value !== "");
+    ].filter((field) => field.value !== undefined && field.value !== '')
 
     if (eventHubFields.length > 0) {
-      sections.push({ fields: eventHubFields, title: "Event Hub metadata" });
+      sections.push({ fields: eventHubFields, title: 'Event Hub metadata' })
     }
   }
 
-  return sections;
-});
+  return sections
+})
 const rawLogJson = computed(() => {
   if (selectedLog.value === null) {
-    return "";
+    return ''
   }
 
-  return JSON.stringify(selectedLog.value.raw, null, 2);
-});
-const rawLogRows = computed(() => Math.min(Math.max(rawLogJson.value.split("\n").length, 6), 24));
+  return JSON.stringify(selectedLog.value.raw, null, 2)
+})
+const rawLogRows = computed(() => Math.min(Math.max(rawLogJson.value.split('\n').length, 6), 24))
 const emptyState = computed<LogsEmptyState>(() => {
   if (!logAnalysisActive.value) {
     return receiver.logs.value.length > 0
       ? {
-          title: "No matching logs",
-          description: "Adjust or reset the active filters.",
+          title: 'No matching logs',
+          description: 'Adjust or reset the active filters.',
         }
       : {
-          title: "No logs received",
+          title: 'No logs received',
           description: managedMode.value
-            ? "Connect to configured Event Hub."
-            : "Connect to an Event Hub with a Listen-only SAS connection string.",
+            ? 'Connect to configured Event Hub.'
+            : 'Connect to an Event Hub with a Listen-only SAS connection string.',
           settingsActionLabel:
-            receiver.status.value === "idle" || receiver.status.value === "error"
-              ? "Open Event Hub settings"
+            receiver.status.value === 'idle' || receiver.status.value === 'error'
+              ? 'Open Event Hub settings'
               : undefined,
-        };
+        }
   }
 
   if (!logQuery.hasRun.value) {
     return {
-      title: "Explore your firewall logs",
+      title: 'Explore your firewall logs',
       description: canRunLogAnalytics.value
-        ? "Choose a time range to query your Log Analytics workspace."
-        : "Connect your Azure workspace, then choose a time range to explore your logs.",
-      settingsActionLabel: canRunLogAnalytics.value ? undefined : "Open Log Analytics settings",
-    };
+        ? 'Choose a time range to query your Log Analytics workspace.'
+        : 'Connect your Azure workspace, then choose a time range to explore your logs.',
+      settingsActionLabel: canRunLogAnalytics.value ? undefined : 'Open Log Analytics settings',
+    }
   }
-  if (logQuery.status.value === "refreshing" || logQuery.refinementPending.value) {
+  if (logQuery.status.value === 'refreshing' || logQuery.refinementPending.value) {
     return {
-      title: "Updating results",
-      description: "Current filters are being applied in Log Analytics.",
-    };
+      title: 'Updating results',
+      description: 'Current filters are being applied in Log Analytics.',
+    }
   }
   if (activeFilterCount.value || activeFilters.value.search) {
     return {
-      title: "No matching logs",
-      description: "No logs match the applied filters in this time range.",
-    };
+      title: 'No matching logs',
+      description: 'No logs match the applied filters in this time range.',
+    }
   }
 
   return {
-    title: "No logs in range",
-    description: "No Azure Firewall records were returned for applied time range.",
-  };
-});
+    title: 'No logs in range',
+    description: 'No Azure Firewall records were returned for applied time range.',
+  }
+})
 
 watch(receiver.errors, (errors) => {
   if (errors.length === 0) {
-    return;
+    return
   }
 
-  const [title, ...details] = errors;
+  const [title, ...details] = errors
   toast.add({
     title,
-    description: details.length > 0 ? details.join("\n") : undefined,
-    color: "error",
-    icon: "i-lucide-circle-alert",
-  });
-});
+    description: details.length > 0 ? details.join('\n') : undefined,
+    color: 'error',
+    icon: 'i-lucide-circle-alert',
+  })
+})
 
 watch(modeState.lastError, (error) => {
   if (error) {
-    toast.add({ title: error, color: "error", icon: "i-lucide-circle-alert" });
+    toast.add({ title: error, color: 'error', icon: 'i-lucide-circle-alert' })
   }
-});
+})
 
 watch(
   managedMode,
   (managed) => {
     if (managed) {
-      connectionForm.connectionString = "";
-      connectionForm.eventHubName = "";
-      rememberConnectionString.value = false;
+      connectionForm.connectionString = ''
+      connectionForm.eventHubName = ''
+      rememberConnectionString.value = false
     }
   },
   { immediate: true },
-);
+)
 
 async function connect() {
   if (modeTransitioning.value || logAnalysisActive.value) {
-    return;
+    return
   }
 
-  connecting.value = true;
+  connecting.value = true
   try {
     if (!managedMode.value && validateEventHubConnectionForm(connectionForm).length === 0) {
-      clearTemporaryEventHubViewState();
+      clearTemporaryEventHubViewState()
     }
-    await receiver.connect(connectionForm, managedMode.value ? "managed" : "manual");
+    await receiver.connect(connectionForm, managedMode.value ? 'managed' : 'manual')
   } finally {
-    connecting.value = false;
+    connecting.value = false
   }
 }
 
 function updateConnectionForm(value: EventHubConnectionForm) {
-  Object.assign(connectionForm, value);
+  Object.assign(connectionForm, value)
 }
 
 function updateLogDraftRange(value: LogAnalysisDateRange) {
-  Object.assign(logDraftRange, value);
+  Object.assign(logDraftRange, value)
 }
 
 function updateDnsFilters(value: DnsFilters) {
-  Object.assign(dns.filters.value, value);
+  Object.assign(dns.filters.value, value)
 }
 
 function updateDnsSort(value: DnsSort) {
-  Object.assign(dns.sort.value, value);
+  Object.assign(dns.sort.value, value)
 }
 
 async function updateLogRetention(enabled: boolean) {
   if (enabled) {
-    logHistory.enable();
-    return;
+    logHistory.enable()
+    return
   }
 
-  clearingLogHistory.value = true;
+  clearingLogHistory.value = true
   try {
-    await logHistory.disableAndClearHistory();
+    await logHistory.disableAndClearHistory()
   } finally {
-    clearingLogHistory.value = false;
+    clearingLogHistory.value = false
   }
 }
 
 async function updateAnalysisMode(mode: AnalysisMode, event: MouseEvent) {
-  const control = event.currentTarget;
-  await modeState.setMode(mode);
-  await nextTick();
+  const control = event.currentTarget
+  await modeState.setMode(mode)
+  await nextTick()
   if (control instanceof HTMLElement && control.isConnected) {
-    control.focus();
+    control.focus()
   }
 }
 
 function commitLogAnalysisInteraction(event: Event) {
-  if (!logAnalysisActive.value) return;
-  const target = event.target;
+  if (!logAnalysisActive.value) {
+    return
+  }
+  const target = event.target
   if (
     !(target instanceof Element) ||
     !target.closest(
       'a, button, input, select, textarea, [role="button"], [role="checkbox"], [role="combobox"], [role="switch"], [role="textbox"]',
     )
   ) {
-    return;
+    return
   }
-  void modeState.commitLogAnalysis();
+  void modeState.commitLogAnalysis()
 }
 
 function closeDetail() {
-  detailOpen.value = false;
-  selectedLog.value = null;
-  dns.closeDetail();
+  detailOpen.value = false
+  selectedLog.value = null
+  dns.closeDetail()
 }
 
 function clearTemporaryEventHubViewState() {
-  if (analysisMode.value === "real-time-analysis") {
-    closeDetail();
+  if (analysisMode.value === 'real-time-analysis') {
+    closeDetail()
   }
-  realTimeQuery.resetFilters();
-  dns.resetRealtimeFilters();
+  realTimeQuery.resetFilters()
+  dns.resetRealtimeFilters()
 }
 
 async function disconnectEventHub() {
-  const temporarySession = !managedMode.value;
+  const temporarySession = !managedMode.value
   try {
-    await receiver.disconnect();
+    await receiver.disconnect()
   } finally {
     if (temporarySession) {
-      clearTemporaryEventHubViewState();
+      clearTemporaryEventHubViewState()
     }
   }
 }
 
 async function resetEventHub() {
-  const temporarySession = !managedMode.value;
+  const temporarySession = !managedMode.value
   try {
-    await receiver.reset();
+    await receiver.reset()
   } finally {
     if (temporarySession) {
-      realTimeQuery.resetFilters();
-      dns.resetRealtimeFilters();
+      realTimeQuery.resetFilters()
+      dns.resetRealtimeFilters()
     }
   }
 }
 
 function setLens(lens: LogsLens) {
-  if (activeLens.value === lens) return;
-  closeDetail();
-  activeLens.value = lens;
+  if (activeLens.value === lens) {
+    return
+  }
+  closeDetail()
+  activeLens.value = lens
 }
 
 function resetActiveFilters() {
   if (logAnalysisActive.value) {
-    logResultQuery.resetFilters();
-    return;
+    logResultQuery.resetFilters()
+    return
   }
-  realTimeQuery.resetFilters();
+  realTimeQuery.resetFilters()
 }
 
 function setSort(key: FirewallLogSortKey) {
   if (logAnalysisActive.value) {
-    logResultSorting.setSort(key);
-    return;
+    logResultSorting.setSort(key)
+    return
   }
-  realTimeSorting.setSort(key);
+  realTimeSorting.setSort(key)
 }
 
 function getSortIcon(key: FirewallLogSortKey) {
   return logAnalysisActive.value
     ? logResultSorting.getSortIcon(key)
-    : realTimeSorting.getSortIcon(key);
+    : realTimeSorting.getSortIcon(key)
 }
 
 function getAriaSort(key: FirewallLogSortKey) {
   return logAnalysisActive.value
     ? logResultSorting.getAriaSort(key)
-    : realTimeSorting.getAriaSort(key);
+    : realTimeSorting.getAriaSort(key)
 }
 
 function createAction(value: string) {
-  logQuery.addActionOption(value);
-  activeFilters.value.action = value;
+  logQuery.addActionOption(value)
+  activeFilters.value.action = value
 }
 
 function createProtocol(value: string) {
-  logQuery.addProtocolOption(value);
-  activeFilters.value.protocol = value;
+  logQuery.addProtocolOption(value)
+  activeFilters.value.protocol = value
 }
 
 function isQuickFilterActive(key: QuickFilterKey, value: string | undefined) {
-  if (key === "category") {
-    return isLogCategoryFilterValueActive(activeFilters.value.category, value);
+  if (key === 'category') {
+    return isLogCategoryFilterValueActive(activeFilters.value.category, value)
   }
-  return isLogFilterValueActive(activeFilters.value[key], value);
+  return isLogFilterValueActive(activeFilters.value[key], value)
 }
 
 function toggleQuickFilter(key: QuickFilterKey, value: string | undefined) {
-  if (key === "category") {
-    activeFilters.value.category = toggleLogCategoryFilterValue(
-      activeFilters.value.category,
-      value,
-    );
-    return;
+  if (key === 'category') {
+    activeFilters.value.category = toggleLogCategoryFilterValue(activeFilters.value.category, value)
+    return
   }
-  activeFilters.value[key] = toggleLogFilterValue(activeFilters.value[key], value);
+  activeFilters.value[key] = toggleLogFilterValue(activeFilters.value[key], value)
+}
+
+const quickFilterKeyLabels: Record<QuickFilterKey, string> = {
+  action: 'action',
+  category: 'category',
+  destination: 'destination',
+  destinationPort: 'destination port',
+  protocol: 'protocol',
+  source: 'source',
+  sourcePort: 'source port',
 }
 
 function quickFilterLabel(key: QuickFilterKey, value: string | undefined) {
-  const action = isQuickFilterActive(key, value) ? "Remove" : "Filter by";
-  const label =
-    key === "sourcePort" ? "source port" : key === "destinationPort" ? "destination port" : key;
-  return `${action} ${label}: ${displayValue(value)}`;
+  const action = isQuickFilterActive(key, value) ? 'Remove' : 'Filter by'
+  return `${action} ${quickFilterKeyLabels[key]}: ${displayValue(value)}`
 }
 
 function clearActiveResults() {
-  if (activeLens.value === "dns-troubleshooting") {
-    dns.clearActiveDataset();
-    return;
+  if (activeLens.value === 'dns-troubleshooting') {
+    dns.clearActiveDataset()
+    return
   }
   if (logAnalysisActive.value) {
-    logQuery.clear();
-    return;
+    logQuery.clear()
+    return
   }
-  receiver.clear();
+  receiver.clear()
 }
 
 async function runLogAnalysis() {
   if (!canRunLogAnalytics.value) {
     toast.add({
       title: temporaryLogAnalyticsRunRequirement(),
-      color: "error",
-      icon: "i-lucide-circle-alert",
-    });
-    return;
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
+    return
   }
-  await logQuery.run();
+  await logQuery.run()
 }
 
 async function runDnsAnalysis() {
   if (!canRunLogAnalytics.value) {
     toast.add({
       title: temporaryLogAnalyticsRunRequirement(),
-      color: "error",
-      icon: "i-lucide-circle-alert",
-    });
-    return;
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
+    return
   }
-  await dns.run();
+  await dns.run()
 }
 
 async function applyDnsFilters() {
-  await dns.applyFilters();
+  await dns.applyFilters()
 }
 
 function runActiveLogAnalysis() {
-  return activeLens.value === "dns-troubleshooting" ? runDnsAnalysis() : runLogAnalysis();
+  return activeLens.value === 'dns-troubleshooting' ? runDnsAnalysis() : runLogAnalysis()
 }
 
 async function disconnectTemporaryLogAnalytics() {
-  temporaryAccessGeneration += 1;
-  temporaryAccessController?.abort();
-  temporaryAccessController = null;
-  temporaryAuthorizationGeneration += 1;
-  temporaryLogAnalyticsAuthorizing.value = false;
-  logQuery.abort();
-  logQuery.clear();
-  dns.abort();
-  dns.clearActiveDataset();
-  temporaryTenantId.value = "";
-  temporaryWorkspaceId.value = "";
-  temporaryTenants.value = [];
-  temporaryWorkspaces.value = [];
-  temporaryAzureUsername.value = "";
-  temporaryAccessStatus.value = "idle";
-  temporaryAccessError.value = null;
-  await temporaryLogAnalyticsAuth.disconnect();
+  temporaryAccessGeneration += 1
+  temporaryAccessController?.abort()
+  temporaryAccessController = null
+  temporaryAuthorizationGeneration += 1
+  temporaryLogAnalyticsAuthorizing.value = false
+  logQuery.abort()
+  logQuery.clear()
+  dns.abort()
+  dns.clearActiveDataset()
+  temporaryTenantId.value = ''
+  temporaryWorkspaceId.value = ''
+  temporaryTenants.value = []
+  temporaryWorkspaces.value = []
+  temporaryAzureUsername.value = ''
+  temporaryAccessStatus.value = 'idle'
+  temporaryAccessError.value = null
+  await temporaryLogAnalyticsAuth.disconnect()
 }
 
 async function authorizeTemporaryLogAnalytics() {
   if (!temporaryTenantValid.value || temporaryLogAnalyticsAuthorizing.value) {
-    return;
+    return
   }
-  const generation = temporaryAuthorizationGeneration;
-  const tenantId = temporaryTenantId.value.trim();
-  temporaryLogAnalyticsAuthorizing.value = true;
+  const generation = temporaryAuthorizationGeneration
+  const tenantId = temporaryTenantId.value.trim()
+  temporaryLogAnalyticsAuthorizing.value = true
   try {
-    await temporaryLogAnalyticsAuth.getAccessToken(tenantId, true);
+    await temporaryLogAnalyticsAuth.getAccessToken(tenantId, true)
   } catch {
     if (
       generation !== temporaryAuthorizationGeneration ||
       tenantId !== temporaryTenantId.value.trim()
     ) {
-      return;
+      return
     }
     toast.add({
-      title: temporaryLogAnalyticsAuth.lastError.value ?? "Log Analytics authorization failed.",
-      color: "error",
-      icon: "i-lucide-circle-alert",
-    });
-    return;
+      title: temporaryLogAnalyticsAuth.lastError.value ?? 'Log Analytics authorization failed.',
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
+    return
   } finally {
     if (generation === temporaryAuthorizationGeneration) {
-      temporaryLogAnalyticsAuthorizing.value = false;
+      temporaryLogAnalyticsAuthorizing.value = false
     }
   }
-  refreshTemporaryAzureAccess();
+  refreshTemporaryAzureAccess()
 }
 
 async function checkTemporaryLogAnalyticsAuthorization() {
-  const generation = ++temporaryAuthorizationGeneration;
-  const tenantId = temporaryTenantId.value.trim();
-  temporaryLogAnalyticsAuth.invalidateAuthorization();
+  const generation = ++temporaryAuthorizationGeneration
+  const tenantId = temporaryTenantId.value.trim()
+  temporaryLogAnalyticsAuth.invalidateAuthorization()
   if (!temporaryLogAnalyticsAuth.connected.value || !isEntraId(tenantId)) {
-    temporaryLogAnalyticsAuthorizing.value = false;
-    return false;
+    temporaryLogAnalyticsAuthorizing.value = false
+    return false
   }
-  temporaryLogAnalyticsAuthorizing.value = true;
-  const authorized = await temporaryLogAnalyticsAuth.checkAuthorization(tenantId);
+  temporaryLogAnalyticsAuthorizing.value = true
+  const authorized = await temporaryLogAnalyticsAuth.checkAuthorization(tenantId)
   if (generation === temporaryAuthorizationGeneration) {
-    temporaryLogAnalyticsAuthorizing.value = false;
+    temporaryLogAnalyticsAuthorizing.value = false
   }
-  return authorized;
+  return authorized
 }
 
 function selectTemporaryWorkspace(workspaceId: string) {
-  if (workspaceId === temporaryWorkspaceId.value) return;
-  logQuery.abort();
-  logQuery.clear();
-  dns.abort();
-  dns.clearActiveDataset();
-  temporaryWorkspaceId.value = workspaceId;
+  if (workspaceId === temporaryWorkspaceId.value) {
+    return
+  }
+  logQuery.abort()
+  logQuery.clear()
+  dns.abort()
+  dns.clearActiveDataset()
+  temporaryWorkspaceId.value = workspaceId
 }
 
 function mergeCurrentTenant(tenants: AzureAccessibleTenant[], tenantId: string) {
   if (tenants.some((tenant) => tenant.tenantId === tenantId)) {
-    return tenants;
+    return tenants
   }
-  return [...tenants, { defaultDomain: null, displayName: tenantId, tenantId }];
+  return [...tenants, { defaultDomain: null, displayName: tenantId, tenantId }]
 }
 
 async function discoverTemporaryAzureAccess(tenantId: string) {
-  temporaryAccessController?.abort();
-  const controller = new AbortController();
-  temporaryAccessController = controller;
-  const generation = ++temporaryAccessGeneration;
-  temporaryTenantId.value = tenantId;
-  selectTemporaryWorkspace("");
-  temporaryWorkspaces.value = [];
-  temporaryAccessStatus.value = "loading";
-  temporaryAccessError.value = null;
+  temporaryAccessController?.abort()
+  const controller = new AbortController()
+  temporaryAccessController = controller
+  const generation = ++temporaryAccessGeneration
+  temporaryTenantId.value = tenantId
+  selectTemporaryWorkspace('')
+  temporaryWorkspaces.value = []
+  temporaryAccessStatus.value = 'loading'
+  temporaryAccessError.value = null
   try {
-    const authorized = await checkTemporaryLogAnalyticsAuthorization();
-    const access = await temporaryLogAnalyticsClient.discover(tenantId, controller.signal);
+    const authorized = await checkTemporaryLogAnalyticsAuthorization()
+    const access = await temporaryLogAnalyticsClient.discover(tenantId, controller.signal)
     if (generation !== temporaryAccessGeneration || temporaryTenantId.value !== tenantId) {
-      return;
+      return
     }
-    temporaryTenants.value = mergeCurrentTenant(access.tenants, tenantId);
-    temporaryWorkspaces.value = authorized ? access.workspaces : [];
+    temporaryTenants.value = mergeCurrentTenant(access.tenants, tenantId)
+    temporaryWorkspaces.value = authorized ? access.workspaces : []
     if (authorized && access.workspaces.length === 1) {
-      selectTemporaryWorkspace(access.workspaces[0]?.workspaceId ?? "");
+      selectTemporaryWorkspace(access.workspaces[0]?.workspaceId ?? '')
     }
-    temporaryAccessStatus.value = "success";
+    temporaryAccessStatus.value = 'success'
   } catch (error: unknown) {
     if (
       generation !== temporaryAccessGeneration ||
-      (error instanceof Error && error.name === "AbortError")
+      (error instanceof Error && error.name === 'AbortError')
     ) {
-      return;
+      return
     }
-    temporaryAccessStatus.value = "error";
+    temporaryAccessStatus.value = 'error'
     temporaryAccessError.value =
       error instanceof Error
         ? error.message
-        : "Could not discover Azure directories and workspaces.";
+        : 'Could not discover Azure directories and workspaces.'
   } finally {
     if (generation === temporaryAccessGeneration) {
-      temporaryAccessController = null;
+      temporaryAccessController = null
     }
   }
 }
 
 async function connectTemporaryLogAnalytics() {
-  const connection = await temporaryLogAnalyticsAuth.connect();
+  const connection = await temporaryLogAnalyticsAuth.connect()
   if (!connection) {
-    return;
+    return
   }
-  temporaryAzureUsername.value = connection.username;
-  await discoverTemporaryAzureAccess(connection.tenantId);
+  temporaryAzureUsername.value = connection.username
+  await discoverTemporaryAzureAccess(connection.tenantId)
 }
 
 function changeTemporaryTenant(tenantId: string) {
   if (!isEntraId(tenantId) || tenantId === temporaryTenantId.value) {
-    return;
+    return
   }
-  void discoverTemporaryAzureAccess(tenantId);
+  void discoverTemporaryAzureAccess(tenantId)
 }
 
 function changeTemporaryWorkspace(workspaceId: string) {
   if (isEntraId(workspaceId)) {
-    selectTemporaryWorkspace(workspaceId);
+    selectTemporaryWorkspace(workspaceId)
   }
 }
 
 function refreshTemporaryAzureAccess() {
   if (!temporaryTenantValid.value) {
-    return;
+    return
   }
-  void discoverTemporaryAzureAccess(temporaryTenantId.value);
+  void discoverTemporaryAzureAccess(temporaryTenantId.value)
 }
 
 function applyLogFilters() {
-  if (logQueryStatus.value === "loading" || logQueryStatus.value === "refreshing") {
-    return;
+  if (logQueryStatus.value === 'loading' || logQueryStatus.value === 'refreshing') {
+    return
   }
   if (logRangeDirty.value || !logHasRun.value) {
-    void runLogAnalysis();
-    return;
+    void runLogAnalysis()
+    return
   }
-  logQuery.scheduleRefinement(true);
+  logQuery.scheduleRefinement(true)
 }
 
 function displayValue(value: string | undefined) {
-  return value && value.length > 0 ? value : "-";
+  return value && value.length > 0 ? value : '-'
 }
 
-function copyValue(label: string, value: string | undefined) {
+async function copyValue(label: string, value: string | undefined) {
   if (!value || value.length === 0) {
-    return;
+    return
   }
 
-  void navigator.clipboard.writeText(value).then(
-    () => {
-      toast.add({
-        title: `${label} copied`,
-        color: "success",
-        icon: "i-lucide-copy-check",
-      });
-    },
-    () => {
-      toast.add({
-        title: `Could not copy ${label.toLowerCase()}`,
-        color: "error",
-        icon: "i-lucide-circle-alert",
-      });
-    },
-  );
+  try {
+    await navigator.clipboard.writeText(value)
+  } catch {
+    toast.add({
+      title: `Could not copy ${label.toLowerCase()}`,
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
+    return
+  }
+
+  toast.add({
+    title: `${label} copied`,
+    color: 'success',
+    icon: 'i-lucide-copy-check',
+  })
 }
 
 function selectLog(log: FirewallLogRecord) {
-  selectedLog.value = { ...log };
-  detailOpen.value = true;
+  selectedLog.value = { ...log }
+  detailOpen.value = true
 }
 
 function clearClosedDetail() {
   if (!detailOpen.value) {
-    selectedLog.value = null;
+    selectedLog.value = null
   }
 }
 
 function openSettings(trigger?: Event | HTMLElement) {
   if (trigger instanceof HTMLElement) {
-    settingsReturnTarget = trigger;
+    settingsReturnTarget = trigger
   } else if (trigger?.currentTarget instanceof HTMLElement) {
-    settingsReturnTarget = trigger.currentTarget;
+    settingsReturnTarget = trigger.currentTarget
   } else {
     settingsReturnTarget =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
   }
-  settingsOpen.value = true;
+  settingsOpen.value = true
 }
 
 function closeSettings() {
-  settingsOpen.value = false;
+  settingsOpen.value = false
 }
 
 async function restoreDnsFocus(event: Event) {
   if (dnsView.value) {
-    event.preventDefault();
+    event.preventDefault()
     await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve());
-    });
-    await nextTick();
-    dnsView.value?.restoreFocus();
+      requestAnimationFrame(() => resolve())
+    })
+    await nextTick()
+    dnsView.value?.restoreFocus()
   }
 }
 
 function focusSettingsClose(event: Event) {
-  event.preventDefault();
-  document.querySelector<HTMLElement>("#logs-settings-close")?.focus({ preventScroll: true });
+  event.preventDefault()
+  document.querySelector<HTMLElement>('#logs-settings-close')?.focus({ preventScroll: true })
 }
 
 function keepDesktopSettingsOpen(event: Event) {
   if (!isMobile.value) {
-    event.preventDefault();
+    event.preventDefault()
   }
 }
 
 function restoreSettingsFocus(event: Event) {
-  event.preventDefault();
-  const active = document.activeElement;
+  event.preventDefault()
+  const active = document.activeElement
   if (
     active instanceof HTMLElement &&
     active !== document.body &&
-    !active.closest("#logs-settings-drawer")
+    !active.closest('#logs-settings-drawer')
   ) {
-    return;
+    return
   }
   const target = settingsReturnTarget?.isConnected
     ? settingsReturnTarget
-    : document.querySelector<HTMLElement>("#logs-settings-toggle");
-  target?.focus({ preventScroll: true });
+    : document.querySelector<HTMLElement>('#logs-settings-toggle')
+  target?.focus({ preventScroll: true })
 }
 
 function toggleSettings(event: MouseEvent) {
   if (settingsOpen.value) {
-    settingsOpen.value = false;
+    settingsOpen.value = false
   } else {
-    openSettings(event);
+    openSettings(event)
   }
 }
 
 function formatTime(timestamp: string) {
-  return formatLogTimestamp(timestamp);
+  return formatLogTimestamp(timestamp)
 }
 
 function statusColor(status: string) {
-  if (status === "connected" || status === "success") {
-    return "success";
+  if (status === 'connected' || status === 'success') {
+    return 'success'
   }
-  if (status === "paused" || status === "refreshing") {
-    return "warning";
+  if (status === 'paused' || status === 'refreshing') {
+    return 'warning'
   }
-  if (status === "error") {
-    return "error";
+  if (status === 'error') {
+    return 'error'
   }
-  if (status === "loading" || status === "connecting" || status === "reconnecting") {
-    return "info";
+  if (status === 'loading' || status === 'connecting' || status === 'reconnecting') {
+    return 'info'
   }
-  return "neutral";
+  return 'neutral'
 }
 </script>
 
@@ -1360,7 +1378,7 @@ function statusColor(status: string) {
         <div class="flex min-w-0 items-center justify-between gap-2">
           <div class="min-w-0 flex-1">
             <h1 class="text-base font-semibold tracking-tight">
-              {{ activeLens === "all-logs" ? "All logs" : "DNS troubleshooting" }}
+              {{ activeLens === 'all-logs' ? 'All logs' : 'DNS troubleshooting' }}
             </h1>
             <p class="flex min-w-0 items-center gap-1.5 text-xs text-muted">
               <UIcon
@@ -1368,7 +1386,7 @@ function statusColor(status: string) {
                 class="size-3.5 shrink-0"
               />
               <span class="truncate"
-                >{{ logAnalysisActive ? "Log Analytics" : "Live Event Hub" }} ·
+                >{{ logAnalysisActive ? 'Log Analytics' : 'Live Event Hub' }} ·
                 {{ logTimeZone }}</span
               >
             </p>
@@ -1445,7 +1463,7 @@ function statusColor(status: string) {
             <span>{{ mobileStatusLabel }}</span>
           </p>
           <span aria-hidden="true">·</span>
-          <p>{{ activeLens === "all-logs" ? countLabel : dnsCountLabel }}</p>
+          <p>{{ activeLens === 'all-logs' ? countLabel : dnsCountLabel }}</p>
         </div>
         <p
           v-if="logAnalysisActive && mobileQueryState.hasRun"
@@ -1650,7 +1668,7 @@ function statusColor(status: string) {
                 color="neutral"
                 variant="outline"
               >
-                <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
+                <span>{{ receiver.caughtUp.value ? 'Latest' : 'Catching up' }}</span>
                 <NuxtTime
                   class="hidden sm:inline"
                   :datetime="receiver.latestSourceTimestamp.value!"
@@ -1658,7 +1676,7 @@ function statusColor(status: string) {
                   relative-style="narrow"
                   numeric="always"
                   :time-zone="logTimeZone"
-                  :title="true"
+                  title
                 />
               </UBadge>
               <span class="text-xs text-muted sm:text-sm">
@@ -1872,11 +1890,8 @@ function statusColor(status: string) {
             <div
               v-if="!isMobile && sortedLogs.length > 0"
               role="row"
-              :class="[
-                'grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100',
-                logTableGridClass,
-                logTableMinWidthClass,
-              ]"
+              class="grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100"
+              :class="[logTableGridClass, logTableMinWidthClass]"
             >
               <button
                 v-for="column in logTableColumns"
@@ -1903,15 +1918,14 @@ function statusColor(status: string) {
                 :item-size="64"
                 :emit-update="false"
                 key-field="id"
-                :class="['min-h-0 flex-1', logTableMinWidthClass]"
+                class="min-h-0 flex-1"
+                :class="[logTableMinWidthClass]"
               >
                 <div
                   role="row"
                   tabindex="0"
-                  :class="[
-                    'grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900',
-                    logTableGridClass,
-                  ]"
+                  class="grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900"
+                  :class="[logTableGridClass]"
                   @click="selectLog(item)"
                   @keydown.enter.self="selectLog(item)"
                   @keydown.space.self.prevent="selectLog(item)"
@@ -2175,7 +2189,7 @@ function statusColor(status: string) {
               color="neutral"
               variant="outline"
             >
-              <span>{{ receiver.caughtUp.value ? "Latest" : "Catching up" }}</span>
+              <span>{{ receiver.caughtUp.value ? 'Latest' : 'Catching up' }}</span>
               <NuxtTime
                 class="hidden sm:inline"
                 :datetime="receiver.latestSourceTimestamp.value!"
@@ -2183,7 +2197,7 @@ function statusColor(status: string) {
                 relative-style="narrow"
                 numeric="always"
                 :time-zone="logTimeZone"
-                :title="true"
+                title
               />
             </UBadge>
           </div>
@@ -2249,7 +2263,7 @@ function statusColor(status: string) {
           @reset="dns.resetFilters"
           @select="dns.selectEntry"
         >
-          <template v-if="logAnalysisActive" #query-controls="{ mobile }">
+          <template v-if="logAnalysisActive" #queryControls="{ mobile }">
             <LogsLogAnalyticsQueryControls
               :show-run="!mobile"
               :display-time-zone="logTimeZone"
@@ -2309,7 +2323,10 @@ function statusColor(status: string) {
                     :destination="field.countryDestination"
                     :lookup="ipCountryLookup"
                   />
-                  <span :class="['min-w-0 break-words', field.mono ? 'font-mono text-xs' : '']">
+                  <span
+                    class="min-w-0 break-words"
+                    :class="[field.mono ? 'font-mono text-xs' : '']"
+                  >
                     {{ displayValue(field.value) }}
                   </span>
                   <UButton

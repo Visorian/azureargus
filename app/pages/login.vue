@@ -1,28 +1,28 @@
 <script setup lang="ts">
 definePageMeta({
-  layout: "login",
+  layout: 'login',
   oidcAuth: false,
-});
+})
 
-const { loggedIn, login } = useOidcAuth();
-const signingIn = ref(false);
+const { loggedIn, login } = useOidcAuth()
+const signingIn = ref(false)
 
 watch(
   loggedIn,
   async (isLoggedIn) => {
     if (isLoggedIn) {
-      await navigateTo("/logs");
+      await navigateTo('/logs')
     }
   },
   { immediate: true },
-);
+)
 
 async function startLogin() {
-  signingIn.value = true;
+  signingIn.value = true
   try {
-    await login("entra");
+    await login('entra')
   } finally {
-    signingIn.value = false;
+    signingIn.value = false
   }
 }
 </script>

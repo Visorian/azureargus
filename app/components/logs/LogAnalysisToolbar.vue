@@ -1,117 +1,117 @@
 <script lang="ts">
 export interface MobileQueryState {
-  canRun: boolean;
-  hasRun: boolean;
-  dirty: boolean;
-  status: "idle" | "loading" | "refreshing" | "success" | "error";
-  pendingMessage: string;
-  rangeError: string | null;
-  error: string | null;
+  canRun: boolean
+  hasRun: boolean
+  dirty: boolean
+  status: 'idle' | 'loading' | 'refreshing' | 'success' | 'error'
+  pendingMessage: string
+  rangeError: string | null
+  error: string | null
 }
 </script>
 
 <script setup lang="ts">
-import { useMediaQuery } from "@vueuse/core";
+import { useMediaQuery } from '@vueuse/core'
 
 const props = withDefaults(
   defineProps<{
-    activeFilterCount?: number;
-    resultCount: number;
-    queryState?: MobileQueryState | null;
+    activeFilterCount?: number
+    resultCount: number
+    queryState?: MobileQueryState | null
   }>(),
   { activeFilterCount: 0, queryState: null },
-);
-const emit = defineEmits<{ interaction: [event: Event]; run: [] }>();
+)
+const emit = defineEmits<{ interaction: [event: Event]; run: [] }>()
 defineSlots<{
-  search?: () => unknown;
-  filters?: () => unknown;
-  query?: (props: { mobile: boolean }) => unknown;
-  summary?: () => unknown;
-}>();
-const isMobile = useMediaQuery("(max-width: 1023px)");
-const filtersOpen = ref(false);
-const root = useTemplateRef("root");
-const queryArea = useTemplateRef("queryArea");
-const sheetBody = useTemplateRef("sheetBody");
-let returnTarget: HTMLElement | null = null;
+  search?: () => unknown
+  filters?: () => unknown
+  query?: (props: { mobile: boolean }) => unknown
+  summary?: () => unknown
+}>()
+const isMobile = useMediaQuery('(max-width: 1023px)')
+const filtersOpen = ref(false)
+const root = useTemplateRef('root')
+const queryArea = useTemplateRef('queryArea')
+const sheetBody = useTemplateRef('sheetBody')
+let returnTarget: HTMLElement | null = null
 const needsQuery = computed(
   () =>
     props.queryState &&
     (!props.queryState.hasRun || props.queryState.dirty || props.queryState.error !== null),
-);
+)
 const queryLoading = computed(
-  () => props.queryState?.status === "loading" || props.queryState?.status === "refreshing",
-);
+  () => props.queryState?.status === 'loading' || props.queryState?.status === 'refreshing',
+)
 const triggerLabel = computed(
   () =>
-    `${props.queryState ? "Query & filters" : "Filters"}${props.activeFilterCount ? ` (${props.activeFilterCount})` : ""}`,
-);
+    `${props.queryState ? 'Query & filters' : 'Filters'}${props.activeFilterCount ? ` (${props.activeFilterCount})` : ''}`,
+)
 const footerLabel = computed(() => {
   if (queryLoading.value) {
-    return "Running query";
+    return 'Running query'
   }
   if (needsQuery.value) {
-    return "Run query";
+    return 'Run query'
   }
   return props.resultCount === 0
-    ? "Done"
-    : `Show ${props.resultCount} ${props.resultCount === 1 ? "result" : "results"}`;
-});
+    ? 'Done'
+    : `Show ${props.resultCount} ${props.resultCount === 1 ? 'result' : 'results'}`
+})
 watch(isMobile, () => {
-  filtersOpen.value = false;
-});
+  filtersOpen.value = false
+})
 watch(
   filtersOpen,
   (open) => {
     if (open) {
-      returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null
     }
   },
-  { flush: "sync" },
-);
+  { flush: 'sync' },
+)
 
 function focusInitialField(event: Event) {
   const field =
     props.queryState &&
     (!props.queryState.hasRun || props.queryState.rangeError !== null) &&
-    sheetBody.value?.querySelector<HTMLInputElement>('input[type="datetime-local"]');
+    sheetBody.value?.querySelector<HTMLInputElement>('input[type="datetime-local"]')
   if (field) {
-    event.preventDefault();
-    field.focus({ preventScroll: true });
+    event.preventDefault()
+    field.focus({ preventScroll: true })
   }
 }
 
 function restoreFocus(event: Event) {
-  event.preventDefault();
+  event.preventDefault()
   const target = returnTarget?.isConnected
     ? returnTarget
-    : root.value?.querySelector<HTMLElement>("[data-query-trigger]");
+    : root.value?.querySelector<HTMLElement>('[data-query-trigger]')
   if (target instanceof HTMLElement) {
-    target.focus({ preventScroll: true });
+    target.focus({ preventScroll: true })
   }
 }
 
 function openFilters() {
   if (isMobile.value) {
-    filtersOpen.value = true;
+    filtersOpen.value = true
   } else {
-    queryArea.value?.querySelector("input")?.focus();
+    queryArea.value?.querySelector('input')?.focus()
   }
 }
 
 function finish(event: MouseEvent) {
   if (queryLoading.value || (needsQuery.value && !props.queryState?.canRun)) {
-    return;
+    return
   }
-  emit("interaction", event);
+  emit('interaction', event)
   if (needsQuery.value) {
-    emit("run");
+    emit('run')
   } else {
-    filtersOpen.value = false;
+    filtersOpen.value = false
   }
 }
 
-defineExpose({ openFilters });
+defineExpose({ openFilters })
 </script>
 
 <template>
@@ -178,7 +178,7 @@ defineExpose({ openFilters });
                 class="text-sm text-muted"
               >
                 {{ resultCount }}
-                {{ resultCount === 1 ? "result" : "results" }} ready.
+                {{ resultCount === 1 ? 'result' : 'results' }} ready.
               </p>
               <p v-if="queryState && !queryState.canRun" class="text-sm text-muted">
                 Connect your Azure workspace in Settings to run a query.
@@ -188,8 +188,8 @@ defineExpose({ openFilters });
               <p class="mb-4 text-sm text-muted">
                 {{
                   queryState
-                    ? "Refine your query with filters, or leave them empty to include all entries."
-                    : "Filters update results as you change them."
+                    ? 'Refine your query with filters, or leave them empty to include all entries.'
+                    : 'Filters update results as you change them.'
                 }}
               </p>
               <div
@@ -233,8 +233,8 @@ defineExpose({ openFilters });
       <span>{{
         queryState.error
           ? queryState.hasRun && resultCount > 0
-            ? "Last query failed. Showing previous results."
-            : "Last query failed."
+            ? 'Last query failed. Showing previous results.'
+            : 'Last query failed.'
           : queryState.pendingMessage
       }}</span>
       <UButton

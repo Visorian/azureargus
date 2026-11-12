@@ -1,25 +1,25 @@
-import { createError, getRequestURL } from "h3";
+import { createError, getRequestURL } from 'h3'
 
-import { parseDeploymentCapabilities } from "../utils/deploymentCapabilities";
+import { parseDeploymentCapabilities } from '../utils/deploymentCapabilities'
 
-const APP_LOGIN_PATH = /^\/auth\/entra\/(?:login|callback)\/?$/;
+const APP_LOGIN_PATH = /^\/auth\/entra\/(?:login|callback)\/?$/
 
 export default defineEventHandler((event) => {
-  const pathname = getRequestURL(event).pathname;
+  const pathname = getRequestURL(event).pathname
   if (!APP_LOGIN_PATH.test(pathname)) {
-    return;
+    return
   }
 
-  const capabilities = parseDeploymentCapabilities(useRuntimeConfig(event), process.env);
-  if (capabilities.mode === "managed") {
-    return;
+  const capabilities = parseDeploymentCapabilities(useRuntimeConfig(event), process.env)
+  if (capabilities.mode === 'managed') {
+    return
   }
 
   throw createError({
-    statusCode: capabilities.mode === "invalid" ? 503 : 403,
+    statusCode: capabilities.mode === 'invalid' ? 503 : 403,
     message:
-      capabilities.mode === "invalid"
-        ? "Deployment configuration is invalid"
-        : "Application login is unavailable",
-  });
-});
+      capabilities.mode === 'invalid'
+        ? 'Deployment configuration is invalid'
+        : 'Application login is unavailable',
+  })
+})

@@ -1,390 +1,420 @@
-import { IncomingMessage, ServerResponse } from "node:http";
-import { Socket } from "node:net";
+import { IncomingMessage, ServerResponse } from 'node:http'
+import { Socket } from 'node:net'
 
-import { EventHubConsumerClient } from "@azure/event-hubs";
-import { createEvent, type H3Event } from "h3";
+import { EventHubConsumerClient } from '@azure/event-hubs'
+import { createEvent } from 'h3'
+import type { H3Event } from 'h3'
 import {
   getUserSessionId,
   requireUserSession,
-} from "nuxt-oidc-auth/runtime/server/utils/session.js";
+} from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
 import {
   createManagedEventHubStream,
   pipeManagedEventHubStream,
-} from "../../server/utils/managedEventHubStream";
+} from '../../server/utils/managedEventHubStream'
+import type * as ManagedEventHubStreamModule from '../../server/utils/managedEventHubStream'
 
-vi.mock("@azure/event-hubs", () => ({
+vi.mock('@azure/event-hubs', () => ({
   EventHubConsumerClient: vi.fn(),
-}));
-vi.mock("nuxt-oidc-auth/runtime/server/utils/session.js", () => ({
+}))
+vi.mock('nuxt-oidc-auth/runtime/server/utils/session.js', () => ({
   getUserSessionId: vi.fn(),
   requireUserSession: vi.fn(),
-}));
-vi.mock("../../server/utils/managedEventHubStream", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../server/utils/managedEventHubStream")>()),
+}))
+vi.mock('../../server/utils/managedEventHubStream', async (importOriginal) => ({
+  ...(await importOriginal<typeof ManagedEventHubStreamModule>()),
   createManagedEventHubStream: vi.fn(),
   pipeManagedEventHubStream: vi.fn(),
-}));
+}))
 
 const runtimeConfig = {
   eventHub: {
     connectionString:
-      "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=private-secret;EntityPath=firewall-logs",
-    name: "",
+      'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=private-secret;EntityPath=firewall-logs',
+    name: '',
   },
   oidc: {
     providers: {
       entra: {
-        authorizationUrl: "https://login.example.com/authorize",
-        clientId: "44444444-4444-4444-8444-444444444444",
-        clientSecret: "login-secret",
-        redirectUri: "https://app.example.com/auth/callback",
-        tokenUrl: "https://login.example.com/token",
+        authorizationUrl: 'https://login.example.com/authorize',
+        clientId: '44444444-4444-4444-8444-444444444444',
+        clientSecret: 'login-secret',
+        redirectUri: 'https://app.example.com/auth/callback',
+        tokenUrl: 'https://login.example.com/token',
       },
     },
   },
-};
-let currentRuntimeConfig: Record<string, unknown> = runtimeConfig;
-let handler: (event: H3Event) => Promise<unknown>;
-const useRuntimeConfig = vi.fn(() => currentRuntimeConfig);
+}
+let currentRuntimeConfig: Record<string, unknown> = runtimeConfig
+let handler: (event: H3Event) => Promise<unknown>
+const useRuntimeConfig = vi.fn(() => currentRuntimeConfig)
+const anyAbortSignal: unknown = expect.any(AbortSignal)
 
-function installAzureClientMock(getPartitionIds: EventHubConsumerClient["getPartitionIds"]) {
-  const close = vi.fn<EventHubConsumerClient["close"]>(async () => undefined);
+function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
+  return typeof value === 'function'
+}
+
+function installAzureClientMock(getPartitionIds: EventHubConsumerClient['getPartitionIds']) {
+  const close = vi.fn<EventHubConsumerClient['close']>(async () => {})
   const client = {
     close,
-    getPartitionIds: vi.fn<EventHubConsumerClient["getPartitionIds"]>(getPartitionIds),
-  };
-  vi.mocked(EventHubConsumerClient).mockImplementation(function () {
-    return client as Pick<
-      EventHubConsumerClient,
-      "close" | "getPartitionIds"
-    > as EventHubConsumerClient;
-  });
-  return client;
+    getPartitionIds: vi.fn<EventHubConsumerClient['getPartitionIds']>(getPartitionIds),
+  }
+  vi.mocked(EventHubConsumerClient).mockImplementation(function (this: EventHubConsumerClient) {
+    Object.assign(this, client)
+  })
+  return client
 }
 
 function createTestEvent(body?: unknown, headers: Record<string, string> = {}) {
-  const request = new IncomingMessage(new Socket());
-  const response = new ServerResponse(request);
-  request.method = "POST";
-  request.headers.host = "app.example.com";
+  const request = new IncomingMessage(new Socket())
+  const response = new ServerResponse(request)
+  request.method = 'POST'
+  request.headers.host = 'app.example.com'
   Object.assign(request.headers, {
-    origin: "http://app.example.com",
-    "sec-fetch-site": "same-origin",
+    origin: 'http://app.example.com',
+    'sec-fetch-site': 'same-origin',
     ...headers,
-  });
+  })
   if (body !== undefined) {
-    const payload = JSON.stringify(body);
-    request.headers["content-length"] = String(Buffer.byteLength(payload));
-    request.headers["content-type"] = "application/json";
-    request.push(payload);
-    request.push(null);
-    request.complete = true;
+    const payload = JSON.stringify(body)
+    request.headers['content-length'] = String(Buffer.byteLength(payload))
+    request.headers['content-type'] = 'application/json'
+    request.push(payload)
+    request.push(null)
+    request.complete = true
   }
-  return createEvent(request, response);
+  return createEvent(request, response)
 }
 
 beforeAll(async () => {
-  vi.stubEnv("NUXT_OIDC_AUTH_SESSION_SECRET", "s".repeat(48));
-  vi.stubEnv("NUXT_OIDC_SESSION_SECRET", "s".repeat(48));
-  vi.stubEnv("NUXT_OIDC_TOKEN_KEY", Buffer.alloc(32).toString("base64"));
-  vi.stubGlobal("defineEventHandler", <T>(eventHandler: T) => eventHandler);
-  vi.stubGlobal("useRuntimeConfig", useRuntimeConfig);
-  handler = (await import("../../server/api/event-hub/stream.post")).default;
-});
-
-afterAll(() => {
-  vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
-});
+  vi.stubEnv('NUXT_OIDC_AUTH_SESSION_SECRET', 's'.repeat(48))
+  vi.stubEnv('NUXT_OIDC_SESSION_SECRET', 's'.repeat(48))
+  vi.stubEnv('NUXT_OIDC_TOKEN_KEY', Buffer.alloc(32).toString('base64'))
+  vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
+  vi.stubGlobal('useRuntimeConfig', useRuntimeConfig)
+  const routeModule: { default: unknown } = await import('../../server/api/event-hub/stream.post')
+  if (!isEventHandler(routeModule.default)) {
+    throw new TypeError('Event Hub stream route has no default event handler.')
+  }
+  handler = routeModule.default
+})
 
 beforeEach(() => {
-  currentRuntimeConfig = runtimeConfig;
-  useRuntimeConfig.mockClear();
+  currentRuntimeConfig = runtimeConfig
+  useRuntimeConfig.mockClear()
   vi.mocked(requireUserSession).mockReset().mockResolvedValue({
-    provider: "entra",
+    provider: 'entra',
     canRefresh: false,
     expireAt: 1_800_000_000,
-  });
-  vi.mocked(getUserSessionId).mockReset().mockResolvedValue("default-session");
-  vi.mocked(EventHubConsumerClient).mockReset();
-  vi.mocked(createManagedEventHubStream).mockReset();
-  vi.mocked(pipeManagedEventHubStream).mockReset().mockResolvedValue(undefined);
-});
+  })
+  vi.mocked(getUserSessionId).mockReset().mockResolvedValue('default-session')
+  vi.mocked(EventHubConsumerClient).mockReset()
+  vi.mocked(createManagedEventHubStream).mockReset()
+  vi.mocked(pipeManagedEventHubStream).mockReset().mockResolvedValue(undefined)
+})
 
-describe("managed Event Hub stream route", () => {
-  it("requires a session before reading deployment configuration", async () => {
-    vi.mocked(requireUserSession).mockRejectedValueOnce({ statusCode: 401 });
+afterAll(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+})
 
-    await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 401 });
-    expect(useRuntimeConfig).not.toHaveBeenCalled();
-    expect(getUserSessionId).not.toHaveBeenCalled();
-    expect(EventHubConsumerClient).not.toHaveBeenCalled();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-  });
+describe('managed Event Hub stream route', () => {
+  it('requires a session before reading deployment configuration', async () => {
+    vi.mocked(requireUserSession).mockRejectedValueOnce({ statusCode: 401 })
 
-  it("supersedes the previous stream for the same OIDC session", async () => {
-    const cleanups: Array<ReturnType<typeof vi.fn<() => Promise<void>>>> = [];
+    await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 401 })
+    expect(useRuntimeConfig).not.toHaveBeenCalled()
+    expect(getUserSessionId).not.toHaveBeenCalled()
+    expect(EventHubConsumerClient).not.toHaveBeenCalled()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+  })
+
+  it('supersedes the previous stream for the same OIDC session', async () => {
+    const cleanups: ReturnType<typeof vi.fn<() => Promise<void>>>[] = []
     vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
-      let streamController: ReadableStreamDefaultController<Uint8Array>;
+      let streamController: ReadableStreamDefaultController<Uint8Array>
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
-          streamController = controller;
-          signal?.addEventListener("abort", () => controller.close(), { once: true });
+          streamController = controller
+          signal?.addEventListener(
+            'abort',
+            () => {
+              controller.close()
+            },
+            { once: true },
+          )
         },
-      });
+      })
       const cleanup = vi.fn<() => Promise<void>>(async () => {
         try {
-          streamController.close();
+          streamController.close()
         } catch {
           // The abort listener may have closed it already.
         }
-      });
-      cleanups.push(cleanup);
-      return { cleanup, stream };
-    });
+      })
+      cleanups.push(cleanup)
+      return { cleanup, stream }
+    })
     vi.mocked(pipeManagedEventHubStream).mockImplementation(async (response, stream) => {
-      await stream.getReader().read();
-      response.end();
-    });
-    installAzureClientMock(async () => ["0"]);
-    const firstEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    const secondEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+      await stream.getReader().read()
+      response.end()
+    })
+    installAzureClientMock(async () => ['0'])
+    const firstEvent = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    const secondEvent = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
 
-    const first = handler(firstEvent);
-    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledOnce());
-    const second = handler(secondEvent);
-    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledTimes(2));
-    await expect(first).resolves.toBeUndefined();
-    expect(firstEvent.node.res.writableEnded).toBe(true);
-    expect(cleanups[0]).toHaveBeenCalledOnce();
+    const first = handler(firstEvent)
+    await vi.waitFor(() => {
+      expect(createManagedEventHubStream).toHaveBeenCalledOnce()
+    })
+    const second = handler(secondEvent)
+    await vi.waitFor(() => {
+      expect(createManagedEventHubStream).toHaveBeenCalledTimes(2)
+    })
+    await expect(first).resolves.toBeUndefined()
+    expect(firstEvent.node.res.writableEnded).toBe(true)
+    expect(cleanups[0]).toHaveBeenCalledOnce()
 
-    secondEvent.node.req.emit("aborted");
-    await expect(second).resolves.toBeUndefined();
-  });
+    secondEvent.node.req.emit('aborted')
+    await expect(second).resolves.toBeUndefined()
+  })
 
-  it("keeps streams from different OIDC sessions active", async () => {
+  it('keeps streams from different OIDC sessions active', async () => {
     vi.mocked(getUserSessionId)
-      .mockResolvedValueOnce("first-session")
-      .mockResolvedValueOnce("second-session");
+      .mockResolvedValueOnce('first-session')
+      .mockResolvedValueOnce('second-session')
     vi.mocked(createManagedEventHubStream).mockImplementation(({ signal }) => {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
-          signal?.addEventListener("abort", () => controller.close(), { once: true });
+          signal?.addEventListener(
+            'abort',
+            () => {
+              controller.close()
+            },
+            { once: true },
+          )
         },
-      });
-      return { cleanup: vi.fn<() => Promise<void>>(async () => undefined), stream };
-    });
+      })
+      return { cleanup: vi.fn<() => Promise<void>>(async () => {}), stream }
+    })
     vi.mocked(pipeManagedEventHubStream).mockImplementation(async (_response, stream) => {
-      await stream.getReader().read();
-    });
-    installAzureClientMock(async () => ["0"]);
-    const firstEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    const secondEvent = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
+      await stream.getReader().read()
+    })
+    installAzureClientMock(async () => ['0'])
+    const firstEvent = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    const secondEvent = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
 
-    const first = handler(firstEvent);
-    const second = handler(secondEvent);
-    await vi.waitFor(() => expect(createManagedEventHubStream).toHaveBeenCalledTimes(2));
-    expect(firstEvent.node.res.writableEnded).toBe(false);
-    expect(secondEvent.node.res.writableEnded).toBe(false);
+    const first = handler(firstEvent)
+    const second = handler(secondEvent)
+    await vi.waitFor(() => {
+      expect(createManagedEventHubStream).toHaveBeenCalledTimes(2)
+    })
+    expect(firstEvent.node.res.writableEnded).toBe(false)
+    expect(secondEvent.node.res.writableEnded).toBe(false)
 
-    firstEvent.node.req.emit("aborted");
-    secondEvent.node.req.emit("aborted");
-    await Promise.all([first, second]);
-  });
+    firstEvent.node.req.emit('aborted')
+    secondEvent.node.req.emit('aborted')
+    await Promise.all([first, second])
+  })
 
-  it("rejects deployments without managed Event Hub capability", async () => {
-    currentRuntimeConfig = {};
+  it('rejects deployments without managed Event Hub capability', async () => {
+    currentRuntimeConfig = {}
 
     await expect(
-      handler(createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 })),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    expect(EventHubConsumerClient).not.toHaveBeenCalled();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-  });
+      handler(createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })),
+    ).rejects.toMatchObject({ statusCode: 403 })
+    expect(EventHubConsumerClient).not.toHaveBeenCalled()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+  })
 
   it.each([
     [
-      "cross-origin requests",
-      { consumerGroup: "$Default", lookbackMinutes: 5 },
-      { origin: "https://attacker.example", "sec-fetch-site": "cross-site" },
+      'cross-origin requests',
+      { consumerGroup: '$Default', lookbackMinutes: 5 },
+      { origin: 'https://attacker.example', 'sec-fetch-site': 'cross-site' },
       403,
     ],
-    ["invalid request DTOs", { consumerGroup: "$Default", lookbackMinutes: 30 }, {}, 400],
+    ['invalid request DTOs', { consumerGroup: '$Default', lookbackMinutes: 30 }, {}, 400],
     [
-      "invalid resume positions",
+      'invalid resume positions',
       {
-        consumerGroup: "$Default",
+        consumerGroup: '$Default',
         lookbackMinutes: 5,
-        resumeFrom: { "0": -1 },
+        resumeFrom: { '0': -1 },
       },
       {},
       400,
     ],
     [
-      "request DTOs containing credentials",
-      { consumerGroup: "$Default", lookbackMinutes: 5, connectionString: "caller-secret" },
+      'request DTOs containing credentials',
+      { consumerGroup: '$Default', lookbackMinutes: 5, connectionString: 'caller-secret' },
       {},
       400,
     ],
-  ])("rejects %s before constructing an Azure client", async (_name, body, headers, statusCode) => {
-    await expect(handler(createTestEvent(body, headers))).rejects.toMatchObject({ statusCode });
-    expect(EventHubConsumerClient).not.toHaveBeenCalled();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-  });
+  ])('rejects %s before constructing an Azure client', async (_name, body, headers, statusCode) => {
+    await expect(handler(createTestEvent(body, headers))).rejects.toMatchObject({ statusCode })
+    expect(EventHubConsumerClient).not.toHaveBeenCalled()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+  })
 
-  it("rejects requests without an Origin header before constructing an Azure client", async () => {
-    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    delete event.node.req.headers.origin;
+  it('rejects requests without an Origin header before constructing an Azure client', async () => {
+    const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    event.node.req.headers.origin = undefined
 
-    await expect(handler(event)).rejects.toMatchObject({ statusCode: 403 });
-    expect(EventHubConsumerClient).not.toHaveBeenCalled();
-  });
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 403 })
+    expect(EventHubConsumerClient).not.toHaveBeenCalled()
+  })
 
-  it("sanitizes Azure client construction failures", async () => {
+  it('sanitizes Azure client construction failures', async () => {
     vi.mocked(EventHubConsumerClient).mockImplementationOnce(() => {
-      throw new Error(`Could not use ${runtimeConfig.eventHub.connectionString}`);
-    });
+      throw new Error(`Could not use ${runtimeConfig.eventHub.connectionString}`)
+    })
 
     await expect(
-      handler(createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 })),
+      handler(createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })),
     ).rejects.toMatchObject({
-      message: "Managed Event Hub could not start",
+      message: 'Managed Event Hub could not start',
       statusCode: 502,
-    });
-  });
+    })
+  })
 
   it.each([
-    ["no partitions", async () => [] as string[]],
-    ["partition discovery failure", async () => Promise.reject(new Error("private-secret"))],
-  ])("cleans up and sanitizes %s", async (_name, getPartitionIds) => {
-    const client = installAzureClientMock(getPartitionIds);
-    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    const initialRequestAbortListeners = event.node.req.listenerCount("aborted");
-    const initialResponseCloseListeners = event.node.res.listenerCount("close");
+    ['no partitions', async () => [] as string[]],
+    [
+      'partition discovery failure',
+      async () => {
+        throw new Error('private-secret')
+      },
+    ],
+  ])('cleans up and sanitizes %s', async (_name, getPartitionIds) => {
+    const client = installAzureClientMock(getPartitionIds)
+    const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    const initialRequestAbortListeners = event.node.req.listenerCount('aborted')
+    const initialResponseCloseListeners = event.node.res.listenerCount('close')
 
     await expect(handler(event)).rejects.toMatchObject({
-      message: "Managed Event Hub could not start",
+      message: 'Managed Event Hub could not start',
       statusCode: 502,
-    });
+    })
 
     expect(client.getPartitionIds).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-    });
-    expect(client.close).toHaveBeenCalledOnce();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-    expect(pipeManagedEventHubStream).not.toHaveBeenCalled();
-    expect(event.node.req.listenerCount("aborted")).toBe(initialRequestAbortListeners);
-    expect(event.node.res.listenerCount("close")).toBe(initialResponseCloseListeners);
-  });
+      abortSignal: anyAbortSignal,
+    })
+    expect(client.close).toHaveBeenCalledOnce()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+    expect(pipeManagedEventHubStream).not.toHaveBeenCalled()
+    expect(event.node.req.listenerCount('aborted')).toBe(initialRequestAbortListeners)
+    expect(event.node.res.listenerCount('close')).toBe(initialResponseCloseListeners)
+  })
 
-  it("closes the client without starting discovery after the request already aborted", async () => {
-    const client = installAzureClientMock(async () => ["0"]);
-    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    Object.defineProperty(event.node.req, "aborted", { value: true });
-
-    await expect(handler(event)).rejects.toMatchObject({
-      message: "Managed Event Hub could not start",
-      statusCode: 502,
-    });
-
-    expect(client.getPartitionIds).not.toHaveBeenCalled();
-    expect(client.close).toHaveBeenCalledOnce();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-  });
-
-  it("closes the client without starting discovery after the response already ended", async () => {
-    const client = installAzureClientMock(async () => ["0"]);
-    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    event.node.res.end();
+  it('closes the client without starting discovery after the request already aborted', async () => {
+    const client = installAzureClientMock(async () => ['0'])
+    const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    Object.defineProperty(event.node.req, 'aborted', { value: true })
 
     await expect(handler(event)).rejects.toMatchObject({
-      message: "Managed Event Hub could not start",
+      message: 'Managed Event Hub could not start',
       statusCode: 502,
-    });
+    })
 
-    expect(client.getPartitionIds).not.toHaveBeenCalled();
-    expect(client.close).toHaveBeenCalledOnce();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-  });
+    expect(client.getPartitionIds).not.toHaveBeenCalled()
+    expect(client.close).toHaveBeenCalledOnce()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+  })
 
-  it("aborts partition discovery when the request closes", async () => {
-    let discoveryAborted = false;
+  it('closes the client without starting discovery after the response already ended', async () => {
+    const client = installAzureClientMock(async () => ['0'])
+    const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    event.node.res.end()
+
+    await expect(handler(event)).rejects.toMatchObject({
+      message: 'Managed Event Hub could not start',
+      statusCode: 502,
+    })
+
+    expect(client.getPartitionIds).not.toHaveBeenCalled()
+    expect(client.close).toHaveBeenCalledOnce()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+  })
+
+  it('aborts partition discovery when the request closes', async () => {
+    let discoveryAborted = false
     const client = installAzureClientMock(
-      (options) =>
-        new Promise<string[]>((_resolve, reject) => {
-          const abortSignal = options?.abortSignal;
+      async (options) =>
+        await new Promise<string[]>((_resolve, reject) => {
+          const abortSignal = options?.abortSignal
           abortSignal?.addEventListener(
-            "abort",
+            'abort',
             () => {
-              discoveryAborted = abortSignal.aborted;
-              reject(new Error("aborted"));
+              discoveryAborted = abortSignal.aborted
+              reject(new Error('aborted'))
             },
             { once: true },
-          );
+          )
         }),
-    );
-    const event = createTestEvent({ consumerGroup: "$Default", lookbackMinutes: 5 });
-    const handling = handler(event);
-    void handling.catch(() => undefined);
-    await vi.waitFor(() => expect(client.getPartitionIds).toHaveBeenCalledOnce());
+    )
+    const event = createTestEvent({ consumerGroup: '$Default', lookbackMinutes: 5 })
+    const handling = handler(event)
+    await vi.waitFor(() => {
+      expect(client.getPartitionIds).toHaveBeenCalledOnce()
+    })
 
-    event.node.req.emit("aborted");
+    event.node.req.emit('aborted')
 
     await expect(handling).rejects.toMatchObject({
-      message: "Managed Event Hub could not start",
+      message: 'Managed Event Hub could not start',
       statusCode: 502,
-    });
-    expect(discoveryAborted).toBe(true);
-    expect(client.close).toHaveBeenCalledOnce();
-    expect(createManagedEventHubStream).not.toHaveBeenCalled();
-  });
+    })
+    expect(discoveryAborted).toBe(true)
+    expect(client.close).toHaveBeenCalledOnce()
+    expect(createManagedEventHubStream).not.toHaveBeenCalled()
+  })
 
   it.each([
-    [runtimeConfig.eventHub.connectionString, "", 2],
+    [runtimeConfig.eventHub.connectionString, '', 2],
     [
-      "Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=private-secret",
-      "firewall-logs",
+      'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=private-secret',
+      'firewall-logs',
       3,
     ],
   ])(
-    "streams managed events with server-owned credentials",
+    'streams managed events with server-owned credentials',
     async (connectionString, eventHubName, constructorArgumentCount) => {
       currentRuntimeConfig = {
         ...runtimeConfig,
         eventHub: { connectionString, name: eventHubName },
-      };
-      const stream = new ReadableStream<Uint8Array>();
-      const cleanup = vi.fn(async () => undefined);
-      const client = installAzureClientMock(async () => ["0", "1"]);
-      vi.mocked(createManagedEventHubStream).mockReturnValue({ cleanup, stream });
+      }
+      const stream = new ReadableStream<Uint8Array>()
+      const cleanup = vi.fn(async () => {})
+      const client = installAzureClientMock(async () => ['0', '1'])
+      vi.mocked(createManagedEventHubStream).mockReturnValue({ cleanup, stream })
       const request = {
-        consumerGroup: "$Default",
+        consumerGroup: '$Default',
         lookbackMinutes: 5,
-        resumeFrom: { "0": 42 },
-      } as const;
-      const event = createTestEvent(request);
+        resumeFrom: { '0': 42 },
+      } as const
+      const event = createTestEvent(request)
 
-      await handler(event);
+      await handler(event)
 
-      expect(EventHubConsumerClient).toHaveBeenCalledOnce();
-      expect(vi.mocked(EventHubConsumerClient).mock.calls[0]).toHaveLength(
-        constructorArgumentCount,
-      );
+      expect(EventHubConsumerClient).toHaveBeenCalledOnce()
+      expect(vi.mocked(EventHubConsumerClient).mock.calls[0]).toHaveLength(constructorArgumentCount)
       expect(createManagedEventHubStream).toHaveBeenCalledWith(
         expect.objectContaining({
           client,
-          expectedPartitionIds: ["0", "1"],
+          expectedPartitionIds: ['0', '1'],
           request,
         }),
-      );
+      )
       expect(client.getPartitionIds).toHaveBeenCalledWith({
-        abortSignal: expect.any(AbortSignal),
-      });
-      expect(pipeManagedEventHubStream).toHaveBeenCalledWith(event.node.res, stream);
-      expect(event.node.res.getHeader("content-type")).toBe("application/x-ndjson; charset=utf-8");
-      expect(event.node.res.getHeader("x-accel-buffering")).toBe("no");
-      expect(cleanup).toHaveBeenCalledOnce();
+        abortSignal: anyAbortSignal,
+      })
+      expect(pipeManagedEventHubStream).toHaveBeenCalledWith(event.node.res, stream)
+      expect(event.node.res.getHeader('content-type')).toBe('application/x-ndjson; charset=utf-8')
+      expect(event.node.res.getHeader('x-accel-buffering')).toBe('no')
+      expect(cleanup).toHaveBeenCalledOnce()
     },
-  );
-});
+  )
+})
