@@ -12,6 +12,7 @@ import {
   validateFirewallTraffic,
 } from '#shared/utils/firewallSimulator'
 
+defineOptions({ name: 'FirewallSimulatorPage' })
 definePageMeta({ layout: 'application' })
 useHead({ title: 'Rule simulator | Azure Argus' })
 
@@ -23,11 +24,30 @@ const result = shallowRef<FirewallSimulationResult | null>(null)
 const lastError = ref<string | null>(null)
 const validationAttempted = ref(false)
 const resultNeedsUpdate = ref(false)
+const policyMenuOpen = ref(false)
+const protocolMenuOpen = ref(false)
+const applicationMenuOpen = ref(false)
+const directionMenuOpen = ref(false)
+onDeactivated(() => {
+  for (const menu of [policyMenuOpen, protocolMenuOpen, applicationMenuOpen, directionMenuOpen]) {
+    menu.value = false
+  }
+})
 const connectionForm = useTemplateRef<HTMLFormElement>('connectionForm')
 const connectionHeading = useTemplateRef<HTMLHeadingElement>('connectionHeading')
 const resultHeading = useTemplateRef<HTMLHeadingElement>('resultHeading')
 const resultPanel = useTemplateRef<HTMLElement>('resultPanel')
 const incompleteHeading = useTemplateRef<HTMLHeadingElement>('incompleteHeading')
+const configurationActions = useTemplateRef<HTMLDivElement>('configurationActions')
+const viewport = useTemplateRef<HTMLDivElement>('viewport')
+let savedScrollTop = 0
+onBeforeRouteLeave(() => {
+  savedScrollTop = viewport.value?.scrollTop ?? 0
+})
+onActivated(async () => {
+  await nextTick()
+  viewport.value?.scrollTo({ top: savedScrollTop, behavior: 'instant' })
+})
 const sourceComponent = useTemplateRef<{ focusImport: () => Promise<void> }>('sourceComponent')
 const processingList = useTemplateRef<{ focusDecision: () => Promise<void> }>('processingList')
 const defaultTraffic: SimulatorTraffic = {
@@ -191,14 +211,18 @@ async function simulate() {
   }
 }
 
-function toggleSource() {
-  sourceOpen.value = !sourceOpen.value
-}
-
 async function reviewConfiguration() {
   sourceOpen.value = true
   await nextTick()
   await sourceComponent.value?.focusImport()
+}
+
+async function hideImportOptions() {
+  sourceOpen.value = false
+  await nextTick()
+  configurationActions.value
+    ?.querySelector<HTMLButtonElement>('button[data-import-configuration]')
+    ?.focus()
 }
 
 function downloadSnapshot() {
@@ -220,6 +244,7 @@ function downloadSnapshot() {
 
 <template>
   <div
+    ref="viewport"
     class="firewall-simulator touch-fields relative h-full overflow-y-auto bg-default text-default"
   >
     <div class="mx-auto max-w-400 space-y-6 p-4 pb-8 sm:p-6">
@@ -230,15 +255,29 @@ function downloadSnapshot() {
             Test a connection and see which policy rule decides its outcome.
           </p>
         </div>
-        <UButton
+        <div
           v-if="snapshot"
-          icon="i-lucide-download"
-          variant="outline"
-          color="neutral"
-          class="min-h-11"
-          @click="downloadSnapshot"
-          >Download snapshot</UButton
+          ref="configurationActions"
+          class="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap"
         >
+          <UButton
+            icon="i-lucide-upload"
+            variant="outline"
+            class="min-h-11 justify-center"
+            aria-controls="simulator-source"
+            data-import-configuration
+            @click="reviewConfiguration"
+            >Import another configuration</UButton
+          >
+          <UButton
+            icon="i-lucide-download"
+            variant="outline"
+            color="neutral"
+            class="min-h-11 justify-center"
+            @click="downloadSnapshot"
+            >Download snapshot</UButton
+          >
+        </div>
       </header>
 
       <section class="rounded-lg border border-default" aria-label="Configuration">
@@ -259,19 +298,16 @@ function downloadSnapshot() {
             </p>
           </div>
           <UButton
-            v-if="snapshot"
+            v-if="snapshot && sourceOpen"
             color="neutral"
-            variant="outline"
-            :icon="sourceOpen ? 'i-lucide-chevron-up' : 'i-lucide-folder-open'"
+            variant="ghost"
+            icon="i-lucide-chevron-up"
             class="min-h-11"
-            :aria-expanded="sourceOpen"
-            :aria-label="sourceOpen ? 'Close configuration' : 'Change configuration'"
+            aria-label="Hide import options"
             aria-controls="simulator-source"
-            @click="toggleSource"
-            ><span class="sm:hidden">{{ sourceOpen ? 'Close' : 'Change' }}</span>
-            <span class="hidden sm:inline">{{
-              sourceOpen ? 'Close configuration' : 'Change configuration'
-            }}</span>
+            @click="hideImportOptions"
+            ><span class="sm:hidden">Hide</span>
+            <span class="hidden sm:inline">Hide import options</span>
           </UButton>
         </div>
         <div v-show="sourceOpen" id="simulator-source" class="border-t border-default p-4">
@@ -314,6 +350,7 @@ function downloadSnapshot() {
             <UFormField label="Evaluate policy" name="simulator-policy" class="w-full sm:max-w-88">
               <USelect
                 id="simulator-policy"
+                v-model:open="policyMenuOpen"
                 v-model="policyId"
                 :items="policyOptions"
                 class="w-full"
@@ -375,6 +412,7 @@ function downloadSnapshot() {
               <UFormField label="IP protocol" name="simulator-protocol">
                 <USelect
                   id="simulator-protocol"
+                  v-model:open="protocolMenuOpen"
                   v-model="traffic.protocol"
                   :items="['TCP', 'UDP', 'ICMP']"
                   class="w-full"
@@ -406,6 +444,7 @@ function downloadSnapshot() {
               >
                 <USelect
                   id="simulator-direction"
+                  v-model:open="directionMenuOpen"
                   v-model="traffic.direction"
                   :items="[
                     { label: 'Outbound', value: 'outbound' },
@@ -422,6 +461,7 @@ function downloadSnapshot() {
               >
                 <USelect
                   id="simulator-application"
+                  v-model:open="applicationMenuOpen"
                   v-model="traffic.applicationProtocol"
                   :disabled="traffic.protocol !== 'TCP'"
                   :items="[

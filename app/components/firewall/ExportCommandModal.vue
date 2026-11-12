@@ -16,6 +16,10 @@ const options = reactive<FirewallExportCommandOptions>({
   policyName: '',
   output: 'file',
 })
+const open = ref(false)
+onDeactivated(() => {
+  open.value = false
+})
 const appConfig = useAppConfig()
 const command = computed(() => createFirewallExportCommand(options, appConfig.sourceRevision))
 const commandError = computed(
@@ -57,6 +61,7 @@ async function copyCommand() {
 
 <template>
   <UModal
+    v-model:open="open"
     title="Export Azure Firewall configuration"
     description="Read-only export of policies, their ancestors, collection groups and IP groups."
     :ui="{

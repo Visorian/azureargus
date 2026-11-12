@@ -1,7 +1,7 @@
 <template>
   <UApp :toaster="{ position: 'bottom-right' }">
     <NuxtLayout>
-      <NuxtPage />
+      <NuxtPage :keepalive="{ include: 'FirewallSimulatorPage' }" />
     </NuxtLayout>
   </UApp>
 </template>

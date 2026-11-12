@@ -35,6 +35,7 @@ function setMode(value: 'import' | 'azure') {
 }
 
 async function focusImport(): Promise<void> {
+  cancelLoad()
   setMode('import')
   await nextTick()
   importActions.value
@@ -52,11 +53,16 @@ function cancelLoad() {
 }
 watch([mode, resourceIds, tenantId], cancelLoad)
 onScopeDispose(cancelLoad)
+onDeactivated(cancelLoad)
 
 function importText() {
   lastError.value = null
   try {
-    emit('load', parseFirewallSnapshot(text.value), 'Pasted configuration')
+    emit(
+      'load',
+      parseFirewallSnapshot(text.value),
+      `Pasted configuration · ${new Date().toLocaleString()}`,
+    )
   } catch (error: unknown) {
     lastError.value = error instanceof Error ? error.message : 'Could not read the configuration.'
   }
@@ -79,7 +85,11 @@ async function importFiles(event: Event) {
     }
     const snapshot = parseFirewallSnapshot(content)
     text.value = content
-    emit('load', snapshot, files.map((file) => file.name).join(', '))
+    emit(
+      'load',
+      snapshot,
+      `${files.map((file) => file.name).join(', ')} · ${new Date().toLocaleString()}`,
+    )
   } catch (error: unknown) {
     if (current === generation) {
       lastError.value = error instanceof Error ? error.message : 'Could not read the files.'

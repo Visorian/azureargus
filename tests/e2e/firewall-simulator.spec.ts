@@ -33,6 +33,7 @@ test('traces the selected child policy and clears stale decisions when the conne
   await expect(simulatorLink).toHaveAttribute('aria-current', 'page')
   await page.getByRole('button', { name: 'Use example' }).click()
   await expect(page.getByLabel('Effective processing order')).toBeVisible()
+  await page.getByLabel('Source IPv4 address', { exact: true }).fill('10.20.0.17')
   await page.getByRole('button', { name: 'Simulate connection' }).click()
   const result = page.getByRole('status')
   await expect(result.getByRole('heading', { name: 'Allow by configured rules' })).toBeVisible()
@@ -95,6 +96,59 @@ test('traces the selected child policy and clears stale decisions when the conne
   ).toHaveCount(0)
   await page.getByRole('button', { name: 'Simulate connection' }).click()
   await expect(result.getByRole('heading', { name: 'Deny by configured rules' })).toBeVisible()
+  const collectionSearch = page.getByLabel('Find a collection or rule', { exact: true })
+  await collectionSearch.fill('saved collection filter')
+  await page.getByLabel('Evaluate policy', { exact: true }).click()
+  await page.getByRole('option', { name: 'workload', exact: true }).waitFor()
+  await page.goBack()
+  await expect(page.getByRole('option')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Logs & DNS', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(
+    page.getByRole('heading', { name: 'Firewall rule simulator', exact: true }),
+  ).toHaveCount(0)
+  await page.goForward()
+  await expect(page.getByLabel('Source IPv4 address', { exact: true })).toHaveValue('10.20.0.17')
+  await expect(page.getByLabel('Destination IPv4 address', { exact: true })).toHaveValue(
+    '10.30.0.4',
+  )
+  await expect(page.getByLabel('Evaluate policy', { exact: true })).toContainText(
+    'restricted-workload',
+  )
+  await expect(result.getByRole('heading', { name: 'Deny by configured rules' })).toBeVisible()
+  await expect(collectionSearch).toHaveValue('saved collection filter')
+  await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Upload JSON files', exact: true })).toBeFocused()
+  await page
+    .getByLabel('Configuration text', { exact: true })
+    .fill('unfinished configuration draft')
+  await page.getByRole('button', { name: 'Hide import options', exact: true }).click()
+  await expect(
+    page.getByRole('button', { name: 'Import another configuration', exact: true }),
+  ).toBeFocused()
+  const workspace = page.locator('.firewall-simulator')
+  const savedScrollTop = await workspace.evaluate((element) => {
+    element.scrollTop = 300
+    return element.scrollTop
+  })
+  expect(savedScrollTop).toBeGreaterThan(0)
+  await page.getByRole('link', { name: 'Logs & DNS', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Firewall rule simulator', exact: true }),
+  ).toHaveCount(0)
+  await page.getByRole('link', { name: 'Rule simulator', exact: true }).click()
+  await expect
+    .poll(async () => await workspace.evaluate((element) => element.scrollTop))
+    .toBe(savedScrollTop)
+  await expect(page.getByLabel('Configuration text', { exact: true })).toBeHidden()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
+  await expect(page.getByLabel('Configuration text', { exact: true })).toHaveValue(
+    'unfinished configuration draft',
+  )
+  await page.getByRole('button', { name: 'Hide import options', exact: true }).click()
   await page.getByLabel('Destination IPv4 address').fill('10.30.0.5')
   await expect(result).toHaveCount(0)
   await expect(
@@ -151,7 +205,7 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
 }) => {
   await page.goto('/firewall-simulator')
   await page.getByRole('button', { name: 'Use example', exact: true }).click()
-  await page.getByRole('button', { name: 'Change configuration', exact: true }).click()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
   await expect(page.getByLabel('Configuration text', { exact: true })).toHaveValue('')
   await page
     .getByLabel('Configuration text', { exact: true })
@@ -159,7 +213,7 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
   await page.getByRole('button', { name: 'Load configuration', exact: true }).click()
   await expect(page.getByLabel('Effective processing order')).toBeVisible()
   await fillImportedConnection(page)
-  await page.getByRole('button', { name: 'Change configuration', exact: true }).click()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
   await page.getByLabel('Configuration text', { exact: true }).fill('not JSON')
   await page.getByRole('button', { name: 'Load configuration', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Expected JSON')
@@ -177,18 +231,29 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
     }
     buffers.push(Buffer.from(value))
   }
-  await page.getByLabel('Upload JSON files', { exact: true }).setInputFiles({
+  const downloadedFile = {
     name: download.suggestedFilename(),
     mimeType: 'application/json',
     buffer: Buffer.concat(buffers),
-  })
-  await expect(page.getByText('firewall-configuration.json', { exact: true })).toBeVisible()
+  }
+  await page.clock.setFixedTime(new Date('2026-11-12T10:00:00Z'))
+  await page.getByLabel('Upload JSON files', { exact: true }).setInputFiles(downloadedFile)
+  const fileReceipt = page.getByText('firewall-configuration.json', { exact: false })
+  await expect(fileReceipt).toBeVisible()
+  const firstReceipt = (await fileReceipt.textContent()) ?? ''
   await expect(page.getByRole('alert')).toHaveCount(0)
   await fillImportedConnection(page)
   await page.getByRole('button', { name: 'Simulate connection' }).click()
   await expect(page.getByRole('status')).toContainText('private-https / allow-private-service')
 
-  await page.getByRole('button', { name: 'Change configuration', exact: true }).click()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
+  await page.clock.setFixedTime(new Date('2026-11-12T10:01:00Z'))
+  await page.getByLabel('Upload JSON files', { exact: true }).setInputFiles(downloadedFile)
+  await expect(fileReceipt).not.toHaveText(firstReceipt)
+  await expect(page.getByRole('status')).toHaveCount(0)
+  await fillImportedConnection(page)
+
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
   await page.getByLabel('Upload JSON files', { exact: true }).setInputFiles(
     FIREWALL_SIMULATOR_EXAMPLE.resources.map((resource, index) => ({
       name: `resource-${index}.json`,
@@ -201,7 +266,7 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
   await expect(page.getByRole('status')).toHaveCount(0)
   await fillImportedConnection(page)
 
-  await page.getByRole('button', { name: 'Change configuration', exact: true }).click()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
   const original = JSON.stringify(FIREWALL_SIMULATOR_EXAMPLE)
   const anotherGroup = original.replaceAll(
     '/resourceGroups/example/',
@@ -216,7 +281,7 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
   await expect(duplicatePolicies.filter({ hasText: 'other-network,' })).toHaveCount(2)
   await page.keyboard.press('Escape')
 
-  await page.getByRole('button', { name: 'Change configuration', exact: true }).click()
+  await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
   await page.getByLabel('Configuration text', { exact: true }).fill(
     JSON.stringify({
       resources: FIREWALL_SIMULATOR_EXAMPLE.resources.filter(
@@ -332,7 +397,8 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
   context,
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-  await page.goto('/firewall-simulator')
+  await page.goto('/logs')
+  await page.getByRole('link', { name: 'Rule simulator', exact: true }).click()
   const trigger = page.getByRole('button', { name: 'Get export command', exact: true })
   await trigger.click()
   const dialog = page.getByRole('dialog', { name: 'Export Azure Firewall configuration' })
@@ -400,4 +466,20 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await expect(trigger).toBeFocused()
+  await trigger.click()
+  await expect(dialog).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('link', { name: 'Logs & DNS', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(dialog).not.toBeVisible()
+  await page.goForward()
+  await expect(
+    page.getByRole('heading', { name: 'Firewall rule simulator', exact: true }),
+  ).toBeVisible()
+  await expect(dialog).not.toBeVisible()
+  await trigger.click()
+  await expect(policy).toHaveValue('*')
+  await page.keyboard.press('Escape')
 })
