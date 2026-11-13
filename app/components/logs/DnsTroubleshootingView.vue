@@ -1,19 +1,28 @@
 <script setup lang="ts">
 import { useElementSize, useMediaQuery } from '@vueuse/core'
 import { RecycleScroller } from 'vue-virtual-scroller'
+import type { RecycleScrollerExposed } from 'vue-virtual-scroller'
 
 import type {
   DnsEntry,
   DnsFilterOptions,
   DnsFilters,
-  DnsObservation,
-  DnsOutcome,
   DnsSort,
   DnsSourceStatus,
 } from '#shared/types/dns'
-import { DNS_OUTCOME_LABELS } from '#shared/utils/dns'
-import type { MobileQueryState } from '~/components/logs/LogAnalysisToolbar.vue'
+import {
+  DNS_COMPLETENESS_LABELS,
+  DNS_OUTCOME_LABELS,
+  DNS_OUTCOME_TONES,
+  DNS_PATH_LABELS,
+  dnsEntryClient,
+  dnsEntryDestination,
+  formatDnsDuration,
+  isDnsOutcome,
+} from '#shared/utils/dns'
 import type { LogHourCycle } from '~/composables/useLogTimeFormat'
+import type { MobileQueryState } from '~/types/logs'
+import { DNS_ENTRY_COLUMNS, DNS_SORT_ITEMS, dnsSourceLabel } from '~/utils/dnsPresentation'
 
 const filters = defineModel<DnsFilters>('filters', { required: true })
 const sort = defineModel<DnsSort>('sort', { required: true })
@@ -31,557 +40,601 @@ const props = withDefaults(
     entriesTruncated: boolean
     transportsTruncated: boolean
     logAnalysis: boolean
-    canApplyFilters: boolean
+    liveConnected?: boolean
     queryState?: MobileQueryState | null
     filterOptions: DnsFilterOptions
-    selectedEntryId: string | null
+    appliedFilters?: DnsFilters | null
+    appliedRange?: { from: string; to: string } | null
   }>(),
-  { hourCycle: 'h23', timeZone: 'UTC', queryState: null },
+  {
+    hourCycle: 'h23',
+    timeZone: 'UTC',
+    liveConnected: false,
+    queryState: null,
+    appliedFilters: null,
+    appliedRange: null,
+  },
 )
 const emit = defineEmits<{
   interaction: [event: Event]
   run: []
   settings: [event: MouseEvent]
-  apply: []
   reset: []
   select: [entry: DnsEntry]
 }>()
-defineSlots<{
-  queryControls?: (props: { mobile: boolean }) => unknown
-}>()
+defineSlots<{ queryControls?: (props: { mobile: boolean }) => unknown }>()
 const isMobile = useMediaQuery('(max-width: 1023px)')
 const tablet = useMediaQuery('(min-width: 768px)')
 const entryViewport = useTemplateRef('entryViewport')
 const { width: entryWidth } = useElementSize(entryViewport)
 const mobileColumns = computed(() => (tablet.value ? 2 : 1))
 const toolbar = useTemplateRef('toolbar')
-const root = useTemplateRef('root')
+const scroller = useTemplateRef<RecycleScrollerExposed<DnsEntry>>('scroller')
 let selectedTriggerId = ''
+const navigation = useVirtualResultsNavigation(
+  toRef(props, 'entries'),
+  entryViewport,
+  scroller,
+  computed(() => (isMobile.value ? mobileColumns.value : 1)),
+  (entry) => {
+    selectedTriggerId = entry.id
+    emit('select', entry)
+  },
+)
 const activeFilterCount = computed(
-  () =>
-    Object.entries(filters.value).filter(([key, value]) => key !== 'search' && value.trim() !== '')
-      .length,
+  () => Object.values(filters.value).filter((value) => value.trim() !== '').length,
 )
-const dnsEntryGridClass = computed(() =>
-  props.hourCycle === 'h12'
-    ? 'min-w-394 grid-cols-[7.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]'
-    : 'min-w-394 grid-cols-[6.5rem_minmax(9rem,1fr)_3.5rem_4rem_24rem_18rem_4rem_7rem_5.5rem_5.5rem_5rem]',
-)
-type SortSelection =
-  | 'timestamp-desc'
-  | 'timestamp-asc'
-  | 'queryName-asc'
-  | 'queryName-desc'
-  | 'duration-asc'
-  | 'duration-desc'
-  | 'observations-asc'
-  | 'observations-desc'
-const sortItems = [
-  { label: 'Newest first', value: 'timestamp-desc', key: 'timestamp', direction: 'desc' },
-  { label: 'Oldest first', value: 'timestamp-asc', key: 'timestamp', direction: 'asc' },
-  { label: 'Query name A–Z', value: 'queryName-asc', key: 'queryName', direction: 'asc' },
-  { label: 'Query name Z–A', value: 'queryName-desc', key: 'queryName', direction: 'desc' },
-  {
-    label: 'Shortest transaction first',
-    value: 'duration-asc',
-    key: 'duration',
-    direction: 'asc',
-  },
-  {
-    label: 'Longest transaction first',
-    value: 'duration-desc',
-    key: 'duration',
-    direction: 'desc',
-  },
-  {
-    label: 'Fewest observations first',
-    value: 'observations-asc',
-    key: 'observations',
-    direction: 'asc',
-  },
-  {
-    label: 'Most observations first',
-    value: 'observations-desc',
-    key: 'observations',
-    direction: 'desc',
-  },
-] satisfies {
-  label: string
-  value: SortSelection
-  key: DnsSort['key']
-  direction: DnsSort['direction']
-}[]
-
-function selectedSortValue(value: DnsSort): SortSelection {
-  if (value.key === 'timestamp') {
-    return value.direction === 'desc' ? 'timestamp-desc' : 'timestamp-asc'
-  }
-  if (value.key === 'queryName') {
-    return value.direction === 'asc' ? 'queryName-asc' : 'queryName-desc'
-  }
-  if (value.key === 'duration') {
-    return value.direction === 'asc' ? 'duration-asc' : 'duration-desc'
-  }
-  return value.direction === 'asc' ? 'observations-asc' : 'observations-desc'
-}
-
-const sortSelection = computed<SortSelection>({
-  get: () => selectedSortValue(sort.value),
-  set: (value) => {
-    const selected = sortItems.find((item) => item.value === value)
-    if (!selected) {
-      return
+const appliedFilterCount = computed(() => {
+  const current = props.logAnalysis ? props.appliedFilters : filters.value
+  return current ? Object.values(current).filter((value) => value.trim() !== '').length : 0
+})
+const sortSelection = computed<(typeof DNS_SORT_ITEMS)[number]['value']>({
+  get: () =>
+    DNS_SORT_ITEMS.find(
+      (item) => item.key === sort.value.key && item.direction === sort.value.direction,
+    )?.value ?? 'timestamp-desc',
+  set: (value: string) => {
+    const selected = DNS_SORT_ITEMS.find((item) => item.value === value)
+    if (selected) {
+      sort.value = { key: selected.key, direction: selected.direction }
     }
-    sort.value = { key: selected.key, direction: selected.direction }
   },
 })
-
 function filterModel(key: 'queryType' | 'protocol' | 'outcome' | 'source') {
-  return computed<string | null>({
-    get: () => filters.value[key] || null,
-    set: (value) => {
-      filters.value[key] = value ?? ''
+  return computed({
+    get: () => filters.value[key] || 'all',
+    set: (value: string) => {
+      filters.value[key] = value === 'all' ? '' : value
     },
   })
 }
-
 const queryTypeFilter = filterModel('queryType')
 const protocolFilter = filterModel('protocol')
+const outcomeFilter = filterModel('outcome')
 const sourceFilter = filterModel('source')
-
-function isDnsOutcome(value: string): value is DnsOutcome {
-  return Object.hasOwn(DNS_OUTCOME_LABELS, value)
-}
-
-const outcomeFilter = computed<DnsOutcome | null>({
-  get: () => (isDnsOutcome(filters.value.outcome) ? filters.value.outcome : null),
-  set: (value) => {
-    filters.value.outcome = value ?? ''
-  },
-})
-const outcomeItems = computed(() =>
-  props.filterOptions.outcomes.map((value) => ({
-    label: DNS_OUTCOME_LABELS[value],
-    value,
-  })),
+const outcomeItems = computed(() => [
+  { label: 'Any result', value: 'all' },
+  ...props.filterOptions.outcomes.map((value) => ({ label: DNS_OUTCOME_LABELS[value], value })),
+])
+const sourceItems = computed(() => [
+  { label: 'Any source', value: 'all' },
+  ...props.filterOptions.sources.map((value) => ({ label: dnsSourceLabel(value), value })),
+])
+const queryTypeItems = computed(() => [
+  { label: 'Any type', value: 'all' },
+  ...props.filterOptions.queryTypes.map((value) => ({ label: value, value })),
+])
+const protocolItems = computed(() => [
+  { label: 'Any protocol', value: 'all' },
+  ...props.filterOptions.protocols.map((value) => ({ label: value, value })),
+])
+const unavailableSources = computed(() =>
+  props.sources.filter((source) => source.availability !== 'available'),
 )
-const emptyEntryMessage = computed(() => {
+const allSourcesUnavailable = computed(
+  () => props.sources.length > 0 && unavailableSources.value.length === props.sources.length,
+)
+const incompleteReasons = computed(() => [
+  ...(props.entriesTruncated ? ['DNS entry limit reached. Narrow the filters or time range.'] : []),
+  ...(props.transportsTruncated ? ['Unidentified transport limit reached.'] : []),
+  ...unavailableSources.value.map(
+    (source) =>
+      `${dnsSourceLabel(source.source)}: ${source.warning ?? (source.availability === 'forbidden' ? 'Access denied.' : 'Query failed.')}`,
+  ),
+])
+const emptyTitle = computed(() => {
+  if (props.status === 'loading') {
+    return 'Loading DNS activity'
+  }
+  if (props.error) {
+    return 'DNS query failed'
+  }
+  if (allSourcesUnavailable.value) {
+    return 'DNS sources unavailable'
+  }
+  if (props.logAnalysis && props.status === 'idle') {
+    return 'Explore DNS activity'
+  }
+  if (!props.logAnalysis && !props.liveConnected) {
+    return 'Connect to Event Hub'
+  }
+  return 'No DNS activity'
+})
+const emptyMessage = computed(() => {
   if (props.status === 'loading') {
     return 'Loading DNS entries…'
   }
   if (props.error) {
-    return 'DNS query failed.'
+    return props.queryState ? 'Review the query and try again.' : props.error
   }
-  if (props.status === 'idle' && props.logAnalysis) {
+  if (allSourcesUnavailable.value) {
+    return 'Check source access and readiness in Settings.'
+  }
+  if (props.logAnalysis && props.status === 'idle') {
     return 'Run DNS query to load entries.'
   }
-  const unavailable = props.sources.filter((source) => source.availability !== 'available')
-  if (props.sources.length > 0 && unavailable.length === props.sources.length) {
-    return 'No DNS sources are available for this query.'
+  if (!props.logAnalysis && !props.liveConnected) {
+    return 'Connect in Event Hub settings to receive live DNS activity.'
   }
-  if (unavailable.length > 0) {
-    return 'No entries returned by available DNS sources.'
+  if (appliedFilterCount.value > 0) {
+    return 'No entries match the applied filters.'
   }
-  if (props.entriesTruncated) {
-    return 'No entries retained within bounded DNS query results.'
-  }
-  return 'No matching DNS entries.'
+  return props.logAnalysis
+    ? 'No DNS entries were returned for this time range.'
+    : 'DNS activity appears here as events arrive.'
 })
-const sourceWarnings = computed(() =>
-  props.sources
-    .filter((source) => source.availability !== 'available')
-    .map((source) => ({
-      key: source.source,
-      text: source.warning ?? `${source.source} source unavailable`,
-    })),
-)
-
-function selectEntry(entry: DnsEntry) {
-  selectedTriggerId = entry.id
-  emit('select', entry)
-}
-
+const appliedSummary = computed(() => {
+  const current = props.logAnalysis ? props.appliedFilters : filters.value
+  if (!current) {
+    return []
+  }
+  const details = [
+    current.queryType,
+    current.protocol,
+    isDnsOutcome(current.outcome) ? DNS_OUTCOME_LABELS[current.outcome] : '',
+    current.source ? dnsSourceLabel(current.source) : '',
+  ].filter(Boolean)
+  const lines = [
+    `${props.logAnalysis ? 'Applied' : 'Active'} · ${current.client || 'All clients'}${details.length > 0 ? ` · ${details.join(' · ')}` : ''}`,
+  ]
+  if (current.search) {
+    lines.push(`Search · ${current.search}`)
+  }
+  if (props.logAnalysis && props.appliedRange) {
+    const date = new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: 'UTC',
+    })
+    lines.push(
+      `${date.format(new Date(props.appliedRange.from))}–${date.format(new Date(props.appliedRange.to))} UTC`,
+    )
+  }
+  return lines
+})
 function restoreFocus() {
-  const target =
-    root.value?.querySelector<HTMLElement>(`[data-dns-entry="${CSS.escape(selectedTriggerId)}"]`) ??
-    root.value?.querySelector<HTMLInputElement>('input')
-  target?.focus({ preventScroll: true })
+  navigation.restore(selectedTriggerId)
 }
-
-defineExpose({ restoreFocus })
-
 function openQuery(event: MouseEvent) {
   if (props.queryState?.canRun) {
-    toolbar.value?.openFilters()
+    toolbar.value?.openRange()
   } else {
     emit('settings', event)
   }
 }
-
-function outcomeClass(value: DnsEntry['outcome']) {
-  if (value === 'dns-error' || value === 'blocked' || value === 'transport-error') {
-    return 'text-red-700 dark:text-red-400'
-  }
-  if (value === 'pending') {
-    return 'text-amber-800 dark:text-amber-300'
-  }
-  return 'text-default'
+function run() {
+  toolbar.value?.runStarted()
+  emit('run')
 }
-
-function outcomeLabel(value: DnsEntry['outcome']) {
-  return DNS_OUTCOME_LABELS[value]
+function retry() {
+  toolbar.value?.focusRun()
+  run()
 }
-
-function duration(seconds: number | undefined) {
-  if (seconds === undefined) {
-    return '-'
+function resetFromEmpty() {
+  if (activeFilterCount.value > 0 || showUnidentifiedTransports.value) {
+    emit('reset')
+    if (!props.logAnalysis) {
+      void nextTick(() => navigation.focus())
+    }
   }
-  if (seconds < 0.001) {
-    return `${Math.round(seconds * 1_000_000)} µs`
+}
+function toggleSort(key: DnsSort['key']) {
+  sort.value = {
+    key,
+    direction: sort.value.key === key && sort.value.direction === 'desc' ? 'asc' : 'desc',
   }
-  if (seconds < 1) {
-    return `${(seconds * 1_000).toFixed(2)} ms`
-  }
-  return `${seconds.toFixed(2)} s`
 }
-
-function endpoint(observation: DnsObservation, side: 'client' | 'server') {
-  const ip = side === 'client' ? observation.clientIp : observation.serverIp
-  const port = side === 'client' ? observation.clientPort : observation.serverPort
-  return [ip, port].filter(Boolean).join(':') || '-'
-}
-
-function destination(entry: DnsEntry) {
-  if (entry.destination) {
-    return entry.destination
-  }
-  const observation = entry.observations.find(
-    (item) => Boolean(item.serverIp) || Boolean(item.serverPort),
-  )
-  return observation ? endpoint(observation, 'server') : '-'
-}
-
-function completeness(value: DnsEntry['completeness']) {
-  return value
-    .split('-')
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ')
-}
+defineExpose({ restoreFocus })
 </script>
 
 <template>
-  <div ref="root" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+  <div class="dns-view">
     <LogsLogAnalysisToolbar
       ref="toolbar"
       :result-count="entries.length"
       :query-state="queryState"
       :active-filter-count="activeFilterCount"
-      @run="emit('run')"
+      :applied-summary="appliedSummary"
+      @run="run"
       @interaction="emit('interaction', $event)"
     >
       <template #search>
-        <UInput
-          v-model="filters.search"
-          icon="i-lucide-search"
-          aria-label="Domain or DNS search"
-          placeholder="Domain or text"
-          class="touch-control min-w-0 flex-1 lg:min-w-48 xl:max-w-60"
-          @keydown.enter="logAnalysis && queryState?.canRun && status !== 'loading' && emit('run')"
-        />
+        <UFormField label="Search" class="min-w-0 flex-1">
+          <UInput
+            v-model="filters.search"
+            icon="i-lucide-search"
+            aria-label="Domain or DNS search"
+            placeholder="Domain or text"
+            class="w-full"
+          />
+        </UFormField>
       </template>
       <template #filters>
-        <div
-          class="dns-filter-grid grid min-w-0 flex-1 basis-full grid-cols-1 gap-2 lg:min-w-[50.5rem] lg:basis-0 lg:grid-cols-[repeat(6,minmax(8rem,1fr))]"
-          data-testid="dns-filter-grid"
-        >
-          <UFormField :label="isMobile ? 'Query type' : undefined">
-            <USelectMenu
+        <div class="dns-filter-fields" data-testid="dns-filter-grid">
+          <UFormField label="Query type"
+            ><USelect
               v-model="queryTypeFilter"
-              :items="filterOptions.queryTypes"
+              :items="queryTypeItems"
+              value-key="value"
               aria-label="Query type"
-              clear
-              :placeholder="isMobile ? 'Any type' : 'Query type'"
               class="w-full"
-            />
-          </UFormField>
-          <UFormField :label="isMobile ? 'Client' : undefined">
-            <UInput
+          /></UFormField>
+          <UFormField label="Client"
+            ><UInput
               v-model="filters.client"
               aria-label="DNS client"
-              :placeholder="isMobile ? 'e.g. 10.0.0.4' : 'Client'"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField :label="isMobile ? 'Protocol' : undefined">
-            <USelectMenu
+              placeholder="Any client"
+              class="w-full font-mono"
+          /></UFormField>
+          <UFormField label="Protocol"
+            ><USelect
               v-model="protocolFilter"
-              :items="filterOptions.protocols"
+              :items="protocolItems"
+              value-key="value"
               aria-label="DNS protocol"
-              clear
-              :placeholder="isMobile ? 'Any protocol' : 'Protocol'"
               class="w-full"
-            />
-          </UFormField>
-          <UFormField :label="isMobile ? 'Result' : undefined">
-            <USelectMenu
+          /></UFormField>
+          <UFormField label="Result"
+            ><USelect
               v-model="outcomeFilter"
               :items="outcomeItems"
               value-key="value"
               aria-label="DNS result"
-              clear
-              :placeholder="isMobile ? 'Any result' : 'Result'"
               class="w-full"
-            />
-          </UFormField>
-          <UFormField :label="isMobile ? 'Source' : undefined">
-            <USelectMenu
+          /></UFormField>
+          <UFormField label="Source" class="col-span-2 min-[641px]:col-span-1"
+            ><USelect
               v-model="sourceFilter"
-              :items="filterOptions.sources"
+              :items="sourceItems"
+              value-key="value"
               aria-label="DNS source"
-              clear
-              :placeholder="isMobile ? 'Any source' : 'Source'"
               class="w-full"
-            />
-          </UFormField>
-          <UFormField :label="isMobile ? 'Sort order' : undefined">
-            <USelect
-              v-model="sortSelection"
-              :items="sortItems"
-              aria-label="DNS sort order"
-              class="w-full"
-            />
-          </UFormField>
-        </div>
-      </template>
-      <template #summary>
-        <div class="flex w-full flex-wrap items-center justify-between gap-3">
-          <div class="col-span-full flex min-h-11 shrink-0 items-center px-1 lg:min-h-8">
+          /></UFormField>
+          <div class="dns-transport-toggle">
             <UCheckbox
               v-model="showUnidentifiedTransports"
               label="Show unidentified DNS transport"
             />
           </div>
-          <LogsLogFilterActions
-            :show-apply="logAnalysis && !isMobile"
-            :apply-disabled="!canApplyFilters"
-            :apply-loading="status === 'loading'"
-            @apply="emit('apply')"
-            @reset="emit('reset')"
-          />
         </div>
       </template>
-      <template v-if="$slots['queryControls']" #query="{ mobile }">
-        <slot name="queryControls" :mobile="mobile" />
-      </template>
+      <template #actions
+        ><LogsLogFilterActions
+          :reset-disabled="activeFilterCount === 0 && !showUnidentifiedTransports"
+          @reset="emit('reset')"
+      /></template>
+      <template v-if="$slots['queryControls']" #query="{ mobile }"
+        ><slot name="queryControls" :mobile="mobile"
+      /></template>
     </LogsLogAnalysisToolbar>
-
-    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden lg:overflow-y-auto lg:p-4">
-      <p
-        v-if="error"
-        role="alert"
-        class="mx-4 mt-3 shrink-0 rounded-md bg-red-50 p-3 text-sm text-red-800 lg:m-0 dark:bg-red-950 dark:text-red-100"
+    <div class="dns-results-body">
+      <AppNotice
+        v-if="error && entries.length && !queryState"
+        tone="error"
+        title="Last query failed"
+        :description="`${error} Previous results remain visible.`"
+        ><template #actions
+          ><UButton
+            label="Retry query"
+            color="neutral"
+            variant="outline"
+            :disabled="status === 'loading'"
+            @click="retry" /></template
+      ></AppNotice>
+      <AppNotice v-if="incompleteReasons.length" tone="warning" title="Result incomplete"
+        ><ul class="list-disc space-y-1 pl-4">
+          <li v-for="reason in incompleteReasons" :key="reason">{{ reason }}</li>
+        </ul></AppNotice
       >
-        {{ error }}
-      </p>
-      <div
-        v-if="sourceWarnings.length"
-        role="status"
-        class="mx-4 mt-3 shrink-0 rounded-md bg-amber-50 p-3 text-sm text-amber-900 lg:m-0 dark:bg-amber-950 dark:text-amber-100"
-      >
-        <p class="font-medium">Some DNS sources could not be queried.</p>
-        <ul class="mt-1 list-disc pl-5">
-          <li v-for="warning in sourceWarnings" :key="warning.key">{{ warning.text }}</li>
-        </ul>
-      </div>
-
       <section
-        class="flex min-h-0 flex-1 flex-col overflow-hidden lg:min-h-52 lg:rounded-md lg:border lg:border-brand-gray-200 dark:lg:border-brand-gray-700"
+        class="dns-results-panel flex min-h-0 flex-1 flex-col overflow-hidden"
         aria-labelledby="dns-entry-heading"
+        :aria-busy="status === 'loading'"
       >
-        <h2
-          id="dns-entry-heading"
-          class="sr-only lg:not-sr-only lg:flex lg:shrink-0 lg:items-center lg:justify-between lg:border-b lg:border-brand-gray-200 lg:px-3 lg:py-2 lg:text-sm lg:font-semibold dark:lg:border-brand-gray-700"
+        <div
+          class="dns-result-header flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2"
         >
-          <span class="flex min-w-0 flex-wrap items-baseline gap-x-2">
-            <span>DNS activity</span>
-            <span class="text-xs font-normal text-brand-gray-600 dark:text-brand-gray-300">
-              Times shown in {{ timeZone }}
-            </span>
-          </span>
-          <span class="flex items-center gap-2">
-            <UBadge v-if="entriesTruncated" color="warning" variant="subtle">
-              Entries truncated
-            </UBadge>
-            <UBadge v-if="transportsTruncated" color="warning" variant="subtle">
-              Unidentified transport truncated
-            </UBadge>
-          </span>
-        </h2>
-        <p
-          v-if="isMobile && (entriesTruncated || transportsTruncated)"
-          role="status"
-          class="px-4 pt-3 text-xs text-amber-800 dark:text-amber-300"
-        >
-          Result limit reached. Narrow filters or time range for complete results.
+          <h2 id="dns-entry-heading" class="text-sm font-semibold">
+            DNS activity
+            <span class="text-xs font-normal text-muted">· Times in {{ timeZone }}</span>
+          </h2>
+          <UFormField label="Sort order" class="min-w-0"
+            ><USelect
+              v-model="sortSelection"
+              :items="[...DNS_SORT_ITEMS]"
+              aria-label="DNS sort order"
+              class="w-full"
+          /></UFormField>
+        </div>
+        <p id="dns-row-help" class="sr-only">
+          Use Up and Down to move between entries. Press Enter to open details.
         </p>
         <div
           ref="entryViewport"
-          class="flex min-h-0 flex-1 flex-col overflow-x-auto px-4 pt-3 lg:p-0"
+          class="virtual-results flex min-h-0 flex-1 flex-col"
           data-testid="dns-entry-scroll"
+          role="grid"
+          :aria-rowcount="entries.length + (isMobile ? 0 : 1)"
+          :aria-colcount="isMobile ? 1 : 8"
+          :aria-activedescendant="navigation.activeDescendant.value"
+          aria-label="DNS results"
+          aria-describedby="dns-row-help"
+          tabindex="0"
+          @keydown="navigation.keydown"
+          @scroll.capture.passive="navigation.scrolled"
         >
-          <div
-            v-if="!isMobile && entries.length > 0"
-            class="sticky top-0 z-10 grid shrink-0 gap-2 border-b border-brand-gray-200 bg-brand-gray-50 px-3 py-2 text-xs font-semibold dark:border-brand-gray-700 dark:bg-brand-gray-900"
-            :class="dnsEntryGridClass"
-            data-testid="dns-entry-header"
-          >
-            <span>Time</span>
-            <span>DNS name or message</span>
-            <span>Type</span>
-            <span>Protocol</span>
-            <span>Client</span>
-            <span>Destination</span>
-            <span>Path</span>
-            <span>Result</span>
-            <span>Transaction duration</span>
-            <span>Evidence</span>
-            <span>Observations</span>
-          </div>
           <ClientOnly>
             <RecycleScroller
               v-if="entries.length"
+              ref="scroller"
               :items="entries"
-              :item-size="isMobile ? 168 : 44"
+              :item-size="isMobile ? 144 : 44"
               :grid-items="isMobile ? mobileColumns : undefined"
               :item-secondary-size="
                 isMobile && entryWidth > 0 ? entryWidth / mobileColumns : undefined
               "
               key-field="id"
-              class="min-h-0 flex-1"
-              :class="isMobile ? 'mobile-results' : 'min-w-394'"
-              role="region"
-              aria-label="DNS entries"
+              list-tag="div"
+              item-tag="div"
+              emit-update
+              class="dns-scroller min-h-0 flex-1"
+              :class="isMobile && 'mobile-results'"
+              @update="navigation.updateRange"
             >
-              <template #default="{ item, index, active }">
-                <button
-                  v-if="active"
-                  type="button"
-                  class="border-default px-3 text-left text-xs hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
-                  :class="
-                    isMobile
-                      ? [
-                          'flex h-40 flex-col items-stretch justify-start gap-1 rounded-lg border bg-default py-3',
-                          tablet ? ['w-[calc(100%-0.25rem)]', index % 2 === 1 && 'ml-1'] : 'w-full',
-                        ]
-                      : ['grid h-11 w-full items-center gap-2 border-b', dnsEntryGridClass]
-                  "
-                  :aria-label="
-                    item.source !== 'network-rule'
-                      ? `Open DNS details for ${item.displayText || item.queryName || item.source}`
-                      : `Open DNS transport details for ${item.client || 'unknown client'}`
-                  "
-                  :aria-pressed="selectedEntryId === item.id"
-                  :data-dns-entry="item.id"
-                  @click="selectEntry(item)"
+              <template v-if="!isMobile" #before>
+                <div
+                  class="dns-entry-grid dns-result-header grid text-xs font-semibold"
+                  role="row"
+                  aria-rowindex="1"
+                  data-testid="dns-entry-header"
                 >
-                  <template v-if="isMobile">
-                    <span class="flex items-center justify-between gap-2 text-muted"
-                      ><NuxtTime
+                  <span
+                    v-for="column in DNS_ENTRY_COLUMNS"
+                    :key="column.label"
+                    role="columnheader"
+                    :aria-sort="
+                      column.key === sort.key
+                        ? sort.direction === 'asc'
+                          ? 'ascending'
+                          : 'descending'
+                        : undefined
+                    "
+                  >
+                    <button
+                      v-if="column.key"
+                      type="button"
+                      class="dns-sort-button"
+                      :aria-label="`Sort by ${column.label.toLowerCase()}`"
+                      @click="column.key && toggleSort(column.key)"
+                    >
+                      {{ column.label
+                      }}<UIcon
+                        :name="
+                          column.key === sort.key
+                            ? sort.direction === 'asc'
+                              ? 'i-lucide-arrow-up'
+                              : 'i-lucide-arrow-down'
+                            : 'i-lucide-arrow-up-down'
+                        "
+                        class="size-3 shrink-0"
+                      />
+                    </button>
+                    <template v-else>{{ column.label }}</template>
+                  </span>
+                </div>
+              </template>
+              <template #default="{ item, index, active }">
+                <div
+                  v-if="active"
+                  :id="navigation.rowId(item.id)"
+                  :data-result-index="index"
+                  :data-dns-entry="item.id"
+                  :aria-rowindex="index + (isMobile ? 1 : 2)"
+                  :aria-selected="item.id === navigation.activeId.value"
+                  :data-active="item.id === navigation.activeId.value"
+                  role="row"
+                  tabindex="-1"
+                  :class="isMobile ? 'dns-mobile-row' : 'dns-entry-grid dns-entry-row'"
+                  @focus.self="navigation.focus(item.id)"
+                  @click="!isMobile && navigation.select(item)"
+                >
+                  <div v-if="isMobile" role="gridcell">
+                    <button
+                      type="button"
+                      tabindex="-1"
+                      class="dns-mobile-entry"
+                      :aria-label="`Open DNS details for ${item.displayText ?? item.queryName ?? 'transport'} from ${dnsEntryClient(item)}`"
+                      @click="navigation.select(item)"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <NuxtTime
+                          :datetime="item.timestamp"
+                          month="short"
+                          day="2-digit"
+                          hour="2-digit"
+                          minute="2-digit"
+                          second="2-digit"
+                          :hour-cycle="hourCycle"
+                          :time-zone="timeZone"
+                          class="font-mono text-muted"
+                        /><AppStatusLabel
+                          :tone="DNS_OUTCOME_TONES[item.outcome]"
+                          :label="DNS_OUTCOME_LABELS[item.outcome]"
+                        />
+                      </div>
+                      <span class="truncate font-mono text-sm font-medium">{{
+                        item.displayText ?? item.queryName ?? 'Not observed'
+                      }}</span>
+                      <span class="truncate font-mono" :title="dnsEntryClient(item)"
+                        >Client {{ dnsEntryClient(item) }}</span
+                      >
+                      <span
+                        v-if="dnsEntryDestination(item) !== 'Not observed'"
+                        class="truncate font-mono"
+                        :title="dnsEntryDestination(item)"
+                        >To {{ dnsEntryDestination(item) }}</span
+                      >
+                      <span class="mt-auto flex items-center justify-between gap-2 text-muted"
+                        ><span>{{
+                          [
+                            item.queryType,
+                            item.protocol,
+                            item.durationSeconds !== undefined
+                              ? formatDnsDuration(item.durationSeconds)
+                              : undefined,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || DNS_PATH_LABELS[item.path]
+                        }}</span
+                        ><UIcon name="i-lucide-chevron-right" class="size-4"
+                      /></span>
+                    </button>
+                  </div>
+                  <template v-else>
+                    <span role="gridcell" class="font-mono">
+                      <NuxtTime
                         :datetime="item.timestamp"
                         month="short"
                         day="2-digit"
+                        :time-zone="timeZone"
+                        class="block"
+                      />
+                      <NuxtTime
+                        :datetime="item.timestamp"
                         hour="2-digit"
                         minute="2-digit"
                         second="2-digit"
                         :hour-cycle="hourCycle"
                         :time-zone="timeZone"
-                      /><span class="font-medium" :class="outcomeClass(item.outcome)">{{
-                        outcomeLabel(item.outcome)
+                        class="block"
+                      />
+                    </span>
+                    <span role="gridcell" class="min-w-0"
+                      ><span
+                        class="block truncate font-mono"
+                        :title="item.displayText ?? item.queryName"
+                        >{{ item.displayText ?? item.queryName ?? 'Not observed' }}</span
+                      ><span class="block truncate text-muted">{{
+                        [item.queryType, item.protocol, DNS_PATH_LABELS[item.path]]
+                          .filter(Boolean)
+                          .join(' · ')
                       }}</span></span
                     >
                     <span
-                      class="line-clamp-3 font-mono text-sm leading-[18px] font-medium wrap-anywhere"
-                      >{{ item.displayText ?? item.queryName ?? 'Not observed' }}</span
+                      role="gridcell"
+                      class="truncate font-mono"
+                      :title="dnsEntryClient(item)"
+                      >{{ dnsEntryClient(item) }}</span
                     >
-                    <span class="flex min-w-0 items-center gap-2 text-muted"
-                      ><span class="shrink-0">Client</span
-                      ><span class="truncate font-mono text-default">{{
-                        item.client || 'Not observed'
-                      }}</span></span
+                    <span
+                      role="gridcell"
+                      class="truncate font-mono"
+                      :title="dnsEntryDestination(item)"
+                      >{{ dnsEntryDestination(item) }}</span
                     >
-                    <span class="flex min-w-0 items-center gap-2 text-muted"
-                      ><span class="shrink-0">To</span
-                      ><span class="truncate font-mono text-default">{{
-                        destination(item)
-                      }}</span></span
-                    >
-                    <span class="mt-auto flex items-center justify-between text-muted"
-                      ><span
-                        >{{ item.queryType ?? '-' }} · {{ item.protocol ?? '-' }} ·
-                        {{ duration(item.durationSeconds) }}</span
-                      ><UIcon name="i-lucide-chevron-right" class="size-4"
-                    /></span>
-                  </template>
-                  <template v-else>
-                    <NuxtTime
-                      :datetime="item.timestamp"
-                      hour="2-digit"
-                      minute="2-digit"
-                      second="2-digit"
-                      :hour-cycle="hourCycle"
-                      :time-zone="timeZone"
+                    <AppStatusLabel
+                      role="gridcell"
+                      :tone="DNS_OUTCOME_TONES[item.outcome]"
+                      :label="DNS_OUTCOME_LABELS[item.outcome]"
                     />
-                    <span class="truncate font-mono">{{
-                      item.displayText ?? item.queryName ?? 'Not observed'
+                    <span role="gridcell">{{
+                      item.durationSeconds === undefined
+                        ? '—'
+                        : formatDnsDuration(item.durationSeconds)
                     }}</span>
-                    <span>{{ item.queryType ?? '-' }}</span>
-                    <span>{{ item.protocol ?? '-' }}</span>
-                    <span class="truncate font-mono" :title="item.client || '-'">
-                      {{ item.client || '-' }}
-                    </span>
-                    <span class="truncate font-mono" :title="destination(item)">
-                      {{ destination(item) }}
-                    </span>
-                    <span>{{ item.path }}</span>
-                    <span :class="outcomeClass(item.outcome)">{{
-                      outcomeLabel(item.outcome)
-                    }}</span>
-                    <span>{{ duration(item.durationSeconds) }}</span>
-                    <span>{{ completeness(item.completeness) }}</span>
-                    <span>{{ item.observationCount }}</span>
+                    <AppStatusLabel
+                      role="gridcell"
+                      :tone="item.completeness === 'complete' ? 'neutral' : 'warning'"
+                      :label="DNS_COMPLETENESS_LABELS[item.completeness]"
+                    />
+                    <span role="gridcell">{{ item.observationCount }}</span>
                   </template>
-                </button>
+                </div>
               </template>
             </RecycleScroller>
             <div
               v-else
-              class="grid min-h-40 flex-1 place-items-center px-6 py-8 text-center text-sm text-muted"
+              class="grid min-h-40 flex-1 place-items-center px-6 py-8 text-center text-sm"
+              :role="error ? 'alert' : 'status'"
             >
               <div class="max-w-sm space-y-3">
-                <UIcon name="i-lucide-network" class="size-7 text-muted" />
-                <h3 class="text-base font-semibold text-default">No DNS activity</h3>
-                <p>{{ emptyEntryMessage }}</p>
+                <UIcon
+                  :name="
+                    status === 'loading'
+                      ? 'i-lucide-loader-circle'
+                      : error
+                        ? 'i-lucide-circle-alert'
+                        : 'i-lucide-network'
+                  "
+                  class="size-7"
+                  :class="status === 'loading' && 'animate-spin motion-reduce:animate-none'"
+                />
+                <h3 class="text-base font-semibold">{{ emptyTitle }}</h3>
+                <p class="text-muted">{{ emptyMessage }}</p>
                 <UButton
-                  v-if="
-                    (activeFilterCount || filters.search) && (!logAnalysis || queryState?.hasRun)
+                  v-if="error && queryState?.canRun"
+                  label="Retry query"
+                  variant="outline"
+                  color="neutral"
+                  @click="retry"
+                />
+                <UButton
+                  v-else-if="!logAnalysis && !liveConnected"
+                  label="Open Event Hub settings"
+                  icon="i-lucide-settings"
+                  color="neutral"
+                  variant="outline"
+                  @click="emit('settings', $event)"
+                />
+                <UButton
+                  v-else-if="allSourcesUnavailable || (logAnalysis && !queryState?.canRun)"
+                  label="Open Log Analytics settings"
+                  icon="i-lucide-settings"
+                  variant="outline"
+                  color="neutral"
+                  @click="emit('settings', $event)"
+                />
+                <UButton
+                  v-else-if="
+                    status !== 'loading' &&
+                    appliedFilterCount &&
+                    (!logAnalysis || queryState?.hasRun)
                   "
                   label="Reset filters"
                   variant="outline"
                   color="neutral"
-                  class="touch-control"
-                  @click="emit('reset')"
+                  :aria-disabled="activeFilterCount === 0 && !showUnidentifiedTransports"
+                  @click="resetFromEmpty"
                 />
                 <UButton
-                  v-else-if="logAnalysis && !error && status !== 'loading'"
-                  :label="
-                    !queryState?.canRun
-                      ? 'Open Log Analytics settings'
-                      : queryState.hasRun
-                        ? 'Change time range'
-                        : 'Choose time range'
-                  "
-                  :icon="queryState?.canRun ? 'i-lucide-calendar-range' : 'i-lucide-settings'"
-                  class="touch-control"
+                  v-else-if="status !== 'loading' && logAnalysis && queryState?.hasRun"
+                  label="Change time range"
+                  icon="i-lucide-calendar-range"
+                  variant="outline"
+                  color="neutral"
                   @click="openQuery"
                 />
               </div>

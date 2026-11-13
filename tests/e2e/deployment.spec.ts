@@ -16,7 +16,7 @@ test('anonymous deployment bypasses application login', async ({ page }) => {
 
   await expect(page).toHaveURL(LOGS_URL_PATTERN, { timeout: 15_000 })
   await expect(page.getByText('Temporary session')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Leave' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0)
 })
 
 test('anonymous deployment starts directly in logs', async ({ page }) => {
@@ -24,7 +24,7 @@ test('anonymous deployment starts directly in logs', async ({ page }) => {
   await page.goto('/logs')
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
   await expect(page.getByText('Temporary session')).toBeVisible()
-  await expect(page.getByText('Azure Firewall Analytics', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Azure Argus', exact: true })).toBeVisible()
 
   const darkModeToggle = page.getByRole('button', { name: 'Switch to dark mode' })
   await expect(darkModeToggle).toBeVisible()
@@ -102,23 +102,29 @@ test('anonymous delegated Log Analytics exposes temporary authentication control
   })
 
   await page.goto('/logs')
-  await page.getByRole('button', { name: 'Log Analytics' }).click()
+  await page.getByRole('radio', { name: 'Log Analytics' }).click()
   const openLogAnalyticsSettings = page.getByRole('button', {
     name: 'Open Log Analytics settings',
   })
   await expect(openLogAnalyticsSettings).toBeVisible()
   await openLogAnalyticsSettings.click()
-  const settingsDrawer = page.locator('#logs-settings-drawer')
+  const settingsDrawer = page.getByRole('dialog', { name: 'Settings', exact: true })
   await expect(settingsDrawer).toBeVisible()
-  await expect(settingsDrawer).toHaveAccessibleName('Log Analytics settings')
+  await expect(
+    settingsDrawer.getByRole('heading', { name: 'Log Analytics settings' }),
+  ).toBeVisible()
   await expect(page.getByText('Tenant ID', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Workspace ID', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Grant tenant consent' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Grant query permission' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Permissions' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Connect to Azure' })).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Run query' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Leave' })).toHaveCount(0)
+  await settingsDrawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Run query' })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  )
+  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0)
 })
 
 test('anonymous mode can reach logs page', async ({ page }) => {
@@ -136,31 +142,17 @@ test('anonymous mode can reach logs page', async ({ page }) => {
   })
   await enterAnonymousMode(page)
 
-  const settingsButton = page.getByRole('button', { name: 'Settings', exact: true })
-  const settingsDrawer = page.locator('#logs-settings-drawer')
+  const settingsButton = page.locator('#logs-settings-toggle')
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const dataSource = page.getByRole('group', { name: 'Data source', exact: true })
   await expect(settingsButton).toHaveAttribute('aria-expanded', 'false')
-  await expect(settingsDrawer).toBeHidden()
-  const dataSource = page.getByRole('group', { name: 'Data source' })
-  await expect(dataSource).toBeVisible()
-  await expect(dataSource.getByRole('button', { name: 'Live Event Hub' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
-  await expect(dataSource.getByRole('button', { name: 'Log Analytics' })).toBeDisabled()
-  await expect(
-    page.getByText('Temporary Log Analytics app registration is not configured.'),
-  ).toBeVisible()
+  await expect(settings).toBeHidden()
+  await expect(dataSource.getByRole('radio', { name: 'Live Event Hub' })).toBeChecked()
+  await expect(dataSource.getByRole('radio', { name: 'Log Analytics' })).toBeDisabled()
   await expect(dataSource.getByText(VISIBLE_RECEIVED_PATTERN)).toHaveCount(0)
-  await expect(dataSource.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0)
   await expect(page.getByText(VISIBLE_RECEIVED_PATTERN)).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Clear', exact: true })).toBeVisible()
-  const firewallTable = page.getByRole('table', { name: 'Firewall logs' })
   const searchLogs = page.getByRole('textbox', { name: 'Search logs' })
-  await expect(firewallTable).toBeVisible()
   await searchLogs.fill('dns')
-  const tableWidth = await firewallTable.evaluate(
-    (element) => element.getBoundingClientRect().width,
-  )
   await expect
     .poll(
       async () =>
@@ -171,53 +163,26 @@ test('anonymous mode can reach logs page', async ({ page }) => {
     )
     .toEqual({ horizontal: true, vertical: true })
 
-  const liveEventHubButton = dataSource.getByRole('button', {
-    name: 'Live Event Hub',
-  })
-  await liveEventHubButton.focus()
-  await expect(liveEventHubButton).toBeFocused()
-  await liveEventHubButton.press('Enter')
-  await expect(liveEventHubButton).toBeFocused()
+  const liveSource = dataSource.getByRole('radio', { name: 'Live Event Hub' })
+  await liveSource.focus()
+  await liveSource.press('Space')
+  await expect(liveSource).toBeChecked()
 
-  const openEventHubSettings = page.getByRole('button', {
-    name: 'Open Event Hub settings',
-  })
-  await expect(openEventHubSettings).toBeVisible()
+  const openEventHubSettings = page.getByRole('button', { name: 'Open Event Hub settings' })
   await openEventHubSettings.click()
-  const closeSettings = settingsDrawer.getByRole('button', { name: 'Close settings' })
   await expect(settingsButton).toHaveAttribute('aria-expanded', 'true')
-  await expect(settingsDrawer).toBeVisible()
-  expect(await settingsDrawer.locator('..').evaluate((element) => element.scrollLeft)).toBe(0)
-  await expect(settingsDrawer).toHaveAccessibleName('Live Event Hub settings')
-  await expect(
-    settingsDrawer.getByRole('heading', { name: 'Live Event Hub settings' }),
-  ).toBeVisible()
-  await expect(closeSettings).toBeFocused()
-  expect(
-    await firewallTable.evaluate((element) => element.getBoundingClientRect().width),
-  ).toBeCloseTo(tableWidth, 1)
+  await expect(settings.getByRole('heading', { name: 'Live Event Hub settings' })).toBeVisible()
+  await expect(settings.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(settings.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(settings).toBeHidden()
+  await expect(openEventHubSettings).toBeFocused()
   await expect(searchLogs).toHaveValue('dns')
 
-  await searchLogs.fill('dns updated')
-  await expect(searchLogs).toBeFocused()
-  await expect(searchLogs).toHaveValue('dns updated')
-  await expect(settingsDrawer).toBeVisible()
-  await closeSettings.click()
-  await expect(settingsButton).toHaveAttribute('aria-expanded', 'false')
-  await expect(openEventHubSettings).toBeFocused()
-  await page.keyboard.press('Tab')
-  await expect(settingsDrawer.locator(':focus')).toHaveCount(0)
-  await expect(settingsDrawer).toBeHidden()
-
-  await settingsButton.click()
-  await expect(closeSettings).toBeFocused()
-
-  await expect(page.getByRole('button', { name: 'Category filter' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Action filter' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Protocol filter' })).toBeVisible()
-
-  const lookbackSelect = page.getByRole('combobox', { name: 'Lookback' })
-  await lookbackSelect.click()
+  await openSettings(page)
+  const lookback = settings.getByRole('combobox', { name: 'Lookback' })
+  await lookback.click()
   await expect(page.getByRole('option')).toHaveText([
     'Last 1 minute',
     'Last 3 minutes',
@@ -227,32 +192,15 @@ test('anonymous mode can reach logs page', async ({ page }) => {
   ])
   await page.keyboard.press('Escape')
   await expect(page.getByRole('option')).toHaveCount(0)
-  await expect(settingsDrawer).toBeVisible()
-  await expect(settingsButton).toHaveAttribute('aria-expanded', 'true')
+  await expect(settings).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(settingsDrawer).toBeHidden()
-  await expect(settingsButton).toBeFocused()
-
-  await settingsButton.click()
-  await expect(settingsDrawer).toBeVisible()
-  await settingsButton.click()
-  await expect(settingsDrawer).toBeHidden()
+  await expect(settings).toBeHidden()
   await expect(settingsButton).toBeFocused()
 
   await openSettings(page)
-
-  const logRetentionSwitch = page.getByRole('switch', {
-    name: 'Local log retention',
-  })
-  const logRetentionInfo = page.getByRole('button', {
-    name: 'About local log retention',
-  })
-  await expect(logRetentionSwitch).toBeVisible()
-  await logRetentionInfo.hover()
+  await expect(settings.getByRole('switch', { name: 'Local log retention' })).toBeVisible()
   await expect(
-    page
-      .getByRole('paragraph')
-      .filter({ hasText: 'Keeps up to 100,000 parsed Live Event Hub records' }),
+    settings.getByText('Keeps up to 100,000 parsed Live Event Hub records', { exact: false }),
   ).toBeVisible()
 })
 

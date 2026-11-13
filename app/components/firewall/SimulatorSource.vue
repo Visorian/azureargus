@@ -1,203 +1,81 @@
 <script setup lang="ts">
 import type { FirewallSnapshot, SimulatorTraffic } from '#shared/types/firewallSimulator'
-import { readAzureFirewallExport } from '#shared/utils/azureFirewallReader'
-import { normalizeFirewallSnapshot, parseFirewallSnapshot } from '#shared/utils/firewallSimulator'
-import {
-  FIREWALL_SIMULATOR_EXAMPLE,
-  FIREWALL_SIMULATOR_EXAMPLE_TRAFFIC,
-} from '~/utils/firewallSimulatorExample'
 
+defineProps<{ hasConfiguration?: boolean }>()
 const emit = defineEmits<{
   load: [snapshot: FirewallSnapshot, label: string, exampleTraffic?: SimulatorTraffic]
 }>()
-const RESOURCE_ID_LINES = /\r?\n/u
-const mode = ref<'import' | 'azure'>('import')
-const text = ref('')
-const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
-const importActions = useTemplateRef<HTMLDivElement>('importActions')
-const resourceIds = ref('')
-const tenantId = ref('')
-const lastError = ref<string | null>(null)
-const loading = ref(false)
-const username = ref('')
-const auth = useTemporaryLogAnalyticsAuth()
-const runtimeConfig = useRuntimeConfig()
-const liveAvailable = computed(() => Boolean(runtimeConfig.public.logAnalyticsDelegated.clientId))
-const sourceError = computed(
-  () => lastError.value ?? (mode.value === 'azure' ? auth.lastError.value : null),
-)
-let controller: AbortController | null = null
-let generation = 0
-
-function setMode(value: 'import' | 'azure') {
-  lastError.value = null
-  mode.value = value
+const {
+  mode,
+  text,
+  resourceIds,
+  tenantId,
+  loading,
+  username,
+  auth,
+  liveAvailable,
+  sourceError,
+  pasteError,
+  uploadError,
+  canRead,
+  cancelLoad,
+  importText,
+  importFiles,
+  loadExample,
+  disconnectAzure,
+  connectAzure,
+  loadAzure,
+} = useSimulatorSource((...args) => emit('load', ...args))
+const configurationInput = useTemplateRef('configurationInput')
+async function loadText() {
+  importText()
+  if (pasteError.value) {
+    await nextTick()
+    configurationInput.value?.textareaRef?.focus()
+  }
 }
+const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
+const uploadButton = useTemplateRef<{ $el: HTMLButtonElement }>('uploadButton')
+const readButton = useTemplateRef<{ $el: HTMLButtonElement }>('readButton')
+const connectButton = useTemplateRef<{ $el: HTMLButtonElement }>('connectButton')
+const inputModes = [
+  { value: 'import', label: 'Paste or upload' },
+  { value: 'azure', label: 'Live Azure' },
+] as const
 
 async function focusImport(): Promise<void> {
   cancelLoad()
-  setMode('import')
+  mode.value = 'import'
   await nextTick()
-  importActions.value
-    ?.querySelector<HTMLButtonElement>('button[data-upload-configuration]')
-    ?.focus()
+  uploadButton.value?.$el.focus()
+}
+async function handleFiles(event: Event) {
+  const input = event.target
+  if (!(input instanceof HTMLInputElement)) {
+    return
+  }
+  await importFiles([...(input.files ?? [])])
+  input.value = ''
+}
+async function cancelRead() {
+  cancelLoad()
+  await nextTick()
+  readButton.value?.$el.focus()
+}
+async function disconnect() {
+  await disconnectAzure()
+  await nextTick()
+  connectButton.value?.$el.focus()
 }
 
 defineExpose({ focusImport })
-
-function cancelLoad() {
-  generation += 1
-  controller?.abort()
-  controller = null
-  loading.value = false
-}
-watch([mode, resourceIds, tenantId], cancelLoad)
-onScopeDispose(cancelLoad)
-onDeactivated(cancelLoad)
-
-function importText() {
-  lastError.value = null
-  try {
-    emit(
-      'load',
-      parseFirewallSnapshot(text.value),
-      `Pasted configuration · ${new Date().toLocaleString()}`,
-    )
-  } catch (error: unknown) {
-    lastError.value = error instanceof Error ? error.message : 'Could not read the configuration.'
-  }
-}
-
-async function importFiles(event: Event) {
-  const input = event.target
-  if (!(input instanceof HTMLInputElement) || !input.files?.length) {
-    return
-  }
-  cancelLoad()
-  const current = generation
-  loading.value = true
-  lastError.value = null
-  const files = [...input.files]
-  try {
-    const content = (await Promise.all(files.map(async (file) => await file.text()))).join('\n')
-    if (current !== generation) {
-      return
-    }
-    const snapshot = parseFirewallSnapshot(content)
-    text.value = content
-    emit(
-      'load',
-      snapshot,
-      `${files.map((file) => file.name).join(', ')} · ${new Date().toLocaleString()}`,
-    )
-  } catch (error: unknown) {
-    if (current === generation) {
-      lastError.value = error instanceof Error ? error.message : 'Could not read the files.'
-    }
-  } finally {
-    if (current === generation) {
-      loading.value = false
-    }
-    input.value = ''
-  }
-}
-
-function loadExample() {
-  cancelLoad()
-  lastError.value = null
-  text.value = ''
-  emit(
-    'load',
-    normalizeFirewallSnapshot(FIREWALL_SIMULATOR_EXAMPLE),
-    'Example configuration',
-    FIREWALL_SIMULATOR_EXAMPLE_TRAFFIC,
-  )
-}
-
-async function disconnectAzure() {
-  cancelLoad()
-  await auth.disconnect()
-}
-
-async function connectAzure() {
-  cancelLoad()
-  lastError.value = null
-  const connection = await auth.connect()
-  if (connection) {
-    tenantId.value = connection.tenantId
-    username.value = connection.username
-  }
-}
-
-async function loadAzure() {
-  cancelLoad()
-  const current = generation
-  const requestController = new AbortController()
-  controller = requestController
-  loading.value = true
-  lastError.value = null
-  try {
-    const token = await auth.getManagementAccessToken(tenantId.value)
-    const ids = resourceIds.value
-      .split(RESOURCE_ID_LINES)
-      .map((id) => id.trim())
-      .filter(Boolean)
-    const data = await readAzureFirewallExport(
-      ids,
-      token,
-      AbortSignal.any([requestController.signal, AbortSignal.timeout(60_000)]),
-    )
-    if (current !== generation) {
-      return
-    }
-    const snapshot = normalizeFirewallSnapshot(data)
-    text.value = JSON.stringify(data, null, 2)
-    emit('load', snapshot, `Azure · ${new Date().toLocaleString()}`)
-  } catch (error: unknown) {
-    if (current !== generation) {
-      return
-    }
-    lastError.value = error instanceof Error ? error.message : 'Could not load Azure policies.'
-  } finally {
-    if (current === generation) {
-      loading.value = false
-      controller = null
-    }
-  }
-}
 </script>
 
 <template>
   <div class="touch-fields min-w-0 space-y-5">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <UFieldGroup
-        role="group"
-        aria-label="Configuration input"
-        class="rounded-md border border-default bg-default"
-      >
-        <UButton
-          :variant="mode === 'import' ? 'soft' : 'ghost'"
-          color="neutral"
-          :aria-pressed="mode === 'import'"
-          class="min-h-11"
-          @click="setMode('import')"
-          >Paste or upload</UButton
-        >
-        <UButton
-          :variant="mode === 'azure' ? 'soft' : 'ghost'"
-          color="neutral"
-          :aria-pressed="mode === 'azure'"
-          class="min-h-11"
-          @click="setMode('azure')"
-          >Live Azure</UButton
-        >
-      </UFieldGroup>
-      <UButton
-        variant="ghost"
-        color="neutral"
-        icon="i-lucide-flask-conical"
-        class="min-h-11"
-        @click="loadExample"
+      <AppSegmentedControl v-model="mode" :items="inputModes" label="Configuration input" />
+      <UButton variant="ghost" color="neutral" icon="i-lucide-flask-conical" @click="loadExample"
         >Use example</UButton
       >
     </div>
@@ -206,14 +84,17 @@ async function loadAzure() {
         <p class="max-w-3xl text-sm text-muted">
           Upload a configuration snapshot, or get a command to export one from Azure Cloud Shell.
         </p>
-        <div ref="importActions" class="grid gap-2 sm:flex sm:flex-wrap">
+        <div class="grid gap-2 sm:flex sm:flex-wrap">
           <UButton
-            icon="i-lucide-upload"
-            color="primary"
-            class="min-h-11 justify-center"
+            ref="uploadButton"
+            :icon="loading ? 'i-lucide-loader-circle' : 'i-lucide-upload'"
+            :color="hasConfiguration ? 'neutral' : 'primary'"
+            :variant="hasConfiguration ? 'outline' : 'solid'"
+            class="justify-center"
             data-upload-configuration
-            :loading="loading"
-            @click="fileInput?.click()"
+            :aria-busy="loading"
+            :aria-disabled="loading"
+            @click="!loading && fileInput?.click()"
             >Upload JSON files</UButton
           >
           <FirewallExportCommandModal />
@@ -225,9 +106,15 @@ async function loadAzure() {
             aria-label="Upload JSON files"
             class="hidden"
             :disabled="loading"
-            @change="importFiles"
+            @change="handleFiles"
           />
         </div>
+        <AppNotice
+          v-if="uploadError"
+          tone="error"
+          title="Could not read configuration files"
+          :description="uploadError"
+        />
         <p class="max-w-3xl text-xs text-muted">
           JSON, JSONL or text files. Select several files together to include policies, collection
           groups and IP groups.
@@ -238,11 +125,13 @@ async function loadAzure() {
           label="Configuration text"
           name="firewall-configuration"
           help="You can also paste the complete export output here."
+          :error="pasteError || undefined"
         >
           <UTextarea
             id="firewall-configuration"
+            ref="configurationInput"
             v-model="text"
-            class="w-full min-w-0"
+            class="simulator-identifiers w-full min-w-0"
             :rows="4"
             placeholder="Paste Azure CLI or REST JSON"
             :spellcheck="false"
@@ -253,24 +142,18 @@ async function loadAzure() {
           color="neutral"
           variant="outline"
           :disabled="!text.trim() || loading"
-          class="min-h-11 disabled:opacity-50"
-          @click="importText"
+          @click="loadText"
           >Load configuration</UButton
         >
       </div>
-      <details class="text-sm text-muted">
-        <summary
-          class="min-h-11 cursor-pointer py-3 text-default focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          What should the export contain?
-        </summary>
+      <AppDisclosure title="What should the export contain?">
         <p class="mt-1 max-w-3xl">
           Include each policy, its rule collection groups, and the referenced IP groups. A policy
           response alone contains references, not the rules. Include the base policy and each child
           you want to compare. You can combine separate JSON responses or use a
           <code>resources</code> array. ARM templates must contain resolved values.
         </p>
-      </details>
+      </AppDisclosure>
     </div>
     <div v-else class="min-w-0 space-y-4">
       <p class="max-w-3xl text-sm text-muted">
@@ -279,21 +162,19 @@ async function loadAzure() {
       </p>
       <div v-if="liveAvailable" class="flex flex-wrap items-center gap-3">
         <UButton
-          :disabled="auth.status.value === 'connecting'"
-          :loading="auth.status.value === 'connecting'"
-          class="min-h-11"
+          ref="connectButton"
+          :icon="auth.status.value === 'connecting' ? 'i-lucide-loader-circle' : 'i-lucide-log-in'"
+          :color="!hasConfiguration && !auth.connected.value ? 'primary' : 'neutral'"
+          :variant="!hasConfiguration && !auth.connected.value ? 'solid' : 'outline'"
+          :aria-disabled="auth.status.value === 'connecting'"
+          :aria-busy="auth.status.value === 'connecting'"
           @click="connectAzure"
           >{{ auth.connected.value ? 'Switch Azure account' : 'Connect to Azure' }}</UButton
         >
         <span v-if="auth.connected.value" class="min-w-0 text-sm break-all text-muted">{{
           username
         }}</span>
-        <UButton
-          v-if="auth.connected.value"
-          variant="ghost"
-          color="neutral"
-          class="min-h-11"
-          @click="disconnectAzure"
+        <UButton v-if="auth.connected.value" variant="ghost" color="neutral" @click="disconnect"
           >Disconnect</UButton
         >
       </div>
@@ -304,7 +185,7 @@ async function loadAzure() {
         </p>
         <div class="grid gap-2 sm:flex sm:flex-wrap">
           <FirewallExportCommandModal />
-          <UButton color="neutral" variant="ghost" class="min-h-11" @click="focusImport"
+          <UButton color="neutral" variant="ghost" @click="focusImport"
             >Import configuration</UButton
           >
         </div>
@@ -314,7 +195,7 @@ async function loadAzure() {
           <UInput
             id="firewall-tenant"
             v-model="tenantId"
-            class="w-full max-w-lg"
+            class="simulator-identifiers w-full max-w-lg"
             placeholder="Tenant containing the policies"
           />
         </UFormField>
@@ -326,7 +207,7 @@ async function loadAzure() {
           <UTextarea
             id="firewall-resource-ids"
             v-model="resourceIds"
-            class="w-full min-w-0"
+            class="simulator-identifiers w-full min-w-0"
             :rows="3"
             placeholder="/subscriptions/…/resourceGroups/…/providers/Microsoft.Network/firewallPolicies/…"
             :spellcheck="false"
@@ -334,18 +215,17 @@ async function loadAzure() {
         </UFormField>
         <div class="flex flex-wrap gap-2">
           <UButton
-            :disabled="!auth.connected.value || !resourceIds.trim() || !tenantId.trim()"
-            :loading="loading"
-            class="min-h-11"
+            ref="readButton"
+            :icon="loading ? 'i-lucide-loader-circle' : 'i-lucide-download'"
+            :color="!hasConfiguration && canRead ? 'primary' : 'neutral'"
+            :variant="!hasConfiguration && canRead ? 'solid' : 'outline'"
+            :disabled="!canRead && !loading"
+            :aria-disabled="loading || !canRead"
+            :aria-busy="loading"
             @click="loadAzure"
             >Read Azure configuration</UButton
           >
-          <UButton
-            v-if="loading"
-            color="neutral"
-            variant="outline"
-            class="min-h-11"
-            @click="cancelLoad"
+          <UButton v-if="loading" color="neutral" variant="outline" @click="cancelRead"
             >Cancel</UButton
           >
         </div>
@@ -358,11 +238,11 @@ async function loadAzure() {
         </p>
       </template>
     </div>
-    <UAlert
-      v-if="sourceError"
-      color="error"
-      variant="subtle"
-      :title="sourceError"
+    <AppNotice
+      v-if="mode === 'azure' && sourceError"
+      tone="error"
+      title="Azure request failed"
+      :description="sourceError"
       class="[overflow-wrap:anywhere]"
       role="alert"
     />

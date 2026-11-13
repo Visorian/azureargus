@@ -8,7 +8,7 @@ import {
 } from './support/temporaryAzure'
 
 const readinessSummary = /Dedicated tables 7\/7 available/
-const temporaryFirewallRow = /AZFWNetworkRule.*10\.0\.0\.4.*10\.0\.0\.53/
+const temporaryFirewallRow = /Network rules.*10\.0\.0\.4.*10\.0\.0\.53/u
 const removedDelegatedRoutes = [
   { method: 'GET', path: '/api/log-analytics/delegated-access' },
   { method: 'POST', path: '/api/log-analytics/delegated-query' },
@@ -28,7 +28,7 @@ test('temporary Azure flows stay browser-direct', async ({ page }) => {
   const traffic = await mockTemporaryAzure(page)
 
   await page.goto('/logs')
-  await page.getByRole('button', { name: 'Log Analytics' }).click()
+  await page.getByRole('radio', { name: 'Log Analytics' }).click()
   let settingsDrawer = await openSettings(page)
   await settingsDrawer.getByRole('button', { name: 'Connect to Azure' }).click()
 
@@ -41,16 +41,19 @@ test('temporary Azure flows stay browser-direct', async ({ page }) => {
   await expect(settingsDrawer.getByText(temporaryAzureWorkspaceId, { exact: true })).toBeVisible()
   await expect(settingsDrawer.getByText(readinessSummary)).toBeVisible()
 
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Run query' }).click()
   await expect(page.getByText('1 visible', { exact: true })).toBeVisible()
   await expect(page.getByRole('row', { name: temporaryFirewallRow })).toBeVisible()
 
-  await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
+  await page.getByRole('radio', { name: 'DNS troubleshooting' }).click()
   settingsDrawer = await openSettings(page)
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'Run query' }).click()
-  const detailButton = page.getByRole('button', { name: 'Open DNS details for example.com.' })
+  const detailButton = page
+    .getByTestId('dns-entry-scroll')
+    .getByRole('row')
+    .filter({ hasText: 'example.com.' })
   await expect(detailButton).toBeVisible()
   await detailButton.click()
   const detailDialog = page.getByRole('dialog', { name: 'DNS resolution detail' })
@@ -84,22 +87,19 @@ test('temporary Azure flows stay browser-direct', async ({ page }) => {
       (request) => request.authorization === `Bearer ${temporaryAzureTokens.logAnalytics}`,
     ),
   ).toBe(true)
-  expect(new Set(traffic.externalRequests.map((request) => request.origin))).toEqual(
+  const iconRequests = traffic.externalRequests
+    .filter((request) => request.origin === 'https://api.iconify.design')
+    .map((request) => request.pathname)
+  expect(
+    new Set(traffic.externalRequests.map((request) => request.origin)),
+    `Unexpected icon requests: ${iconRequests.join(', ')}`,
+  ).toEqual(
     new Set([
-      'https://api.iconify.design',
       'https://api.loganalytics.azure.com',
       'https://login.microsoftonline.com',
       'https://management.azure.com',
     ]),
   )
-  expect(
-    traffic.externalRequests
-      .filter((request) => request.origin === 'https://api.iconify.design')
-      .every(
-        (request) =>
-          request.authorization === null && request.body === null && request.method === 'GET',
-      ),
-  ).toBe(true)
   expect(
     traffic.sameOriginRequests.filter((request) =>
       request.pathname.startsWith('/api/log-analytics/'),

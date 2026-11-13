@@ -4,11 +4,23 @@ import type { Locator, Page } from '@playwright/test'
 import { isIpCountryLookupRequest } from '../../shared/types/ipCountry'
 import type { ManagedEventHubStreamEnvelope } from '../../shared/types/managedEventHub'
 import { mockManagedDeployment } from './support/deployment'
-import { enterAnonymousMode, openSettings } from './support/logsWorkspace'
+import {
+  enterAnonymousMode,
+  expectActiveResultVisible,
+  expectResultsScrollAndNavigate,
+  openSettings,
+} from './support/logsWorkspace'
 import {
   enqueueManagedEventHubEnvelope,
   mockManagedEventHubStream,
 } from './support/managedEventHub'
+
+const EDIT_FILTERS_PATTERN = /^Edit filters/u
+const HIDE_FILTERS_PATTERN = /^Hide filters/u
+const ONE_FILTER_PATTERN = /^Edit filters.*\(1\)/u
+const PRESET_RANGE_PATTERN = /Last 15 minutes/u
+const JULY_RANGE_PATTERN = /21 Jul/u
+const RECORD_PATTERN = /record-\d+/u
 
 function ipCountryRequestIps(body: unknown) {
   if (!isIpCountryLookupRequest(body)) {
@@ -29,45 +41,10 @@ async function expectLeftInSameRow(left: Locator, right: Locator) {
   }).toPass()
 }
 
-async function expectRightAligned(container: Locator, item: Locator) {
-  await expect(async () => {
-    const [containerBox, itemBox] = await Promise.all([container.boundingBox(), item.boundingBox()])
-    expect(containerBox).not.toBeNull()
-    expect(itemBox).not.toBeNull()
-    const rightInset = containerBox!.x + containerBox!.width - itemBox!.x - itemBox!.width
-    expect(rightInset).toBeGreaterThanOrEqual(15)
-    expect(rightInset).toBeLessThanOrEqual(17)
-  }).toPass()
-}
-
-async function expectMatchingOuterEdges(
-  topLeft: Locator,
-  topRight: Locator,
-  bottomLeft: Locator,
-  bottomRight: Locator,
-) {
-  await expect(async () => {
-    const [topLeftBox, topRightBox, bottomLeftBox, bottomRightBox] = await Promise.all([
-      topLeft.boundingBox(),
-      topRight.boundingBox(),
-      bottomLeft.boundingBox(),
-      bottomRight.boundingBox(),
-    ])
-    expect(topLeftBox).not.toBeNull()
-    expect(topRightBox).not.toBeNull()
-    expect(bottomLeftBox).not.toBeNull()
-    expect(bottomRightBox).not.toBeNull()
-    expect(Math.abs(topLeftBox!.x - bottomLeftBox!.x)).toBeLessThanOrEqual(1)
-    expect(
-      Math.abs(topRightBox!.x + topRightBox!.width - bottomRightBox!.x - bottomRightBox!.width),
-    ).toBeLessThanOrEqual(1)
-  }).toPass()
-}
-
 async function connectManagedEventHub(page: Page) {
   const settingsDrawer = await openSettings(page)
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
 }
 
 async function startManagedEventHub(page: Page) {
@@ -105,34 +82,39 @@ async function enqueueDetailLog(page: Page, destinationIp = '20.30.40.50', proto
       },
     ],
   })
-  await expect(page.getByText('1 visible / 1 received')).toBeVisible()
+  await expect(
+    page.getByRole('status').filter({ hasText: '1 result · Live filters update immediately.' }),
+  ).toBeVisible()
 }
 
 test('receiver status indicators follow the active pane actions', async ({ page }) => {
   await startManagedEventHub(page)
   await enqueueDetailLog(page)
 
-  const dataSource = page.getByRole('region', { name: 'Data source' })
+  const dataSource = page.getByRole('region', { name: 'Workspace', exact: true })
   await expect(dataSource.getByRole('status')).toHaveCount(0)
   await expect(dataSource.getByText('Catching up', { exact: true })).toHaveCount(0)
 
   const allLogsControls = page.getByRole('group', { name: 'All logs status and actions' })
-  await expect(allLogsControls.getByRole('status')).toHaveText('connected')
+  await expect(allLogsControls.getByRole('status')).toHaveText('Catching up')
   await allLogsControls.getByRole('button', { name: 'Pause' }).click()
-  await expect(allLogsControls.getByRole('status')).toHaveText('paused')
-  await expect(allLogsControls.getByText('Catching up', { exact: true })).toBeVisible()
+  await expect(allLogsControls.getByRole('status')).toHaveText('Paused')
+  await expect(allLogsControls.locator('time')).toHaveAttribute(
+    'datetime',
+    '2026-07-12T16:36:42.015Z',
+  )
   await expectLeftInSameRow(
     allLogsControls.getByRole('status'),
     allLogsControls.getByRole('button', { name: 'Resume' }),
   )
 
-  await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
+  await page.getByRole('radio', { name: 'DNS troubleshooting' }).click()
   await expect(allLogsControls).toHaveCount(0)
   const dnsControls = page.getByRole('group', {
     name: 'DNS troubleshooting status and actions',
   })
-  await expect(dnsControls.getByRole('status')).toHaveText('paused')
-  await expect(dnsControls.getByText('Catching up', { exact: true })).toBeVisible()
+  await expect(dnsControls.getByRole('status')).toHaveText('Paused')
+  await expect(dnsControls.locator('time')).toHaveAttribute('datetime', '2026-07-12T16:36:42.015Z')
   await expectLeftInSameRow(
     dnsControls.getByRole('status'),
     dnsControls.getByRole('button', { name: 'Resume' }),
@@ -147,112 +129,64 @@ test('receiver status indicators follow the active pane actions', async ({ page 
     .toBe(true)
 })
 
-test('pane action rails align with filters and separate them', async ({ page }) => {
-  await page.setViewportSize({ height: 720, width: 2048 })
+test('workspace controls keep sources and views separate from result actions', async ({ page }) => {
   await enterAnonymousMode(page)
-
-  const allLogsControls = page.getByRole('group', { name: 'All logs status and actions' })
-  await expect(allLogsControls).toHaveCSS('border-bottom-style', 'solid')
-  await expect(allLogsControls).toHaveCSS('border-bottom-width', '1px')
-  await expectMatchingOuterEdges(
-    allLogsControls.getByRole('status'),
-    allLogsControls.getByRole('button', { name: 'Clear', exact: true }),
-    page.getByPlaceholder('Search logs'),
-    page.getByRole('button', { name: 'Reset', exact: true }),
-  )
-
-  await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
-  const dnsControls = page.getByRole('group', {
-    name: 'DNS troubleshooting status and actions',
-  })
-  await expect(dnsControls).toHaveCSS('border-bottom-style', 'solid')
-  await expect(dnsControls).toHaveCSS('border-bottom-width', '1px')
-  await expectMatchingOuterEdges(
-    dnsControls.getByRole('status'),
-    dnsControls.getByRole('button', { name: 'Clear DNS results' }),
-    page.getByRole('textbox', { name: 'Domain or DNS search' }),
-    page.getByRole('button', { name: 'Reset', exact: true }),
-  )
+  const workspace = page.getByRole('region', { name: 'Workspace', exact: true })
+  const sources = workspace.getByRole('group', { name: 'Data source', exact: true })
+  const views = workspace.getByRole('group', { name: 'View', exact: true })
+  await expect(sources).toBeVisible()
+  await expect(views).toBeVisible()
+  await expect(workspace.getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
+  await expect(workspace.getByRole('status')).toHaveCount(0)
+  await expect(workspace.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0)
+  await expect(views.getByRole('radio', { name: 'All logs', exact: true })).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Clear', exact: true })).toBeDisabled()
+  await views.getByRole('radio', { name: 'DNS troubleshooting', exact: true }).check()
+  await expect(page.getByRole('button', { name: 'Clear DNS results' })).toBeDisabled()
+  await expect(page.getByRole('textbox', { name: 'Domain or DNS search' })).toBeVisible()
 })
 
-test('data source rail keeps source left and controls right', async ({ page }) => {
+test('settings remain modal and restore the selected view and search', async ({ page }) => {
   await enterAnonymousMode(page)
-
-  const rail = page.getByRole('region', { name: 'Data source' })
-  const dataSourceControls = rail.getByRole('group', { name: 'Data source' })
-  const viewControls = rail.getByRole('group', { name: 'View' })
-  const settingsButton = rail.getByRole('button', { name: 'Settings', exact: true })
-  await expectLeftInSameRow(dataSourceControls, viewControls)
-  await expectLeftInSameRow(viewControls, settingsButton)
-  await expectRightAligned(rail, settingsButton)
-  await expect(viewControls.getByRole('button', { name: 'All logs' })).toBeVisible()
-  await expect(viewControls.getByRole('button', { name: 'DNS troubleshooting' })).toBeVisible()
-  await settingsButton.click()
-  await viewControls.getByRole('button', { name: 'DNS troubleshooting' }).click()
-  await expect(settingsButton).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('radio', { name: 'DNS troubleshooting', exact: true }).check()
   const search = page.getByRole('textbox', { name: 'Domain or DNS search' })
-  await search.fill('typing with settings open')
-  await expect(search).toBeFocused()
-  await expect(settingsButton).toHaveAttribute('aria-expanded', 'true')
-  await settingsButton.click()
-  await expect(page.locator('#logs-settings-drawer')).toBeHidden()
-  await viewControls.getByRole('button', { name: 'All logs' }).click()
+  await search.fill('retained DNS search')
+  const settingsButton = page.getByRole('button', { name: 'Settings', exact: true })
+  const settings = await openSettings(page)
+  await expect(settings.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(settings.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(settings).toBeHidden()
+  await expect(settingsButton).toBeFocused()
+  await expect(search).toHaveValue('retained DNS search')
+  await expect(page.getByRole('radio', { name: 'DNS troubleshooting', exact: true })).toBeChecked()
   await page.setViewportSize({ width: 1024, height: 768 })
-  await expect
-    .poll(
-      async () =>
-        (await page.getByRole('textbox', { name: 'Search logs' }).boundingBox())?.width ?? 0,
-    )
-    .toBeGreaterThanOrEqual(192)
-  await page.getByRole('button', { name: 'DNS troubleshooting', exact: true }).click()
-  await expect
-    .poll(
-      async () =>
-        (await page.getByRole('textbox', { name: 'Domain or DNS search' }).boundingBox())?.width ??
-        0,
-    )
-    .toBeGreaterThanOrEqual(192)
-  await expect
-    .poll(
-      async () =>
-        (await page.getByRole('button', { name: 'Query type', exact: true }).boundingBox())
-          ?.width ?? 0,
-    )
-    .toBeGreaterThanOrEqual(128)
+  await expect(search).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Query type', exact: true })).toBeVisible()
 })
 
-test('mobile workspace menu switches views and keeps settings reachable', async ({ page }) => {
+test('mobile workspace controls switch views and keep settings reachable', async ({ page }) => {
   await page.setViewportSize({ height: 568, width: 320 })
   await mockManagedDeployment(page, { eventHub: true, logAnalytics: false })
   await page.goto('/logs')
-  const menuButton = page.getByRole('button', { name: 'Workspace menu' })
-  await expect(page.getByRole('heading', { name: 'All logs', exact: true })).toBeVisible()
+  const sources = page.getByRole('group', { name: 'Data source', exact: true })
+  await expect(sources.getByRole('radio', { name: 'Live Event Hub' })).toBeChecked()
+  await expect(sources.getByRole('radio', { name: 'Log Analytics' })).toBeDisabled()
+  await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
   await page.getByRole('textbox', { name: 'Search logs' }).fill('retained search')
-  await menuButton.click()
-  const menu = page.getByRole('navigation', { name: 'Workspace' })
-  await expect(menu.getByRole('button', { name: 'Live Event Hub' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
-  await expect(menu.getByRole('button', { name: 'Log Analytics' })).toBeDisabled()
-  await expect(menu.getByText('Log Analytics is not configured.')).toBeVisible()
-  await menu.getByRole('button', { name: 'DNS troubleshooting' }).click()
-  await expect(menu).toBeHidden()
-  await expect(
-    page.getByRole('heading', { name: 'DNS troubleshooting', exact: true }),
-  ).toBeVisible()
+  await page.getByRole('button', { name: HIDE_FILTERS_PATTERN }).click()
+  await page.getByRole('radio', { name: 'DNS troubleshooting', exact: true }).check()
+  await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
   await expect(page.getByRole('textbox', { name: 'Domain or DNS search' })).toBeVisible()
-  await menuButton.click()
-  await menu.getByRole('button', { name: 'All logs', exact: true }).click()
+  await page.getByRole('radio', { name: 'All logs', exact: true }).check()
+  await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
   await expect(page.getByRole('textbox', { name: 'Search logs' })).toHaveValue('retained search')
-  await menuButton.click()
-  await menu.getByRole('button', { name: 'Settings', exact: true }).click()
-  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
-  await expect(settings).toBeVisible()
-  await expect(settings.getByRole('button', { name: 'Close settings' })).toBeFocused()
+  const settings = await openSettings(page)
+  await expect(settings.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(settings).toBeHidden()
-  await expect(menuButton).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
   await expect
     .poll(
       async () =>
@@ -268,40 +202,40 @@ test('mobile logs can be filtered, sorted and inspected without horizontal scrol
   await startManagedEventHub(page)
   const destination = 'germanywestcentral-gas.guestconfiguration.azure.com'
   await enqueueDetailLog(page, destination)
-  const log = page.getByRole('button', {
-    name: `Open log details for ${destination} at Jul 12, 2026, 16:36:42.015`,
-  })
+  const log = page
+    .getByTestId('mobile-log-list')
+    .getByRole('button')
+    .filter({ hasText: destination })
   await expect(log).toContainText('10.140.16.133')
   await expect(log).toContainText(destination)
   await expect(log).toContainText('Deny')
-  await expect.poll(async () => (await log.boundingBox())?.y ?? Infinity).toBeLessThan(260)
+  await expect(log).toBeInViewport()
   await expect
     .poll(async () => await log.evaluate((element) => element.scrollWidth <= element.clientWidth))
     .toBe(true)
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const filters = page.getByRole('dialog', { name: 'Filters', exact: true })
-  await filters.getByRole('textbox', { name: 'Source address' }).fill('192.0.2.1')
-  await filters.getByRole('button', { name: 'Done', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Filters (1)' })).toBeVisible()
+  await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
+  await page.getByRole('textbox', { name: 'Source address' }).fill('192.0.2.1')
+  await page.getByRole('button', { name: HIDE_FILTERS_PATTERN }).click()
+  await expect(page.getByRole('button', { name: ONE_FILTER_PATTERN })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'No matching logs' })).toBeVisible()
-  await page.getByRole('button', { name: 'Reset filters' }).click()
+  await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
+  await page.getByRole('button', { name: 'Reset', exact: true }).click()
   await expect(log).toBeVisible()
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
   await page.getByRole('combobox', { name: 'Sort by' }).click()
   await page.getByRole('option', { name: 'Destination', exact: true }).click()
   await page.getByRole('button', { name: 'Sort descending', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Sort ascending', exact: true })).toBeVisible()
-  await filters.getByRole('button', { name: 'Show 1 result', exact: true }).click()
+  await page.getByRole('button', { name: HIDE_FILTERS_PATTERN }).click()
   await page.setViewportSize({ width: 820, height: 1180 })
   await expect(log).toHaveCount(1)
   await page.setViewportSize({ width: 320, height: 568 })
   await expect(log).toHaveCount(1)
   await log.click()
   const detail = page.getByRole('dialog', { name: 'Log detail' })
-  await expect(detail.getByText(destination, { exact: true })).toBeVisible()
+  await expect(detail.getByText(`${destination}:443`, { exact: true })).toBeVisible()
   await expect(detail.getByText('hub-policy', { exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(log).toBeFocused()
+  await expect(page.getByRole('grid', { name: 'Firewall logs' })).toBeFocused()
   await expect
     .poll(
       async () =>
@@ -323,7 +257,7 @@ test('log detail renders destination flag and separates Event Hub metadata', asy
   await startManagedEventHub(page)
   await enqueueDetailLog(page)
 
-  await page.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('cell').first().click()
+  await page.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('gridcell').first().click()
   const dialog = page.getByRole('dialog', { name: 'Log detail' })
   await expect(dialog.getByText('hub-policy', { exact: true })).toBeVisible()
   await expect(dialog.getByText('hub-collection-group', { exact: true })).toBeVisible()
@@ -339,10 +273,10 @@ test('log detail identifies an internal RFC 1918 destination', async ({ page }) 
   await startManagedEventHub(page)
   await enqueueDetailLog(page, '172.16.0.1')
 
-  await page.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('cell').first().click()
+  await page.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('gridcell').first().click()
   const dialog = page.getByRole('dialog', { name: 'Log detail' })
   await expect(dialog.getByRole('img', { name: 'Internal address (RFC 1918)' })).toBeVisible()
-  await expect(dialog.getByText('172.16.0.1', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('172.16.0.1:443', { exact: true })).toBeVisible()
 })
 
 test('log detail explains a known ICMP type', async ({ page }) => {
@@ -350,9 +284,9 @@ test('log detail explains a known ICMP type', async ({ page }) => {
   await enqueueDetailLog(page, '20.30.40.50', 'ICMP Type=8')
 
   await expect(
-    page.getByRole('table', { name: 'Firewall logs' }).getByText('ICMP Type=8', { exact: true }),
+    page.getByRole('grid', { name: 'Firewall logs' }).getByText('ICMP Type=8', { exact: true }),
   ).toBeVisible()
-  await page.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('cell').first().click()
+  await page.getByRole('row').filter({ hasText: 'deny-web' }).getByRole('gridcell').first().click()
   const dialog = page.getByRole('dialog', { name: 'Log detail' })
   await expect(dialog.getByText('ICMP Type=8 (Echo Request)', { exact: true })).toBeVisible()
 })
@@ -396,7 +330,7 @@ test('orders realtime logs by source timestamp', async ({ page }) => {
   })
 
   await expect(page.getByText('3 visible / 3 received')).toBeVisible()
-  const rows = page.getByRole('table', { name: 'Firewall logs' }).getByRole('row')
+  const rows = page.getByRole('grid', { name: 'Firewall logs' }).getByRole('row')
   await expect(rows).toHaveCount(4)
   await expect(rows.nth(1)).toContainText('newest')
   await expect(rows.nth(2)).toContainText('middle')
@@ -413,7 +347,7 @@ test('keeps recent logs visible when delayed batches exceed the display and raw 
   const settingsDrawer = await openSettings(page)
   await settingsDrawer.getByRole('spinbutton', { name: 'Visible rows' }).fill('100')
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
 
   const sourceIp = '10.140.185.29'
   function event(sequenceNumber: number, time: string) {
@@ -435,7 +369,7 @@ test('keeps recent logs visible when delayed batches exceed the display and raw 
     events: [event(1, newestTime), event(2, '2026-09-15T13:44:31.000Z')],
   })
   await expect(page.getByText('2 visible / 2 received')).toBeVisible()
-  const table = page.getByRole('table', { name: 'Firewall logs' })
+  const table = page.getByRole('grid', { name: 'Firewall logs' })
   const newestRow = table.getByRole('row').filter({
     has: page.locator(`time[datetime="${newestTime}"]`),
   })
@@ -457,16 +391,16 @@ test('keeps recent logs visible when delayed batches exceed the display and raw 
     await expect(page.getByText(`100 visible / ${received} received`)).toBeVisible()
     await expect(newestRow).toBeVisible()
     await expect(status.locator('time')).toHaveAttribute('datetime', newestTime)
-    await page.getByPlaceholder('Source').fill('10.140.185.30')
+    await page.getByRole('textbox', { name: 'Source address', exact: true }).fill('10.140.185.30')
     await expect(page.getByText(`0 visible / ${received} received`)).toBeVisible()
-    await page.getByPlaceholder('Source').fill(sourceIp)
+    await page.getByRole('textbox', { name: 'Source address', exact: true }).fill(sourceIp)
     await expect(page.getByText(`100 visible / ${received} received`)).toBeVisible()
     await expect(newestRow).toBeVisible()
-    await page.getByPlaceholder('Source').fill('')
+    await page.getByRole('textbox', { name: 'Source address', exact: true }).fill('')
     await expect(newestRow).toBeVisible()
   }
 
-  await newestRow.locator('time').click()
+  await newestRow.getByRole('gridcell').first().click()
   const detail = page.getByRole('dialog', { name: 'Log detail' })
   await expect(detail.getByText('Sep 15, 2026, 13:45:31', { exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
@@ -519,26 +453,115 @@ test('filters source and destination addresses and ports exactly', async ({ page
   })
 
   await expect(page.getByText('2 visible / 2 received')).toBeVisible()
-  const table = page.getByRole('table', { name: 'Firewall logs' })
+  const table = page.getByRole('grid', { name: 'Firewall logs' })
 
-  await page.getByPlaceholder('Source').fill('10.141.8.1')
+  await page.getByRole('textbox', { name: 'Source address', exact: true }).fill('10.141.8.1')
   await expect(table.getByRole('row').filter({ hasText: 'exact-endpoints' })).toBeVisible()
   await expect(table.getByRole('row').filter({ hasText: 'prefix-endpoints' })).toHaveCount(0)
 
-  await page.getByPlaceholder('Source').fill('')
-  await page.getByPlaceholder('Destination').fill('20.30.40.5')
+  await page.getByRole('textbox', { name: 'Source address', exact: true }).fill('')
+  await page.getByRole('textbox', { name: 'Destination address', exact: true }).fill('20.30.40.5')
   await expect(table.getByRole('row').filter({ hasText: 'exact-endpoints' })).toBeVisible()
   await expect(table.getByRole('row').filter({ hasText: 'prefix-endpoints' })).toHaveCount(0)
 
-  await page.getByPlaceholder('Destination').fill('')
-  await page.getByPlaceholder('Src port').fill('52389')
+  await page.getByRole('textbox', { name: 'Destination address', exact: true }).fill('')
+  await page.getByRole('textbox', { name: 'Source port', exact: true }).fill('52389')
   await expect(table.getByRole('row').filter({ hasText: 'prefix-endpoints' })).toBeVisible()
   await expect(table.getByRole('row').filter({ hasText: 'exact-endpoints' })).toHaveCount(0)
 
-  await page.getByPlaceholder('Src port').fill('')
-  await table.getByRole('button', { name: 'Filter by destination port: 443' }).first().click()
-  await expect(page.getByPlaceholder('Dst port')).toHaveValue('443')
+  await page.getByRole('textbox', { name: 'Source port', exact: true }).fill('')
+  await table.getByRole('button', { name: 'Filter by destination port: 443' }).first().focus()
+  await page.keyboard.press('Enter')
+  await expect(table).toBeFocused()
+  await expect(page.getByRole('textbox', { name: 'Destination port', exact: true })).toHaveValue(
+    '443',
+  )
   await expect(page.getByText('2 visible / 2 received')).toBeVisible()
+})
+
+test('keeps live results visible and controls focused while scrolling, sorting and filtering', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await startManagedEventHub(page)
+  const events = Array.from({ length: 600 }, (_, index) => ({
+    body: {
+      category: 'AZFWNetworkRule',
+      properties: {
+        Action: index % 2 ? 'Allow' : 'Deny',
+        Protocol: 'TCP',
+        SourceIp: `10.${Math.floor(index / 256)}.${index % 256}.4`,
+        DestinationIp: '20.30.40.50',
+        DestinationPort: 443,
+        Rule: `record-${index}`,
+      },
+      time: new Date(Date.now() - index * 1000).toISOString(),
+    },
+    enqueuedTimeUtc: new Date().toISOString(),
+    partitionId: '0',
+    sequenceNumber: index,
+  }))
+  await enqueueManagedEventHubEnvelope(page, { type: 'events', events })
+  const grid = page.getByRole('grid', { name: 'Firewall logs', exact: true })
+  const date = grid.getByRole('button', { name: 'Date (UTC)', exact: true })
+  await date.focus()
+  await page.keyboard.press('Enter')
+  await expect(date).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(date).toBeFocused()
+  const action = grid
+    .locator('[data-result-index]')
+    .filter({ has: page.getByText('record-0', { exact: true }) })
+    .getByRole('button', { name: 'Filter by action: Deny', exact: true })
+  await action.focus()
+  await enqueueManagedEventHubEnvelope(page, {
+    type: 'events',
+    events: [
+      {
+        ...events[0]!,
+        sequenceNumber: 601,
+        body: {
+          ...events[0]!.body,
+          properties: { ...events[0]!.body.properties, Rule: 'new-record' },
+        },
+        enqueuedTimeUtc: new Date().toISOString(),
+      },
+    ],
+  })
+  await expect(page.getByText('601 visible / 601 received', { exact: true })).toBeVisible()
+  await expect(action).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(grid).toBeFocused()
+  await expectActiveResultVisible(grid)
+  await page.getByRole('button', { name: 'Reset', exact: true }).click()
+  await grid.focus()
+  await page.keyboard.press('Home')
+  const source = grid
+    .getByRole('button', { name: 'Filter by source: 10.0.1.4', exact: true })
+    .first()
+  await source.focus()
+  await page.keyboard.press('Enter')
+  await expect(grid).toBeFocused()
+  await expectActiveResultVisible(grid)
+  await page.getByRole('button', { name: 'Reset', exact: true }).click()
+  await grid.focus()
+  await page.keyboard.press('Home')
+  const scroller = grid.locator('.vue-recycle-scroller')
+  await scroller.hover()
+  await page.mouse.wheel(0, 1800)
+  await expect.poll(async () => await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1500)
+  await expectActiveResultVisible(grid)
+  const active = await grid.locator('[data-result-index][data-active="true"]').textContent()
+  await page.keyboard.press('Enter')
+  await expect(
+    page
+      .getByRole('dialog', { name: 'Log detail', exact: true })
+      .getByText(RECORD_PATTERN.exec(active ?? '')![0], { exact: true })
+      .first(),
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expectResultsScrollAndNavigate(page, grid, 375)
+  await expectResultsScrollAndNavigate(page, grid, 768)
 })
 
 test('keeps surfaced logs eligible when filters change after raw-buffer eviction', async ({
@@ -550,7 +573,7 @@ test('keeps surfaced logs eligible when filters change after raw-buffer eviction
   const settingsDrawer = await openSettings(page)
   await settingsDrawer.getByRole('spinbutton', { name: 'Visible rows' }).fill('100')
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
 
   const destinationIp = '131.189.255.123'
   await enqueueManagedEventHubEnvelope(page, {
@@ -624,12 +647,12 @@ test('keeps surfaced logs eligible when filters change after raw-buffer eviction
 
   await search.fill('')
   await expect(page.getByText('100 visible / 1005 received')).toBeVisible()
-  await page.getByRole('button', { name: 'Category filter' }).click()
-  await page.getByRole('option', { name: 'AZFWNatRule', exact: true }).click()
+  await page.locator('summary').filter({ hasText: 'Categories' }).click()
+  await page.getByRole('checkbox', { name: 'NAT rules', exact: true }).click()
   await page.keyboard.press('Escape')
 
   await expect(page.getByText('2 visible / 1005 received')).toBeVisible()
-  const table = page.getByRole('table', { name: 'Firewall logs' })
+  const table = page.getByRole('grid', { name: 'Firewall logs' })
   await expect(table.getByRole('row').filter({ hasText: 'nat-new' })).toBeVisible()
   await expect(table.getByRole('row').filter({ hasText: 'nat-old' })).toBeVisible()
 })
@@ -675,24 +698,23 @@ test('renders application-rule FQDN destinations and full category names', async
   })
 
   await expect(page.getByText('2 visible / 2 received')).toBeVisible()
-  const table = page.getByRole('table', { name: 'Firewall logs' })
+  const table = page.getByRole('grid', { name: 'Firewall logs' })
   const legacyRow = table.getByRole('row').filter({ hasText: 'login.live.com' })
   const structuredRow = table.getByRole('row').filter({ hasText: structuredFqdn })
   await expect(legacyRow).toContainText('443')
   await expect(structuredRow).toContainText('443')
   await expect(structuredRow).not.toHaveAttribute('title')
-  await expect(structuredRow.getByRole('cell').nth(1)).toHaveAttribute(
-    'title',
-    'AZFWApplicationRule',
-  )
-  await expect(structuredRow.getByRole('cell').nth(6)).toHaveAttribute('title', structuredFqdn)
-  await expect(structuredRow.getByRole('cell').nth(8)).toHaveAttribute('title', 'Internet-Access')
+  await expect(structuredRow.getByTitle('Application rules', { exact: true })).toBeVisible()
+  await expect(structuredRow.getByTitle(structuredFqdn, { exact: true })).toBeVisible()
+  await expect(structuredRow.getByTitle('Internet-Access', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Category filter' }).click()
-  for (const category of ['AZFWApplicationRule', 'AzureFirewallApplicationRule']) {
-    const label = page.getByRole('option', { name: category, exact: true }).getByText(category, {
-      exact: true,
-    })
+  await page.locator('summary').filter({ hasText: 'Categories' }).click()
+  for (const category of ['Application rules', 'AzureFirewallApplicationRule']) {
+    const categoryFields = page.getByRole('group', { name: 'Categories', exact: true })
+    await expect(
+      categoryFields.getByRole('checkbox', { name: category, exact: true }),
+    ).toBeVisible()
+    const label = categoryFields.getByText(category, { exact: true })
     await expect(label).toBeVisible()
     await expect
       .poll(
@@ -747,70 +769,67 @@ test.describe('time display preferences', () => {
     await enqueueManagedEventHubEnvelope(page, timeFormatEvents)
     await expect(page.getByText('2 visible / 2 received')).toBeVisible()
 
-    const logsTable = page.getByRole('table', { name: 'Firewall logs' })
+    const logsTable = page.getByRole('grid', { name: 'Firewall logs' })
     const noonRow = logsTable.getByRole('row').filter({ hasText: '20.30.40.50' })
     const midnightRow = logsTable.getByRole('row').filter({ hasText: 'AzureFirewallDnsProxy' })
     await expect(logsTable.getByRole('columnheader', { name: 'Date (UTC)' })).toBeVisible()
-    await expect(noonRow.locator('time')).toHaveText('Jul 21, 2026, 12:09:24')
-    await expect(midnightRow.locator('time')).toHaveText('Jul 21, 2026, 00:09:24')
+    await expect(noonRow.locator('time')).toHaveText(['Jul 21', '12:09:24'])
+    await expect(midnightRow.locator('time')).toHaveText(['Jul 21', '00:09:24'])
 
-    await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
-    const dnsEntry = page.getByRole('button', { name: 'Open DNS details for midnight.example.' })
+    await page.getByRole('radio', { name: 'DNS troubleshooting' }).click()
+    const dnsEntry = page
+      .getByTestId('dns-entry-scroll')
+      .getByRole('row')
+      .filter({ hasText: 'midnight.example.' })
     const dnsTimeHeader = page.getByTestId('dns-entry-header').getByText('Time', { exact: true })
     await expect(dnsTimeHeader).toBeVisible()
-    await expect(page.getByText('Times shown in UTC', { exact: true })).toBeVisible()
+    await expect(page.getByText('· Times in UTC', { exact: true })).toBeVisible()
     await expect
       .poll(
         async () =>
           await dnsTimeHeader.evaluate((element) => element.scrollWidth <= element.clientWidth),
       )
       .toBe(true)
-    await expect(dnsEntry.locator('time')).toHaveText('00:09:24')
-    await page.getByRole('button', { name: 'All logs' }).click()
+    await expect(dnsEntry.locator('time').last()).toHaveText('00:09:24')
+    await page.getByRole('radio', { name: 'All logs' }).click()
 
     const settingsDrawer = await openSettings(page)
-    const timeFormatSwitch = page.getByRole('switch', { name: '12-hour time' })
-    const localTimeSwitch = page.getByRole('switch', { name: 'Local time' })
+    const timeFormatSwitch = page.getByRole('radio', { name: '12-hour', exact: true })
+    const localTimeSwitch = page.getByRole('radio', { name: 'Local', exact: true })
     await expect(timeFormatSwitch).not.toBeChecked()
     await expect(localTimeSwitch).not.toBeChecked()
     await expectLeftInSameRow(timeFormatSwitch, localTimeSwitch)
     await localTimeSwitch.click()
     await expect(localTimeSwitch).toBeChecked()
     await expect(timeFormatSwitch).not.toBeChecked()
-    await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+    await settingsDrawer.getByRole('button', { name: 'Close' }).click()
 
     await expect(
       logsTable.getByRole('columnheader', { name: 'Date (America/Los_Angeles)' }),
     ).toBeVisible()
-    await expect(noonRow.locator('time')).toHaveText('Jul 21, 2026, 05:09:24')
-    await expect(midnightRow.locator('time')).toHaveText('Jul 20, 2026, 17:09:24')
-    await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
-    await expect(
-      page.getByText('Times shown in America/Los_Angeles', { exact: true }),
-    ).toBeVisible()
+    await expect(noonRow.locator('time')).toHaveText(['Jul 21', '05:09:24'])
+    await expect(midnightRow.locator('time')).toHaveText(['Jul 20', '17:09:24'])
+    await page.getByRole('radio', { name: 'DNS troubleshooting' }).click()
+    await expect(page.getByText('· Times in America/Los_Angeles', { exact: true })).toBeVisible()
     await expect(dnsTimeHeader).toBeVisible()
-    await expect(dnsEntry.locator('time')).toHaveText('17:09:24')
+    await expect(dnsEntry.locator('time').last()).toHaveText('17:09:24')
 
     const localSettings = await openSettings(page)
     await timeFormatSwitch.click()
     await expect(timeFormatSwitch).toBeChecked()
     await expect(localTimeSwitch).toBeChecked()
-    await localSettings.getByRole('button', { name: 'Close settings' }).click()
+    await localSettings.getByRole('button', { name: 'Close' }).click()
 
-    await expect(dnsEntry.locator('time')).toHaveText('05:09:24 PM')
+    await expect(dnsEntry.locator('time').last()).toHaveText('05:09:24 PM')
     await dnsEntry.click()
     const dnsDialog = page.getByRole('dialog', { name: 'DNS resolution detail' })
     await expect(dnsDialog.getByText('Times shown in America/Los_Angeles')).toBeVisible()
     await expect(dnsDialog.locator('time').first()).toHaveText('Jul 20, 2026, 5:09:24 PM')
     await page.keyboard.press('Escape')
-    await page.getByRole('button', { name: 'All logs' }).click()
+    await page.getByRole('radio', { name: 'All logs' }).click()
 
-    await expect(noonRow.locator('time')).toHaveText('Jul 21, 2026, 05:09:24 AM')
-    await expect(noonRow.getByRole('cell').first()).toHaveAttribute(
-      'title',
-      'Jul 21, 2026, 05:09:24.536 AM',
-    )
-    await noonRow.getByRole('cell').first().click()
+    await expect(noonRow.locator('time')).toHaveText(['Jul 21', '05:09:24 AM'])
+    await noonRow.getByRole('gridcell').first().click()
     const logDialog = page.getByRole('dialog', { name: 'Log detail' })
     await expect(logDialog.getByText('Times shown in America/Los_Angeles')).toBeVisible()
     await expect(
@@ -820,67 +839,75 @@ test.describe('time display preferences', () => {
     await page.keyboard.press('Escape')
 
     const utcSettings = await openSettings(page)
-    await localTimeSwitch.click()
+    await page.getByRole('radio', { name: 'UTC', exact: true }).check()
     await expect(localTimeSwitch).not.toBeChecked()
     await expect(timeFormatSwitch).toBeChecked()
-    await utcSettings.getByRole('button', { name: 'Close settings' }).click()
+    await utcSettings.getByRole('button', { name: 'Close' }).click()
     await expect(logsTable.getByRole('columnheader', { name: 'Date (UTC)' })).toBeVisible()
-    await expect(noonRow.locator('time')).toHaveText('Jul 21, 2026, 12:09:24 PM')
-    await expect(midnightRow.locator('time')).toHaveText('Jul 21, 2026, 12:09:24 AM')
+    await expect(noonRow.locator('time')).toHaveText(['Jul 21', '12:09:24 PM'])
+    await expect(midnightRow.locator('time')).toHaveText(['Jul 21', '12:09:24 AM'])
 
     const persistedSettings = await openSettings(page)
     await localTimeSwitch.click()
-    await persistedSettings.getByRole('button', { name: 'Close settings' }).click()
+    await persistedSettings.getByRole('button', { name: 'Close' }).click()
 
     await page.reload()
     const reloadedSettings = await openSettings(page)
     await expect(timeFormatSwitch).toBeChecked()
     await expect(localTimeSwitch).toBeChecked()
     await page.getByRole('button', { name: 'Connect', exact: true }).click()
-    await reloadedSettings.getByRole('button', { name: 'Close settings' }).click()
+    await reloadedSettings.getByRole('button', { name: 'Close' }).click()
     await enqueueManagedEventHubEnvelope(page, timeFormatEvents)
-    const reloadedTable = page.getByRole('table', { name: 'Firewall logs' })
+    const reloadedTable = page.getByRole('grid', { name: 'Firewall logs' })
     await expect(
       reloadedTable.getByRole('columnheader', { name: 'Date (America/Los_Angeles)' }),
     ).toBeVisible()
     await expect(
       reloadedTable.getByRole('row').filter({ hasText: '20.30.40.50' }).locator('time'),
-    ).toHaveText('Jul 21, 2026, 05:09:24 AM')
+    ).toHaveText(['Jul 21', '05:09:24 AM'])
   })
 
-  test('labels applied Log Analytics ranges in the selected time zone', async ({ page }) => {
+  test('keeps range entry and applied scope in UTC across display preferences', async ({
+    page,
+  }) => {
     await mockManagedDeployment(page, { eventHub: false, logAnalytics: true })
     await page.route('**/api/log-analytics/dns/readiness', async (route) => {
       await route.fulfill({ contentType: 'application/json', json: { readiness: [] } })
     })
     await page.route('**/api/log-analytics/query', async (route) => {
       expect(route.request().postDataJSON()).toMatchObject({
-        from: '2026-07-21T19:00:00.000Z',
-        to: '2026-07-21T20:00:00.000Z',
+        from: '2026-07-21T12:00:00.000Z',
+        to: '2026-07-21T13:00:00.000Z',
       })
       await route.fulfill({
         contentType: 'application/json',
         json: { limit: 1_000, records: [], truncated: false },
       })
     })
-
     await page.goto('/logs')
-    await page.getByRole('textbox', { name: 'Start' }).fill('2026-07-21T12:00')
-    await page.getByRole('textbox', { name: 'End' }).fill('2026-07-21T13:00')
-    await page.getByRole('button', { name: 'Run query' }).click()
+    await page.locator('summary').filter({ hasText: PRESET_RANGE_PATTERN }).click()
+    await page.getByRole('textbox', { name: 'Start (UTC)', exact: true }).fill('2026-07-21T12:00')
+    await page.getByRole('textbox', { name: 'End (UTC)', exact: true }).fill('2026-07-21T13:00')
+    await page.getByRole('button', { name: 'Done', exact: true }).click()
+    await page.getByRole('button', { name: 'Run query', exact: true }).click()
     await expect(page.getByText('0 visible', { exact: true })).toBeVisible()
-
-    await page.getByRole('textbox', { name: 'Start' }).fill('2026-07-21T12:30')
-    const appliedRange = page.locator('p').filter({ hasText: 'Run query to apply date range.' })
-    await expect(appliedRange).toContainText(
-      'Jul 21, 2026, 19:00:00 to Jul 21, 2026, 20:00:00 (UTC)',
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(
+      page.getByRole('paragraph').filter({ hasText: '21 Jul 12:00–13:00 UTC' }),
+    ).toBeVisible()
+    const settings = await openSettings(page)
+    await settings.getByRole('radio', { name: 'Local', exact: true }).check()
+    await settings.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(
+      page.getByRole('paragraph').filter({ hasText: '21 Jul 12:00–13:00 UTC' }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
+    await page.locator('summary').filter({ hasText: JULY_RANGE_PATTERN }).click()
+    await expect(page.getByRole('textbox', { name: 'Start (UTC)', exact: true })).toHaveValue(
+      '2026-07-21T12:00',
     )
-
-    const settingsDrawer = await openSettings(page)
-    await settingsDrawer.getByRole('switch', { name: 'Local time' }).click()
-    await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
-    await expect(appliedRange).toContainText(
-      'Jul 21, 2026, 12:00:00 to Jul 21, 2026, 13:00:00 (America/Los_Angeles)',
+    await expect(page.getByRole('textbox', { name: 'End (UTC)', exact: true })).toHaveValue(
+      '2026-07-21T13:00',
     )
   })
 })

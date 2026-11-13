@@ -3,10 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="stylesheet" href="/styles/design-tokens.css" />
     <title>Azure authentication</title>
   </head>
-  <body>
-    <p>Processing authentication...</p>
+  <body class="auth-callback">
+    <main class="status-page">
+      <section class="status-card" aria-labelledby="status-title">
+        <div class="status-card-header">
+          <div class="callback-status" data-state="pending">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M12 3a9 9 0 1 1-9 9" />
+            </svg>
+            <h1 id="status-title" class="status-card-title">Azure authentication</h1>
+          </div>
+        </div>
+        <div class="status-card-body">
+          <p class="status-card-description" role="status">Processing authentication...</p>
+        </div>
+        <div class="status-card-actions">
+          <a class="callback-return" href="/logs">Return to Azure Argus</a>
+        </div>
+      </section>
+    </main>
     <script type="module" src="/_nuxt/log-analytics-redirect.js"></script>
   </body>
 </html>

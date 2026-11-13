@@ -47,9 +47,3 @@ const accessibleLabel = computed((): string | undefined => {
     <template v-else>{{ flag }}</template>
   </span>
 </template>
-
-<style scoped>
-.country-flag {
-  font-family: emoji;
-}
-</style>

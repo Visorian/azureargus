@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Azure Argus design guidelines</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #fff;
+        --surface: #f6f7f9;
+        --header: #eceff3;
+        --border: #dbdfe6;
+        --control-border: #6e788c;
+        --text: #121621;
+        --muted: #555e72;
+        --primary: hsl(232, 94%, 59%);
+        --on-primary: #fff;
+        --switch-active: #1f72e6;
+        --success: oklch(52.7% 0.154 150.069);
+        --warning: oklch(55.5% 0.163 48.998);
+        --error: oklch(50.5% 0.213 27.518);
+        --radius: 6px;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      :root:has(#dark:checked) {
+        color-scheme: dark;
+        --page: #121621;
+        --surface: #1f2533;
+        --header: #1f2533;
+        --border: #2f3646;
+        --control-border: #6e788c;
+        --text: #f6f7f9;
+        --muted: #b8c0cc;
+        --primary: hsl(223, 100%, 72%);
+        --on-primary: #121621;
+        --success: oklch(79.2% 0.209 151.711);
+        --warning: oklch(87.9% 0.169 91.605);
+        --error: oklch(70.4% 0.191 22.216);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--text);
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+      input,
+      select {
+        accent-color: var(--primary);
+      }
+      :focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 3px;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      h1 {
+        font-size: 24px;
+        line-height: 1.3;
+        font-weight: 600;
+      }
+      h2 {
+        font-size: 18px;
+        line-height: 1.4;
+        font-weight: 600;
+      }
+      h3 {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      p {
+        max-width: 78ch;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      p code {
+        font-size: inherit;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .sheet {
+        max-width: 1040px;
+        margin: auto;
+        padding: 32px 24px;
+      }
+      .titlebar,
+      .row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .titlebar {
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .theme {
+        display: flex;
+        gap: 16px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .theme label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 44px;
+        cursor: pointer;
+      }
+      section {
+        margin-top: 24px;
+      }
+      section > p {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+      .specimen {
+        margin-top: 12px;
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .scroll {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+      }
+      caption {
+        text-align: left;
+        padding-bottom: 8px;
+        font-weight: 600;
+      }
+      th {
+        font-size: 12px;
+        font-weight: 600;
+        background: var(--header);
+      }
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .tokens {
+        margin-top: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: auto;
+      }
+      .tokens table {
+        table-layout: fixed;
+      }
+      .tokens td {
+        overflow-wrap: anywhere;
+      }
+      .swatch {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        margin-right: 8px;
+        border: 1px solid #6e788c;
+        border-radius: 2px;
+        vertical-align: -1px;
+      }
+      .columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      dl {
+        margin: 12px 0 0;
+        display: grid;
+        grid-template-columns: 5.5rem 1fr;
+        gap: 8px 16px;
+      }
+      dt {
+        font-weight: 600;
+      }
+      dd {
+        margin: 0;
+        color: var(--muted);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .button {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 6px 12px;
+        border: 1px solid var(--control-border);
+        border-radius: var(--radius);
+        background: var(--page);
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .button:disabled {
+        cursor: not-allowed;
+      }
+      .button svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+      }
+      .button[aria-busy='true'] {
+        cursor: progress;
+      }
+      .button[aria-busy='true'] svg {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .button[aria-busy='true'] svg {
+          animation: none;
+        }
+      }
+      .focus-example {
+        outline: 2px solid var(--primary);
+        outline-offset: 3px;
+      }
+      .primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: var(--on-primary);
+      }
+      .ghost {
+        border-color: transparent;
+        background: transparent;
+      }
+      .disabled {
+        color: var(--muted);
+        border-color: var(--border);
+        background: var(--surface);
+      }
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .field {
+        display: grid;
+        align-content: start;
+        gap: 6px;
+        min-width: 0;
+        font-size: 12px;
+      }
+      .field > span:first-child {
+        font-weight: 600;
+      }
+      .field > label {
+        font-weight: 600;
+      }
+      .field input,
+      .field select {
+        width: 100%;
+        min-height: 36px;
+        padding: 6px 10px;
+        border: 1px solid var(--control-border);
+        border-radius: var(--radius);
+        background: var(--page);
+        font-size: 14px;
+      }
+      .field input[aria-invalid='true'] {
+        border-color: var(--error);
+      }
+      .error {
+        color: var(--error);
+      }
+      .success {
+        color: var(--success);
+      }
+      .warning {
+        color: var(--warning);
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      .status svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        flex-shrink: 0;
+      }
+      .application {
+        padding: 0;
+        overflow: hidden;
+      }
+      .app-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 24px;
+        min-height: 56px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+      .brand svg {
+        width: 32px;
+        height: 32px;
+        padding: 8px;
+        border-radius: 6px;
+        background: hsl(232, 94%, 59%);
+        fill: none;
+        stroke: #fff;
+        stroke-width: 1.8;
+      }
+      .routes {
+        display: flex;
+        align-self: stretch;
+        gap: 8px;
+      }
+      .routes label {
+        display: flex;
+        position: relative;
+        align-items: center;
+        min-height: 44px;
+        padding-inline: 4px;
+        border-bottom: 2px solid transparent;
+        font-weight: 600;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .routes label:has(input:checked) {
+        border-bottom-color: var(--primary);
+        color: var(--text);
+      }
+      .routes input,
+      .segments input {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+        height: 1px;
+      }
+      .routes label:has(:focus-visible),
+      .segments label:has(:focus-visible) {
+        outline: 2px solid var(--primary);
+        outline-offset: 3px;
+      }
+      .routes label:has(:focus-visible) {
+        outline-offset: -2px;
+      }
+      .session {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .view {
+        padding: 16px;
+      }
+      .application:has(#route-simulator:checked) .logs-view,
+      .application:has(#route-logs:checked) .simulator-view {
+        display: none;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 16px 12px;
+        margin-bottom: 16px;
+      }
+      .segments {
+        display: inline-flex;
+        flex-shrink: 0;
+        min-width: 0;
+        border: 1px solid var(--control-border);
+        border-radius: var(--radius);
+        margin: 0;
+        padding: 0;
+        background: var(--page);
+      }
+      .segments label {
+        position: relative;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        color: var(--text);
+        font-size: 12px;
+        line-height: 20px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .segments label:first-of-type {
+        border-radius: 5px 0 0 5px;
+      }
+      .segments label:last-of-type {
+        border-radius: 0 5px 5px 0;
+      }
+      .segments label + label {
+        border-left: 1px solid var(--control-border);
+      }
+      .segments label:has(:checked) {
+        background: var(--switch-active);
+        color: #fff;
+      }
+      .segments label:has(:checked):has(:focus-visible) {
+        outline-color: #fff;
+        outline-offset: -3px;
+      }
+      .segments svg {
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.75;
+      }
+      .segments .check {
+        width: 12px;
+        height: 12px;
+        visibility: hidden;
+        stroke-width: 2.75;
+      }
+      .segments :checked ~ .check {
+        visibility: visible;
+      }
+      .toolbar .muted {
+        margin-left: auto;
+        font-size: 12px;
+      }
+      .data-table {
+        min-width: 600px;
+        font-size: 12px;
+      }
+      .data-table td {
+        height: 64px;
+      }
+      .dns-logs td {
+        height: 44px;
+      }
+      .date {
+        display: block;
+        margin-top: 4px;
+      }
+      .data-table tbody tr:hover {
+        background: var(--surface);
+      }
+      .data-table code {
+        white-space: nowrap;
+      }
+      .application:has(#lens-dns:checked) .all-logs,
+      .application:has(#lens-all:checked) .dns-logs {
+        display: none;
+      }
+      .panel {
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .panel + .panel {
+        margin-top: 16px;
+      }
+      .panel p {
+        margin-top: 4px;
+      }
+      .panel .field-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .panel .row {
+        margin-top: 16px;
+      }
+      .result {
+        border-left: 3px solid var(--success);
+      }
+      .rule {
+        margin-top: 12px;
+        color: var(--muted);
+      }
+      .note {
+        padding: 16px;
+        background: var(--page);
+        border-left: 3px solid var(--warning);
+      }
+      .note strong {
+        font-weight: 600;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+      }
+      @media (hover: hover) {
+        .button:not(:disabled):not(.primary):not([aria-busy='true']):hover {
+          background: var(--surface);
+        }
+        .button.primary:not(:disabled):not([aria-busy='true']):hover {
+          background: color-mix(in srgb, var(--primary) 90%, var(--text));
+        }
+        .routes label:hover {
+          color: var(--primary);
+        }
+        .segments label:not(:has(:checked)):hover {
+          background: var(--header);
+        }
+      }
+      @media (max-width: 640px) {
+        .sheet {
+          padding: 20px 16px;
+        }
+        .columns {
+          grid-template-columns: 1fr;
+          gap: 0;
+        }
+        .columns dl + dl {
+          margin-top: 8px;
+        }
+        .tokens th,
+        .tokens td {
+          padding: 8px;
+        }
+        .field-grid,
+        .panel .field-grid {
+          grid-template-columns: 1fr;
+        }
+        .app-header {
+          padding-top: 12px;
+          gap: 8px 16px;
+        }
+        .routes {
+          width: 100%;
+          order: 3;
+        }
+        .session {
+          display: none;
+        }
+        .toolbar .muted {
+          margin-left: 0;
+        }
+      }
+      @media (max-width: 640px), (pointer: coarse) {
+        .field input,
+        .field select {
+          min-height: 44px;
+          font-size: 16px;
+        }
+        .button {
+          min-height: 44px;
+        }
+        .segments label::before {
+          content: '';
+          position: absolute;
+          inset: -8px 0;
+        }
+      }
+      @media (max-width: 360px) {
+        .segments svg:not(.check) {
+          display: none;
+        }
+      }
+      @media (forced-colors: active) {
+        .routes label {
+          border-bottom-color: Canvas;
+        }
+        .routes label:has(input:checked) {
+          border-bottom-color: CanvasText;
+        }
+        .segments label:has(:checked) {
+          forced-color-adjust: none;
+          background: Highlight;
+          color: HighlightText;
+        }
+        .segments label:has(:checked):has(:focus-visible) {
+          outline-color: HighlightText;
+        }
+      }
+      @media print {
+        .sheet {
+          max-width: none;
+          padding: 0;
+        }
+        .theme {
+          display: none;
+        }
+        section {
+          break-inside: avoid;
+        }
+        .application .simulator-view {
+          display: block !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <header class="titlebar">
+        <h1>Azure Argus design guidelines</h1>
+        <fieldset class="theme">
+          <legend class="sr-only">Appearance</legend>
+          <label><input type="radio" name="theme" id="light" checked /> Light</label>
+          <label><input type="radio" name="theme" id="dark" /> Dark</label>
+        </fieldset>
+      </header>
+
+      <section aria-labelledby="surfaces">
+        <h2 id="surfaces">Surfaces and color</h2>
+        <p>
+          Use the same page background for logs, DNS, and the simulator. Keep rows and panels on
+          that background. Use muted surfaces for chrome, row hover, and table headers. Command
+          buttons use the theme's primary blue; selected switches use #1f72e6 with white text in
+          both themes.
+        </p>
+        <div class="tokens" tabindex="0" role="region" aria-label="Color tokens">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Role</th>
+                <th scope="col">Light</th>
+                <th scope="col">Dark</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Page and panels</td>
+                <td><span class="swatch" style="background: #fff"></span><code>#ffffff</code></td>
+                <td>
+                  <span class="swatch" style="background: #121621"></span
+                  ><code>brand-gray-950</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Chrome and muted areas</td>
+                <td>
+                  <span class="swatch" style="background: #f6f7f9"></span><code>brand-gray-50</code>
+                </td>
+                <td>
+                  <span class="swatch" style="background: #1f2533"></span
+                  ><code>brand-gray-900</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Table header</td>
+                <td>
+                  <span class="swatch" style="background: #eceff3"></span
+                  ><code>brand-gray-100</code>
+                </td>
+                <td>
+                  <span class="swatch" style="background: #1f2533"></span
+                  ><code>brand-gray-900</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Dividers</td>
+                <td>
+                  <span class="swatch" style="background: #dbdfe6"></span
+                  ><code>brand-gray-200</code>
+                </td>
+                <td>
+                  <span class="swatch" style="background: #2f3646"></span
+                  ><code>brand-gray-800</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Text / supporting text</td>
+                <td><code>brand-gray-950 / 600</code></td>
+                <td><code>brand-gray-50 / 300</code></td>
+              </tr>
+              <tr>
+                <td>Primary / text on primary</td>
+                <td>
+                  <span class="swatch" style="background: hsl(232, 94%, 59%)"></span
+                  ><code>brand-blue-600 / white</code>
+                </td>
+                <td>
+                  <span class="swatch" style="background: hsl(223, 100%, 72%)"></span
+                  ><code>brand-blue-400 / gray-950</code>
+                </td>
+              </tr>
+              <tr>
+                <td>Control border</td>
+                <td><code>brand-gray-500</code></td>
+                <td><code>brand-gray-500</code></td>
+              </tr>
+              <tr>
+                <td>Selected switch / text</td>
+                <td><code>#1f72e6 / white</code></td>
+                <td><code>#1f72e6 / white</code></td>
+              </tr>
+              <tr>
+                <td>Success / error / warning</td>
+                <td>
+                  <code>green-700</code><br /><code>red-700</code><br /><code>amber-700</code>
+                </td>
+                <td>
+                  <code>green-400</code><br /><code>red-400</code><br /><code>amber-300</code>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Use green for Allow and success, red for Deny and errors, amber for incomplete results.
+          Pair every status with an icon and a label. Keep status out of page backgrounds.
+        </p>
+      </section>
+
+      <section aria-labelledby="type">
+        <h2 id="type">Type and spacing</h2>
+        <div class="columns">
+          <dl>
+            <dt>Typeface</dt>
+            <dd>System sans; system mono for IPs, ports, timestamps, and rules.</dd>
+            <dt>Sizes</dt>
+            <dd>24px page title, 18px section, 14px body, 12px dense data.</dd>
+            <dt>Weights</dt>
+            <dd>400 body, 500 switch labels, 600 headings and actions. Sentence case.</dd>
+          </dl>
+          <dl>
+            <dt>Spacing</dt>
+            <dd>
+              4px grid; 2px steps inside controls. 8px control gaps, 16px panel padding, 24px
+              section gaps.
+            </dd>
+            <dt>Shape</dt>
+            <dd>6px controls, 8px panels, 1px borders. No pills or decorative shadows.</dd>
+            <dt>Icons</dt>
+            <dd>
+              Lucide, 16px in controls, 20px for section actions. Compact switches use 14px icons
+              and 12px checks; omit leading icons first on narrow screens.
+            </dd>
+          </dl>
+        </div>
+      </section>
+
+      <section aria-labelledby="controls">
+        <h2 id="controls">Controls</h2>
+        <p>
+          Use Nuxt UI controls. One solid primary action per task. Secondary actions use neutral
+          outlines; utility actions use ghost buttons. Routes use underlined text tabs. Two-choice
+          switches use joined segments in one 30px frame, 12px labels, and a solid blue selected
+          segment with white text. Keep both choices visible and the group width stable. Use
+          <code>size="lg"</code> for 36px action buttons and fields. On small or coarse-pointer
+          screens, use 44px touch targets; extend the hit area around compact switches without
+          enlarging their frame.
+        </p>
+        <div class="specimen">
+          <div class="row" role="group" aria-label="Button state examples">
+            <button type="button" class="button primary">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 4 12 8-12 8Z" /></svg>Run
+              query
+            </button>
+            <button type="button" class="button focus-example">Export</button>
+            <button type="button" class="button ghost">Reset</button>
+            <button type="button" class="button disabled" disabled>Unavailable</button>
+            <button type="button" class="button primary" aria-busy="true" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-8-8 M12 4h5 M12 4v5" /></svg
+              >Run query
+            </button>
+          </div>
+          <div class="field-grid">
+            <div class="field">
+              <label for="example-source">Source IP</label>
+              <input
+                id="example-source"
+                class="mono"
+                value="10.0.1.4"
+                autocomplete="off"
+                spellcheck="false"
+                aria-describedby="source-hint"
+              />
+              <span class="muted" id="source-hint">Keep labels above fields.</span>
+            </div>
+            <div class="field">
+              <label for="example-protocol">Protocol</label>
+              <select id="example-protocol">
+                <option>TCP</option>
+                <option>UDP</option>
+                <option>ICMP</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="example-port">Destination port</label>
+              <input
+                id="example-port"
+                class="mono"
+                value="70000"
+                aria-invalid="true"
+                aria-describedby="port-error"
+                inputmode="numeric"
+                readonly
+              />
+              <span id="port-error" class="error">Enter a port from 1 to 65535.</span>
+            </div>
+          </div>
+        </div>
+        <p>
+          Use a 2px blue focus outline; selected switch segments use a white inset outline. Keep
+          hover, focus, selection, loading, and disabled states distinct. Loading keeps the button
+          label and width. Put field errors below the field and preserve entered values.
+        </p>
+      </section>
+
+      <section aria-labelledby="layout">
+        <h2 id="layout">Application layout</h2>
+        <p>
+          Keep the 56px app header, brand, route tabs, and account controls consistent. Put source
+          selection and view switches below it; filters and actions follow. Use 16px page insets.
+          The simulator follows configuration, connection, result, then processing order.
+        </p>
+        <p>
+          Pair each log address with its port, then Action and Protocol. Put Search, Categories,
+          time range, Reset and Run query on the next row; keep Reset and Run together. Log
+          Analytics edits stay pending until Run query. Keep the applied summary and results
+          unchanged during edits and loading. Live Event Hub filters update immediately, without a
+          time range or Run query.
+        </p>
+        <div class="specimen application">
+          <header class="app-header">
+            <span class="brand"
+              ><svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z" /></svg
+              >Azure Argus</span
+            >
+            <div class="routes" role="radiogroup" aria-label="Layout example">
+              <label
+                ><input type="radio" id="route-logs" name="route" checked />Logs &amp; DNS</label
+              >
+              <label><input type="radio" id="route-simulator" name="route" />Rule simulator</label>
+            </div>
+            <span class="session">Temporary session</span>
+          </header>
+          <div class="view logs-view">
+            <div class="toolbar">
+              <fieldset class="segments">
+                <legend class="sr-only">Data source example</legend>
+                <label
+                  ><input type="radio" name="source" id="source-live" checked /><svg
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="2" />
+                    <path
+                      d="M7 7a7 7 0 0 0 0 10M17 7a7 7 0 0 1 0 10M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16"
+                    /></svg
+                  >Live Event Hub<svg class="check" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m5 12 4 4L19 6" /></svg
+                ></label>
+                <label
+                  ><input type="radio" name="source" id="source-analytics" /><svg
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 3v18h18M7 17v-5M12 17V9M17 17V6M6 8l5-4 5 2 5-5" /></svg
+                  >Log Analytics<svg class="check" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m5 12 4 4L19 6" /></svg
+                ></label>
+              </fieldset>
+              <fieldset class="segments">
+                <legend class="sr-only">Log view example</legend>
+                <label><input type="radio" id="lens-all" name="lens" checked />All logs</label>
+                <label><input type="radio" id="lens-dns" name="lens" />DNS troubleshooting</label>
+              </fieldset>
+            </div>
+            <div
+              class="panel scroll"
+              style="padding: 0"
+              tabindex="0"
+              role="region"
+              aria-label="Log table example"
+            >
+              <table class="data-table all-logs">
+                <caption class="sr-only">
+                  Firewall log example
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" aria-sort="descending">
+                      Time (UTC) <span aria-hidden="true">↓</span>
+                    </th>
+                    <th scope="col">Action</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Destination</th>
+                    <th scope="col">Rule</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>14:32:08</code><code class="date muted">2026-11-11</code></td>
+                    <td>
+                      <span class="status success"
+                        ><svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m5 12 4 4L19 6" /></svg
+                        >Allow</span
+                      >
+                    </td>
+                    <td><code>10.0.1.4</code></td>
+                    <td><code>10.0.2.8:443</code></td>
+                    <td><code>Allow-HTTPS</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>14:32:06</code><code class="date muted">2026-11-11</code></td>
+                    <td>
+                      <span class="status error"
+                        ><svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m6 6 12 12M6 18 18 6" /></svg
+                        >Deny</span
+                      >
+                    </td>
+                    <td><code>10.0.1.5</code></td>
+                    <td><code>10.0.2.8:22</code></td>
+                    <td><code>Default deny</code></td>
+                  </tr>
+                </tbody>
+              </table>
+              <table class="data-table dns-logs">
+                <caption class="sr-only">
+                  DNS log example
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col" aria-sort="descending">
+                      Time (UTC) <span aria-hidden="true">↓</span>
+                    </th>
+                    <th scope="col">Query</th>
+                    <th scope="col">Client</th>
+                    <th scope="col">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>14:32:08</code></td>
+                    <td><code>api.internal</code></td>
+                    <td><code>10.0.1.4</code></td>
+                    <td>
+                      <span class="status success"
+                        ><svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m5 12 4 4L19 6" /></svg
+                        >NOERROR</span
+                      >
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>14:32:06</code></td>
+                    <td><code>unknown.internal</code></td>
+                    <td><code>10.0.1.5</code></td>
+                    <td>
+                      <span class="status warning"
+                        ><svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m12 3 10 18H2Z M12 9v5 M12 17v1" /></svg
+                        >NXDOMAIN</span
+                      >
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="view simulator-view">
+            <div class="panel">
+              <h3>Configuration source</h3>
+              <p class="muted">Example policy · 2 rule collections</p>
+            </div>
+            <div class="panel">
+              <h3>Test a connection</h3>
+              <div class="field-grid">
+                <label class="field"
+                  ><span>Source IP</span><input class="mono" value="10.0.1.4" readonly
+                /></label>
+                <label class="field"
+                  ><span>Destination IP</span><input class="mono" value="10.0.2.8" readonly
+                /></label>
+                <label class="field"
+                  ><span>Protocol</span
+                  ><select>
+                    <option>TCP</option>
+                    <option>UDP</option>
+                    <option>ICMP</option>
+                  </select></label
+                >
+                <label class="field"
+                  ><span>Destination port</span><input class="mono" value="443" readonly
+                /></label>
+              </div>
+              <div class="row">
+                <button type="button" class="button primary">Simulate connection</button>
+              </div>
+            </div>
+            <div class="panel result">
+              <h3 class="status success">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>Allow
+              </h3>
+              <p>Matched <code>Allow-HTTPS</code> in <code>Network rules</code>.</p>
+              <p class="muted">
+                Configured-rule result. Actual traffic also depends on runtime conditions.
+              </p>
+            </div>
+            <div class="panel">
+              <h3>Processing order</h3>
+              <p class="muted">
+                DNAT → Network → Application. Show the deciding rule and why evaluation stopped.
+              </p>
+            </div>
+          </div>
+        </div>
+        <p>
+          Keep tables dense and left-aligned: 12px headers, 44px DNS rows, 64px log rows. Show sort
+          direction. Keep headers visible while scrolling. Open full values in details; make
+          identifiers selectable and copyable.
+        </p>
+      </section>
+
+      <section aria-labelledby="feedback">
+        <h2 id="feedback">Feedback and overlays</h2>
+        <p>
+          Put persistent errors and incomplete results beside the affected task. Use toasts for
+          action confirmation. Distinguish no connection, no data, and no filter matches; give each
+          one a useful next action. Show loading in the results area and keep filters usable.
+        </p>
+        <div class="specimen note">
+          <span class="status warning"
+            ><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m12 3 10 18H2Z M12 9v5 M12 17v1" /></svg
+            ><strong>Result incomplete</strong></span
+          >
+          <p>Resolve missing IP groups before treating the result as conclusive.</p>
+        </div>
+        <p>
+          Drawers and dialogs use the page surface, a border, and a dimmed backdrop. Include a title
+          and close control. Trap focus, close on Escape, and restore focus to the trigger. Confirm
+          destructive actions with their consequence and an explicit verb.
+        </p>
+        <p>
+          Categories and time controls use bounded popovers with matching Done buttons. Close
+          popovers on Done, Escape or focus leaving; restore trigger focus on Done and Escape. Edit
+          time inline on phones. Keep every formatted UTC range within a stable trigger width so
+          edits never move the controls.
+        </p>
+      </section>
+
+      <section aria-labelledby="responsive">
+        <h2 id="responsive">Responsive and accessible</h2>
+        <p>
+          At 640px and below, start log filters collapsed. Keep the source switch, Edit filters with
+          the draft count, applied connection, action/protocol, UTC range, applied search, result
+          count and Run query visible. For example, <code>Applied · 10.0.1.4 → Any:443</code>. Keep
+          pending changes and validation errors visible. Live mode omits the time range and Run.
+        </p>
+        <p>
+          Edit filters reveals every field; hiding preserves drafts. Run query collapses the mobile
+          editor and focuses Run. Keep newly edited drafts when a query completes. Escape closes the
+          innermost disclosure first and restores its trigger. Wrap long addresses; show full search
+          values in the editor.
+        </p>
+        <p>
+          Wrap navigation below the brand and stack expanded fields. Scroll wide tables inside their
+          container; never scroll the whole page horizontally. Maintain 4.5:1 text contrast and 3:1
+          control and focus contrast in both themes. Label icon buttons, support keyboard operation,
+          announce async results, and respect reduced motion.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

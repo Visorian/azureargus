@@ -8,7 +8,7 @@ import {
   normalizeEventHubLookbackMinutes,
   parseEventHubConnectionString,
   validateEventHubConnectionForm,
-} from '../../app/composables/useEventHubConnection'
+} from '../../app/utils/eventHubConnection'
 
 describe('Event Hub connection helpers', () => {
   it('parses connection string values case-insensitively', () => {

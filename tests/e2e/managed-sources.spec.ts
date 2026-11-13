@@ -9,7 +9,10 @@ import {
   mockManagedEventHubStream,
 } from './support/managedEventHub'
 
-const NETWORK_RULE_ROW_PATTERN = /Jul 12, 2026.*AZFWNetworkRule.*Allow.*TCP/
+const NETWORK_RULE_ROW_PATTERN = /Jul 12.*Network rules.*Allow.*TCP/u
+
+const EDIT_FILTERS_PATTERN = /^Edit filters/u
+const PRESET_RANGE_PATTERN = /Last 15 minutes/u
 
 test('managed Event Hub uses configured server stream without exposing credentials', async ({
   page,
@@ -20,8 +23,8 @@ test('managed Event Hub uses configured server stream without exposing credentia
   await page.goto('/logs')
   await expect(page.getByText('Managed User')).toBeVisible({ timeout: 15_000 })
   const settingsDrawer = await openSettings(page)
-  await expect(page.getByRole('textbox', { name: 'Connection string' })).toBeDisabled()
-  await expect(page.getByRole('textbox', { name: 'Event Hub name' })).toBeDisabled()
+  await expect(page.getByRole('textbox', { name: 'Connection string' })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: 'Event Hub name' })).toHaveCount(0)
   await expect(page.getByRole('checkbox', { name: 'Remember connection string' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect
@@ -59,14 +62,14 @@ test('managed Event Hub uses configured server stream without exposing credentia
       },
     ],
   })
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByText('2 visible / 2 received')).toBeVisible()
   await expect(page.getByText('Catching up', { exact: true })).toBeVisible()
   await closeManagedEventHubStream(page)
   await expect(
     page
       .getByRole('group', { name: 'All logs status and actions' })
-      .getByText('reconnecting', { exact: true }),
+      .getByText('Reconnecting', { exact: true }),
   ).toBeVisible()
   await expect
     .poll(async () => await getManagedEventHubRequests(page))
@@ -96,7 +99,7 @@ test('managed Event Hub uses configured server stream without exposing credentia
   await expect(
     page
       .getByRole('group', { name: 'All logs status and actions' })
-      .getByText('connected', { exact: true }),
+      .getByText('Catching up', { exact: true }),
   ).toBeVisible()
   await enqueueManagedEventHubEnvelope(page, { type: 'caught-up' })
   await expect(page.getByText('Latest', { exact: true })).toBeVisible()
@@ -106,10 +109,10 @@ test('managed Event Hub uses configured server stream without exposing credentia
   })
   await expect(networkRows).toHaveCount(2)
   await expect(networkRows.first()).toBeVisible()
-  const categoryFilter = page.getByRole('button', { name: 'Category filter' })
+  const categoryFilter = page.locator('summary').filter({ hasText: 'Categories' })
   await categoryFilter.click()
-  const networkCategory = page.getByRole('option', { name: 'AZFWNetworkRule', exact: true })
-  const dnsCategory = page.getByRole('option', { name: 'AzureFirewallDnsProxy', exact: true })
+  const networkCategory = page.getByRole('checkbox', { name: 'Network rules', exact: true })
+  const dnsCategory = page.getByRole('checkbox', { name: 'AzureFirewallDnsProxy', exact: true })
   await networkCategory.click()
   await expect(page.getByText('2 visible / 3 received')).toBeVisible()
   await dnsCategory.click()
@@ -117,24 +120,23 @@ test('managed Event Hub uses configured server stream without exposing credentia
   await networkCategory.click()
   await expect(page.getByText('1 visible / 3 received')).toBeVisible()
   await page.keyboard.press('Escape')
-  const firewallTable = page.getByRole('table', { name: 'Firewall logs' })
+  const firewallTable = page.getByRole('grid', { name: 'Firewall logs' })
   const tableBox = await firewallTable.boundingBox()
   expect(tableBox?.x).toBeGreaterThanOrEqual(15)
-  await expect(firewallTable).toHaveCSS('border-top-width', '1px')
-  await expect(firewallTable).toHaveCSS('border-radius', '6px')
 
-  await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
+  await page.getByRole('radio', { name: 'DNS troubleshooting' }).click()
   await expect(
     page
       .getByRole('group', { name: 'DNS troubleshooting status and actions' })
-      .getByText('1 queried entries · 0 unidentified transports'),
+      .getByText('1 entry', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole('button', {
-      name: 'Open DNS details for winatp-gw-neu3.microsoft.com.',
-    }),
+    page
+      .getByTestId('dns-entry-scroll')
+      .getByRole('row')
+      .filter({ hasText: 'winatp-gw-neu3.microsoft.com.' }),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'All logs' }).click()
+  await page.getByRole('radio', { name: 'All logs' }).click()
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
   await expect(page.getByText('0 visible / 0 received')).toBeVisible()
   await enqueueManagedEventHubEnvelope(page, {
@@ -225,38 +227,34 @@ test('managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
   })
 
   await page.goto('/logs')
-  const settingsDrawer = await openSettings(page)
   const dataSource = page.getByRole('group', { name: 'Data source' })
-  await expect(dataSource.getByRole('button', { name: 'Live Event Hub' })).toBeDisabled()
-  await expect(dataSource.getByRole('button', { name: 'Log Analytics' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
+  await expect(dataSource.getByRole('radio', { name: 'Live Event Hub' })).toBeDisabled()
+  await expect(dataSource.getByRole('radio', { name: 'Log Analytics' })).toBeChecked()
+  const settingsDrawer = await openSettings(page)
   await expect(page.getByRole('textbox', { name: 'Workspace ID*' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Connect to Azure' })).toHaveCount(0)
   const sourceSelect = page.getByRole('combobox', { name: 'Query source' })
   await expect(sourceSelect).toContainText('AzureDiagnostics')
   await expect(sourceSelect).toBeDisabled()
   const runQuery = page.getByRole('button', { name: 'Run query' })
-  await expect(
-    page.getByRole('complementary').getByRole('button', { name: 'Run query' }),
-  ).toHaveCount(0)
-  await expect(runQuery).toBeVisible()
+  await expect(settingsDrawer.getByRole('button', { name: 'Run query' })).toHaveCount(0)
   await page.getByRole('spinbutton', { name: 'Query result limit' }).fill('2000')
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
-  await page.getByRole('button', { name: 'Category filter' }).click()
-  await page.getByRole('option', { name: 'AZFWNetworkRule', exact: true }).click()
-  await page.getByRole('option', { name: 'AZFWApplicationRule', exact: true }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
+  await page.locator('summary').filter({ hasText: 'Categories' }).click()
+  await page.getByRole('checkbox', { name: 'Network rules', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'Application rules', exact: true }).click()
   await page.keyboard.press('Escape')
   await runQuery.click()
   await expect(page.getByText('1 visible', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open Log Analytics settings' })).toHaveCount(0)
   const normalizedRow = page
-    .getByRole('table', { name: 'Firewall logs' })
+    .getByRole('grid', { name: 'Firewall logs' })
     .getByRole('row')
     .filter({ hasText: '192.0.2.10' })
   await expect(normalizedRow).toBeVisible()
-  await expect(normalizedRow).toContainText('AZFWNetworkRule')
+  await expect(normalizedRow.getByTitle('Network rules', { exact: true })).toHaveText(
+    'Network rules',
+  )
   await expect(normalizedRow).toContainText('Allow')
   await expect(normalizedRow).toContainText('UDP')
   await expect(normalizedRow).toContainText('53607')
@@ -266,15 +264,15 @@ test('managed Log Analytics-only deployment shows normalized AzureDiagnostics ro
 
   await page.setViewportSize({ width: 375, height: 812 })
   await page.getByRole('button', { name: 'Clear results' }).click()
-  await page.getByRole('button', { name: 'Choose time range' }).click()
-  const mobileQuery = page.getByRole('dialog', { name: 'Query & filters', exact: true })
-  await mobileQuery.getByRole('textbox', { name: 'Start' }).fill('2026-07-12T14:00')
-  await mobileQuery.getByRole('textbox', { name: 'End' }).fill('2026-07-12T15:00')
-  await mobileQuery.getByRole('button', { name: 'Run query' }).click()
-  await expect(page.getByText('1 visible', { exact: true })).toBeVisible()
-  await mobileQuery.getByRole('button', { name: 'Show 1 result', exact: true }).click()
-  await expect(mobileQuery).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Query & filters (1)' })).toBeFocused()
+  await page.getByRole('button', { name: EDIT_FILTERS_PATTERN }).click()
+  await page.locator('summary').filter({ hasText: PRESET_RANGE_PATTERN }).click()
+  await page.getByRole('textbox', { name: 'Start (UTC)', exact: true }).fill('2026-07-12T14:00')
+  await page.getByRole('textbox', { name: 'End (UTC)', exact: true }).fill('2026-07-12T15:00')
+  await page.getByRole('button', { name: 'Done', exact: true }).click()
+  await runQuery.click()
+  await expect(page.getByRole('status')).toHaveText('1 result')
+  await expect(page.getByTestId('log-filter-panel')).toBeHidden()
+  await expect(runQuery).toBeFocused()
   const mobileLog = page
     .getByTestId('mobile-log-list')
     .getByRole('button')

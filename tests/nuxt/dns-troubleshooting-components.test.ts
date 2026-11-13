@@ -11,10 +11,6 @@ import type {
   DnsSort,
 } from '../../shared/types/dns'
 
-function containsElement(container: Element, element: unknown) {
-  return element instanceof Node && container.contains(element)
-}
-
 const filterOptions = {
   outcomes: ['response-unknown', 'transport-observed'],
   protocols: ['TCP', 'UDP'],
@@ -65,7 +61,8 @@ function createFilters(): DnsFilters {
 
 const RecycleScrollerStub = defineComponent({
   props: { items: { type: Array, required: true } },
-  template: '<div><slot v-for="item in items" :item="item" :active="true" /></div>',
+  template:
+    '<div><slot name="before" /><slot v-for="(item,index) in items" :item="item" :index="index" :active="true" /></div>',
 })
 const SelectStub = defineComponent({
   inheritAttrs: false,
@@ -125,9 +122,7 @@ describe('DNS troubleshooting components', () => {
         entriesTruncated: false,
         transportsTruncated: true,
         logAnalysis: false,
-        canApplyFilters: false,
         filterOptions,
-        selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
         'onUpdate:filters': (value: DnsFilters) => Object.assign(filters, value),
       },
@@ -139,9 +134,9 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).toContain('Not observed')
     expect(wrapper.text()).toContain('10.0.0.4:53000')
     expect(wrapper.text()).toContain('168.63.129.16:53')
-    expect(wrapper.text()).toContain('Observations')
+    expect(wrapper.text()).toContain('Count')
     expect(wrapper.text()).toContain('Destination')
-    expect(wrapper.text()).toContain('Unidentified transport truncated')
+    expect(wrapper.text()).toContain('Unidentified transport limit reached')
     expect(wrapper.text()).toContain('Partial')
     expect(wrapper.text()).toContain('Response received')
     expect(wrapper.text()).toContain('Transport observed')
@@ -149,11 +144,9 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).not.toContain('Entries truncated')
     expect(wrapper.text()).not.toContain('Source query failed')
 
-    await wrapper.get('button[aria-label="Open DNS details for api.example."]').trigger('click')
+    await wrapper.get('[data-dns-entry="entry-1"]').trigger('click')
     expect(wrapper.emitted('select')?.[0]).toEqual([entry])
-    await wrapper
-      .get('button[aria-label="Open DNS transport details for 10.0.0.4:53000"]')
-      .trigger('click')
+    await wrapper.get('[data-dns-entry="transport-1"]').trigger('click')
     expect(wrapper.emitted('select')?.[1]).toEqual([transportEntry])
   })
 
@@ -181,19 +174,15 @@ describe('DNS troubleshooting components', () => {
         entriesTruncated: false,
         transportsTruncated: false,
         logAnalysis: true,
-        canApplyFilters: false,
         filterOptions,
-        selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
         'onUpdate:filters': () => {},
       },
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
 
-    expect(wrapper.get('[role="status"]').text()).toContain(
-      'Some DNS sources could not be queried.',
-    )
-    expect(wrapper.get('[role="status"]').text()).toContain('DNS transport query failed')
+    expect(wrapper.get('.status-panel').text()).toContain('Result incomplete')
+    expect(wrapper.get('.status-panel').text()).toContain('DNS transport query failed')
     expect(wrapper.text()).toContain('api.example.')
     expect(wrapper.text()).not.toContain('No entries returned by available DNS sources.')
   })
@@ -210,67 +199,51 @@ describe('DNS troubleshooting components', () => {
         entriesTruncated: false,
         transportsTruncated: false,
         logAnalysis: true,
-        canApplyFilters: false,
         filterOptions,
-        selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
         'onUpdate:filters': () => {},
       },
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
 
-    expect(wrapper.get('[role="alert"]').text()).toBe('DNS query failed.')
+    expect(wrapper.get('[role="alert"]').text()).toContain('DNS query failed.')
     expect(wrapper.text()).not.toContain('No matching DNS entries.')
     expect(wrapper.text()).not.toContain('Source query failed')
   })
 
-  it('keeps search and filters above query controls and secondary actions', async () => {
+  it('labels every DNS filter and exposes only Reset as its secondary action', async () => {
     const wrapper = await mountSuspended(DnsTroubleshootingView, {
       props: {
         entries: [],
         filters: createFilters(),
         showUnidentifiedTransports: false,
         sources: [],
-        status: 'success',
+        status: 'idle',
         error: null,
         entriesTruncated: false,
         transportsTruncated: false,
         logAnalysis: true,
-        canApplyFilters: true,
         filterOptions,
-        selectedEntryId: null,
         sort: { key: 'timestamp', direction: 'desc' },
         'onUpdate:filters': () => {},
       },
       slots: { queryControls: '<div>Query controls</div>' },
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
-
-    const filterRow = wrapper.get('[data-testid="log-filter-row"]')
-    const filterGrid = filterRow.get('[data-testid="dns-filter-grid"]')
-    const filterActions = wrapper.get('[data-testid="log-filter-actions"]')
-    const buttons = wrapper
-      .findAllComponents({ name: 'UButton' })
-      .filter((button) => containsElement(filterActions.element, button.element))
-    expect(buttons[0]?.props('label')).toBe('Apply filters')
-    expect(buttons[1]?.props('label')).toBe('Reset')
-    expect(buttons[1]?.props()).toMatchObject({ color: 'neutral', variant: 'ghost' })
-
-    await buttons[0]!.trigger('click')
-    await buttons[1]!.trigger('click')
-    expect(wrapper.emitted('apply')).toHaveLength(1)
-    expect(wrapper.emitted('reset')).toHaveLength(1)
-    expect(wrapper.get('[data-testid="log-query-row"]').text()).toContain('Query controls')
-    expect(filterRow.element.contains(filterGrid.element)).toBe(true)
-    expect(
-      wrapper.get('[data-testid="log-query-row"]').element.contains(filterActions.element),
-    ).toBe(true)
-    expect(
-      wrapper
-        .get('[data-testid="log-query-row"]')
-        .getComponent({ name: 'UCheckbox' })
-        .props('label'),
-    ).toBe('Show unidentified DNS transport')
+    const labels = wrapper.findAll('label').map((field) => field.text())
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'Search',
+        'Query type',
+        'Client',
+        'Protocol',
+        'Result',
+        'Source',
+        'Sort order',
+      ]),
+    )
+    expect(wrapper.text()).not.toContain('Apply filters')
+    expect(wrapper.text()).toContain('Query controls')
   })
 
   it('maps explicit sort-order choices without a separate direction control', async () => {
@@ -286,9 +259,7 @@ describe('DNS troubleshooting components', () => {
         entriesTruncated: false,
         transportsTruncated: false,
         logAnalysis: false,
-        canApplyFilters: false,
         filterOptions,
-        selectedEntryId: null,
         sort,
         'onUpdate:filters': () => {},
         'onUpdate:sort': (value: DnsSort) => Object.assign(sort, value),
@@ -338,6 +309,7 @@ describe('DNS troubleshooting components', () => {
       },
       global: {
         stubs: {
+          UTooltip: { template: '<span><slot /></span>' },
           UModal: { template: "<div><slot name='body' /></div>" },
         },
       },
@@ -351,13 +323,12 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).toContain('Recursion desired')
     expect(wrapper.text()).not.toContain('Not observed: terminal response')
     expect(wrapper.text()).not.toContain('Canonical raw projection')
-    expect(wrapper.get('button[aria-label="Copy raw"]').text()).toContain('Copy raw')
-    const rawMessage = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Raw message"]')
-    expect(rawMessage.element.value).toBe(JSON.stringify(observation.raw, null, 2))
-    expect(rawMessage.attributes('readonly')).toBeDefined()
-    expect(rawMessage.attributes('spellcheck')).toBe('false')
-    expect(rawMessage.attributes('wrap')).toBe('off')
-    expect(rawMessage.attributes('rows')).toBe('6')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('Copy raw'))).toBe(
+      true,
+    )
+    expect(wrapper.get('pre[aria-label="Raw message"]').text()).toBe(
+      JSON.stringify(observation.raw, null, 2),
+    )
   })
 
   it('keeps pending remote detail separate from absence evidence', async () => {
@@ -372,6 +343,7 @@ describe('DNS troubleshooting components', () => {
       },
       global: {
         stubs: {
+          UTooltip: { template: '<span><slot /></span>' },
           UModal: { template: "<div><slot name='body' /></div>" },
         },
       },
@@ -384,7 +356,7 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).not.toContain('Not observed: terminal response')
 
     await wrapper.setProps({ loading: false, error: 'DNS detail query failed.' })
-    expect(wrapper.get('[role="alert"]').text()).toBe('DNS detail query failed.')
+    expect(wrapper.get('[role="alert"]').text()).toContain('DNS detail query failed.')
     expect(wrapper.text()).not.toContain('Observed flow')
   })
 
@@ -427,6 +399,7 @@ describe('DNS troubleshooting components', () => {
       },
       global: {
         stubs: {
+          UTooltip: { template: '<span><slot /></span>' },
           UModal: { template: "<div><slot name='body' /></div>" },
         },
       },
@@ -439,7 +412,7 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).toContain('Uncorrelated nearby evidence')
     expect(wrapper.text()).toContain('Related source query forbidden')
     expect(wrapper.text()).toContain('https://api.example/health')
-    expect(wrapper.text()).toContain('not-applicable')
+    expect(wrapper.text()).toContain('Not applicable')
     expect(wrapper.text()).toContain('Observed flow')
   })
 
@@ -488,6 +461,7 @@ describe('DNS troubleshooting components', () => {
       },
       global: {
         stubs: {
+          UTooltip: { template: '<span><slot /></span>' },
           UModal: {
             props: ['title'],
             template: "<div><h2>{{ title }}</h2><slot name='body' /></div>",

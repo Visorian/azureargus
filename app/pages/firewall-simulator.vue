@@ -1,29 +1,34 @@
 <script setup lang="ts">
-import type {
-  FirewallSimulationResult,
-  FirewallSnapshot,
-  FirewallTrafficErrors,
-  SimulatorTraffic,
-} from '#shared/types/firewallSimulator'
-import {
-  buildFirewallProcessingPlan,
-  exportFirewallSnapshot,
-  simulateFirewallTraffic,
-  validateFirewallTraffic,
-} from '#shared/utils/firewallSimulator'
+import type { FirewallSnapshot, SimulatorTraffic } from '#shared/types/firewallSimulator'
 
 defineOptions({ name: 'FirewallSimulatorPage' })
 definePageMeta({ layout: 'application' })
 useHead({ title: 'Rule simulator | Azure Argus' })
 
-const snapshot = shallowRef<FirewallSnapshot | null>(null)
-const sourceLabel = ref('')
-const sourceOpen = ref(true)
-const policyId = ref('')
-const result = shallowRef<FirewallSimulationResult | null>(null)
-const lastError = ref<string | null>(null)
-const validationAttempted = ref(false)
-const resultNeedsUpdate = ref(false)
+const {
+  snapshot,
+  sourceLabel,
+  sourceOpen,
+  policyId,
+  result,
+  lastError,
+  resultNeedsUpdate,
+  traffic,
+  portValue,
+  fieldErrors,
+  policyOptions,
+  plan,
+  configurationIssues,
+  warnings,
+  resultNotes,
+  resultSummary,
+  applicationRequest,
+  resultNeedsConfiguration,
+  resultPresentation,
+  loadSnapshot: setSnapshot,
+  simulate: evaluate,
+  downloadSnapshot,
+} = useFirewallSimulator()
 const policyMenuOpen = ref(false)
 const protocolMenuOpen = ref(false)
 const applicationMenuOpen = ref(false)
@@ -38,7 +43,7 @@ const connectionHeading = useTemplateRef<HTMLHeadingElement>('connectionHeading'
 const resultHeading = useTemplateRef<HTMLHeadingElement>('resultHeading')
 const resultPanel = useTemplateRef<HTMLElement>('resultPanel')
 const incompleteHeading = useTemplateRef<HTMLHeadingElement>('incompleteHeading')
-const configurationActions = useTemplateRef<HTMLDivElement>('configurationActions')
+const configurationToggle = useTemplateRef<{ $el: HTMLButtonElement }>('configurationToggle')
 const viewport = useTemplateRef<HTMLDivElement>('viewport')
 let savedScrollTop = 0
 onBeforeRouteLeave(() => {
@@ -50,121 +55,9 @@ onActivated(async () => {
 })
 const sourceComponent = useTemplateRef<{ focusImport: () => Promise<void> }>('sourceComponent')
 const processingList = useTemplateRef<{ focusDecision: () => Promise<void> }>('processingList')
-const defaultTraffic: SimulatorTraffic = {
-  sourceIp: '',
-  destinationIp: '',
-  destinationPort: '443',
-  protocol: 'TCP',
-  applicationProtocol: 'None',
-  targetFqdn: '',
-  direction: 'outbound',
-}
-const traffic = reactive<SimulatorTraffic>({ ...defaultTraffic })
-const portValue = computed({
-  get: () => (traffic.protocol === 'ICMP' ? '' : traffic.destinationPort),
-  set: (value: string) => {
-    traffic.destinationPort = value
-  },
-})
-const fieldErrors = computed<FirewallTrafficErrors>(() =>
-  validationAttempted.value ? validateFirewallTraffic(traffic) : {},
-)
-const policyOptions = computed(() => {
-  const policies = snapshot.value?.policies ?? []
-  return policies.map((policy) => {
-    const duplicate = policies.some(
-      (other) => other.id !== policy.id && other.name.toLowerCase() === policy.name.toLowerCase(),
-    )
-    const parts = policy.id.split('/')
-    const context = parts[4] ? `${parts[4]}, ${parts[2]}` : policy.id
-    return { label: duplicate ? `${policy.name} (${context})` : policy.name, value: policy.id }
-  })
-})
-const plan = computed(() =>
-  snapshot.value && policyId.value
-    ? buildFirewallProcessingPlan(snapshot.value, policyId.value)
-    : null,
-)
-const configurationIssues = computed(() => [
-  ...(plan.value?.incompleteReasons ?? []),
-  ...(plan.value?.missingIpGroupIds.map(
-    (id) => `IP group ${id} is missing. Get export command includes referenced IP groups.`,
-  ) ?? []),
-])
-const warnings = computed(() =>
-  [...new Set([...(plan.value?.warnings ?? []), ...(result.value?.warnings ?? [])])].filter(
-    (warning) => !plan.value?.incompleteReasons.includes(warning),
-  ),
-)
-const resultNotes = computed(() => {
-  if (result.value?.cause === 'incomplete-policy') {
-    return plan.value?.incompleteReasons.slice(1) ?? []
-  }
-  if (result.value?.cause === 'unresolved-rule') {
-    return [
-      ...new Set(
-        result.value.trace
-          .filter((entry) => entry.status === 'unknown')
-          .map((entry) => entry.reason),
-      ),
-    ].slice(1)
-  }
-  return []
-})
-const applicationRequest = computed(
-  () => traffic.protocol === 'TCP' && traffic.applicationProtocol !== 'None',
-)
-const resultNeedsConfiguration = computed(
-  () =>
-    result.value?.cause === 'incomplete-policy' ||
-    (result.value?.cause === 'unresolved-rule' && (plan.value?.missingIpGroupIds.length ?? 0) > 0),
-)
-const resultClass = computed(() => {
-  if (result.value?.verdict === 'Indeterminate') {
-    return 'border-warning/40 bg-warning/5'
-  }
-  if (result.value?.verdict === 'Deny') {
-    return 'border-error/40 bg-error/5'
-  }
-  return 'border-success/40 bg-success/5'
-})
-const resultLabel = computed(() => {
-  const decision = result.value
-  if (!decision) {
-    return ''
-  }
-  if (decision.verdict === 'Indeterminate') {
-    return 'Indeterminate'
-  }
-  if (decision.verdict === 'Deny' && !decision.trace.some((entry) => entry.status === 'match')) {
-    return 'Deny (default)'
-  }
-  if (decision.verdict === 'DNAT') {
-    return 'Allow and translate (DNAT)'
-  }
-  return `${decision.verdict} by configured rules`
-})
-const resultIcon = computed(() => {
-  if (result.value?.verdict === 'Indeterminate') {
-    return 'i-lucide-circle-help'
-  }
-  if (result.value?.verdict === 'Deny') {
-    return 'i-lucide-circle-x'
-  }
-  return 'i-lucide-circle-check'
-})
 
 async function loadSnapshot(value: FirewallSnapshot, label: string, preset?: SimulatorTraffic) {
-  snapshot.value = value
-  sourceLabel.value = label
-  const child = value.policies.find((policy) => policy.basePolicyId)
-  policyId.value = child?.id ?? value.policies[0]?.id ?? ''
-  result.value = null
-  lastError.value = null
-  validationAttempted.value = false
-  resultNeedsUpdate.value = false
-  sourceOpen.value = false
-  Object.assign(traffic, preset ?? defaultTraffic)
+  setSnapshot(value, label, preset)
   await nextTick()
   if (configurationIssues.value.length > 0) {
     incompleteHeading.value?.focus()
@@ -173,41 +66,14 @@ async function loadSnapshot(value: FirewallSnapshot, label: string, preset?: Sim
   }
 }
 
-watch([policyId, traffic], () => {
-  if (result.value) {
-    resultNeedsUpdate.value = true
-  }
-  result.value = null
-  lastError.value = null
-})
-watch(
-  () => traffic.protocol,
-  (protocol) => {
-    if (protocol !== 'TCP') {
-      traffic.applicationProtocol = 'None'
-    }
-  },
-)
-
 async function simulate() {
-  lastError.value = null
-  if (!snapshot.value || !plan.value) {
-    return
-  }
-  validationAttempted.value = true
+  evaluate()
+  await nextTick()
   if (Object.keys(fieldErrors.value).length > 0) {
-    await nextTick()
     connectionForm.value?.querySelector<HTMLInputElement>('input[aria-invalid="true"]')?.focus()
-    return
-  }
-  try {
-    result.value = simulateFirewallTraffic(snapshot.value, plan.value, traffic)
-    resultNeedsUpdate.value = false
-    await nextTick()
+  } else if (result.value) {
     resultHeading.value?.focus({ preventScroll: true })
     resultPanel.value?.scrollIntoView({ behavior: 'instant', block: 'nearest' })
-  } catch (error: unknown) {
-    lastError.value = error instanceof Error ? error.message : 'Could not simulate this connection.'
   }
 }
 
@@ -220,25 +86,7 @@ async function reviewConfiguration() {
 async function hideImportOptions() {
   sourceOpen.value = false
   await nextTick()
-  configurationActions.value
-    ?.querySelector<HTMLButtonElement>('button[data-import-configuration]')
-    ?.focus()
-}
-
-function downloadSnapshot() {
-  if (!snapshot.value) {
-    return
-  }
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(exportFirewallSnapshot(snapshot.value), null, 2)], {
-      type: 'application/json',
-    }),
-  )
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'firewall-configuration.json'
-  link.click()
-  URL.revokeObjectURL(url)
+  configurationToggle.value?.$el.focus()
 }
 </script>
 
@@ -247,7 +95,7 @@ function downloadSnapshot() {
     ref="viewport"
     class="firewall-simulator touch-fields relative h-full overflow-y-auto bg-default text-default"
   >
-    <div class="mx-auto max-w-400 space-y-6 p-4 pb-8 sm:p-6">
+    <div class="simulator-page">
       <header class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 class="text-2xl font-semibold tracking-tight">Firewall rule simulator</h1>
@@ -255,35 +103,12 @@ function downloadSnapshot() {
             Test a connection and see which policy rule decides its outcome.
           </p>
         </div>
-        <div
-          v-if="snapshot"
-          ref="configurationActions"
-          class="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap"
-        >
-          <UButton
-            icon="i-lucide-upload"
-            variant="outline"
-            class="min-h-11 justify-center"
-            aria-controls="simulator-source"
-            data-import-configuration
-            @click="reviewConfiguration"
-            >Import another configuration</UButton
-          >
-          <UButton
-            icon="i-lucide-download"
-            variant="outline"
-            color="neutral"
-            class="min-h-11 justify-center"
-            @click="downloadSnapshot"
-            >Download snapshot</UButton
-          >
-        </div>
       </header>
 
       <section class="rounded-lg border border-default" aria-label="Configuration">
-        <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div class="simulator-source-header px-4 py-3">
           <div class="min-w-0 flex-1">
-            <h2 class="font-semibold">
+            <h2 class="text-lg font-semibold">
               {{ snapshot ? 'Configuration source' : 'Load a configuration' }}
             </h2>
             <p
@@ -297,21 +122,36 @@ function downloadSnapshot() {
               Import your policies, or use the example to try an inherited policy and IP groups.
             </p>
           </div>
-          <UButton
-            v-if="snapshot && sourceOpen"
-            color="neutral"
-            variant="ghost"
-            icon="i-lucide-chevron-up"
-            class="min-h-11"
-            aria-label="Hide import options"
-            aria-controls="simulator-source"
-            @click="hideImportOptions"
-            ><span class="sm:hidden">Hide</span>
-            <span class="hidden sm:inline">Hide import options</span>
-          </UButton>
+          <div v-if="snapshot" class="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <UButton
+              ref="configurationToggle"
+              color="neutral"
+              variant="outline"
+              :icon="sourceOpen ? 'i-lucide-chevron-up' : 'i-lucide-upload'"
+              :aria-expanded="sourceOpen"
+              aria-controls="simulator-source"
+              @click="sourceOpen ? hideImportOptions() : reviewConfiguration()"
+              >{{ sourceOpen ? 'Hide import options' : 'Import another configuration' }}</UButton
+            >
+            <UTooltip text="Download snapshot">
+              <UButton
+                icon="i-lucide-download"
+                variant="ghost"
+                color="neutral"
+                aria-label="Download snapshot"
+                @click="downloadSnapshot"
+              >
+                <span class="hidden sm:inline">Download snapshot</span>
+              </UButton>
+            </UTooltip>
+          </div>
         </div>
         <div v-show="sourceOpen" id="simulator-source" class="border-t border-default p-4">
-          <FirewallSimulatorSource ref="sourceComponent" @load="loadSnapshot" />
+          <FirewallSimulatorSource
+            ref="sourceComponent"
+            :has-configuration="Boolean(snapshot)"
+            @load="loadSnapshot"
+          />
         </div>
       </section>
 
@@ -319,17 +159,21 @@ function downloadSnapshot() {
         <section
           v-if="configurationIssues.length"
           aria-labelledby="incomplete-heading"
-          class="space-y-3 rounded-lg border border-warning/40 p-4 [overflow-wrap:anywhere]"
+          class="status-panel space-y-3"
+          data-tone="warning"
         >
-          <h2 id="incomplete-heading" ref="incompleteHeading" tabindex="-1" class="font-semibold">
+          <h2
+            id="incomplete-heading"
+            ref="incompleteHeading"
+            tabindex="-1"
+            class="status-heading flex items-center gap-2 text-lg font-semibold"
+          >
+            <UIcon name="i-lucide-triangle-alert" class="size-5 shrink-0" />
             Configuration is incomplete
           </h2>
           <ul class="list-disc space-y-2 pl-5 text-sm">
             <li v-for="reason in configurationIssues" :key="reason">{{ reason }}</li>
           </ul>
-          <UButton color="neutral" variant="outline" class="min-h-11" @click="reviewConfiguration">
-            Review configuration
-          </UButton>
         </section>
         <section aria-labelledby="connection-heading" class="space-y-4">
           <div class="flex flex-wrap items-end justify-between gap-4">
@@ -354,7 +198,6 @@ function downloadSnapshot() {
                 v-model="policyId"
                 :items="policyOptions"
                 class="w-full"
-                :ui="{ base: 'min-h-11' }"
               />
             </UFormField>
           </div>
@@ -386,8 +229,7 @@ function downloadSnapshot() {
                   :spellcheck="false"
                   autocapitalize="off"
                   autocomplete="off"
-                  class="w-full"
-                  :ui="{ base: 'min-h-11' }"
+                  class="simulator-identifiers w-full"
                 />
               </UFormField>
               <UFormField
@@ -405,8 +247,7 @@ function downloadSnapshot() {
                   :spellcheck="false"
                   autocapitalize="off"
                   autocomplete="off"
-                  class="w-full"
-                  :ui="{ base: 'min-h-11' }"
+                  class="simulator-identifiers w-full"
                 />
               </UFormField>
               <UFormField label="IP protocol" name="simulator-protocol">
@@ -416,7 +257,6 @@ function downloadSnapshot() {
                   v-model="traffic.protocol"
                   :items="['TCP', 'UDP', 'ICMP']"
                   class="w-full"
-                  :ui="{ base: 'min-h-11' }"
                 />
               </UFormField>
               <UFormField
@@ -433,8 +273,7 @@ function downloadSnapshot() {
                   inputmode="numeric"
                   :disabled="traffic.protocol === 'ICMP'"
                   :required="traffic.protocol !== 'ICMP'"
-                  class="w-full"
-                  :ui="{ base: 'min-h-11' }"
+                  class="simulator-identifiers w-full"
                 />
               </UFormField>
               <UFormField
@@ -451,7 +290,6 @@ function downloadSnapshot() {
                     { label: 'Inbound', value: 'inbound' },
                   ]"
                   class="w-full"
-                  :ui="{ base: 'min-h-11' }"
                 />
               </UFormField>
               <UFormField
@@ -471,7 +309,6 @@ function downloadSnapshot() {
                     { label: 'MSSQL', value: 'Mssql' },
                   ]"
                   class="w-full"
-                  :ui="{ base: 'min-h-11' }"
                 />
               </UFormField>
               <UFormField
@@ -491,8 +328,7 @@ function downloadSnapshot() {
                   :spellcheck="false"
                   autocapitalize="off"
                   autocomplete="off"
-                  class="w-full"
-                  :ui="{ base: 'min-h-11' }"
+                  class="simulator-identifiers w-full"
                 />
               </UFormField>
               <p
@@ -503,7 +339,7 @@ function downloadSnapshot() {
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <UButton type="submit" icon="i-lucide-play" class="min-h-11 w-full sm:w-auto">
+              <UButton type="submit" icon="i-lucide-play" class="w-full sm:w-auto">
                 Simulate connection
               </UButton>
               <p
@@ -520,7 +356,12 @@ function downloadSnapshot() {
               </p>
             </div>
           </form>
-          <UAlert v-if="lastError" color="error" variant="subtle" :title="lastError" role="alert" />
+          <AppNotice
+            v-if="lastError"
+            tone="error"
+            title="Simulation failed"
+            :description="lastError"
+          />
 
           <section
             v-if="result"
@@ -528,19 +369,28 @@ function downloadSnapshot() {
             role="status"
             aria-live="polite"
             aria-labelledby="simulation-result"
-            class="space-y-3 rounded-lg border p-4 sm:p-5"
-            :class="resultClass"
+            class="status-panel simulator-result space-y-3"
+            :data-tone="resultPresentation.tone"
           >
             <div class="flex items-start gap-3">
-              <UIcon :name="resultIcon" class="mt-0.5 size-5 shrink-0" />
+              <UIcon
+                :name="
+                  result.verdict === 'Indeterminate'
+                    ? 'i-lucide-circle-help'
+                    : result.verdict === 'Deny'
+                      ? 'i-lucide-circle-x'
+                      : 'i-lucide-circle-check'
+                "
+                class="status-heading mt-0.5 size-5 shrink-0"
+              />
               <div class="min-w-0 flex-1 space-y-2">
                 <h2
                   id="simulation-result"
                   ref="resultHeading"
                   tabindex="-1"
-                  class="text-lg font-semibold"
+                  class="status-heading text-lg font-semibold"
                 >
-                  {{ resultLabel }}
+                  {{ resultPresentation.label }}
                 </h2>
                 <p class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
                   <span class="sr-only">Connection from</span>
@@ -557,7 +407,13 @@ function downloadSnapshot() {
                   {{ traffic.applicationProtocol.toUpperCase() }} host:
                   <code>{{ traffic.targetFqdn || 'Not provided' }}</code>
                 </p>
-                <p class="text-sm [overflow-wrap:anywhere]">{{ result.summary }}</p>
+                <p class="text-sm [overflow-wrap:anywhere]">
+                  {{
+                    result.cause === 'incomplete-policy'
+                      ? 'The incomplete configuration above prevents a conclusive result.'
+                      : resultSummary
+                  }}
+                </p>
                 <ul v-if="resultNotes.length" class="list-disc space-y-1 pl-4 text-sm">
                   <li v-for="reason in resultNotes" :key="reason">{{ reason }}</li>
                 </ul>
@@ -570,7 +426,6 @@ function downloadSnapshot() {
                     color="neutral"
                     variant="outline"
                     icon="i-lucide-list-filter"
-                    class="min-h-11"
                     @click="processingList?.focusDecision()"
                     >Inspect evaluation</UButton
                   >
@@ -579,7 +434,6 @@ function downloadSnapshot() {
                     color="neutral"
                     variant="outline"
                     icon="i-lucide-folder-open"
-                    class="min-h-11"
                     @click="reviewConfiguration"
                   >
                     Review configuration
@@ -605,38 +459,35 @@ function downloadSnapshot() {
               first. Lower group and collection priorities run first in their scope.
             </p>
           </div>
-          <details
+          <AppDisclosure
             v-if="warnings.length"
             :open="!plan.complete || result?.verdict === 'Indeterminate'"
-            class="rounded-md border border-warning/40 px-3 text-sm"
+            :title="`Evaluation notes (${warnings.length})`"
           >
-            <summary class="min-h-11 cursor-pointer py-3 font-medium">
-              Evaluation notes ({{ warnings.length }})
-            </summary>
-            <ul class="list-disc space-y-2 pb-3 pl-5 text-muted">
+            <ul class="list-disc space-y-2 pl-5 text-muted">
               <li v-for="warning in warnings" :key="warning">{{ warning }}</li>
             </ul>
-          </details>
+          </AppDisclosure>
           <FirewallProcessingList
             ref="processingList"
             :snapshot="snapshot"
             :plan="plan"
             :result="result"
           />
-          <details v-if="snapshot.ipGroups.length" class="border-t border-default pt-2">
-            <summary class="min-h-11 cursor-pointer py-3 text-sm font-semibold">
-              Resolved IP groups ({{ snapshot.ipGroups.length }})
-            </summary>
-            <dl class="grid gap-4 py-3 text-sm sm:grid-cols-2">
+          <AppDisclosure
+            v-if="snapshot.ipGroups.length"
+            :title="`Resolved IP groups (${snapshot.ipGroups.length})`"
+          >
+            <dl class="grid gap-4 text-sm sm:grid-cols-2">
               <div v-for="group in snapshot.ipGroups" :key="group.id" class="min-w-0">
                 <dt class="font-medium">{{ group.name }}</dt>
-                <dd class="mt-1 break-words">
+                <dd class="mt-1 font-mono break-words">
                   {{ group.addresses.join(', ') || 'Empty: referencing rules are skipped' }}
                 </dd>
-                <dd class="mt-1 text-xs break-all text-muted">{{ group.id }}</dd>
+                <dd class="mt-1 font-mono text-xs break-all text-muted">{{ group.id }}</dd>
               </div>
             </dl>
-          </details>
+          </AppDisclosure>
         </section>
       </template>
 
@@ -671,16 +522,3 @@ function downloadSnapshot() {
     </div>
   </div>
 </template>
-
-<style scoped>
-.firewall-simulator {
-  --ui-success: var(--color-brand-turquoise-700);
-  --ui-error: var(--color-brand-pink-700);
-  --ui-warning: var(--color-brand-orange-700);
-}
-:global(.dark .firewall-simulator) {
-  --ui-success: var(--color-brand-turquoise-300);
-  --ui-error: var(--color-brand-pink-300);
-  --ui-warning: var(--color-brand-orange-300);
-}
-</style>

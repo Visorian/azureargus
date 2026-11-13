@@ -14,6 +14,10 @@ export interface FirewallExportCommandOptions {
   output: 'file' | 'text'
 }
 
+export function firewallExportNameError(value: string): string | undefined {
+  return WILDCARDS.test(value) ? 'Enter an exact name. Wildcards are not supported.' : undefined
+}
+
 export function firewallExportSelectionError(
   options: FirewallExportCommandOptions,
 ): string | undefined {

@@ -22,11 +22,34 @@ test('application routes keep the Azure Argus title without loading the redirect
   expect(redirectBridgeRequests).toEqual([])
 })
 
-test('redirect page processes the tenant consent response', async ({ page }) => {
-  await page.goto('/log-analytics-redirect.html?state=azure-argus-admin-consent&admin_consent=true')
+for (const outcome of [
+  { granted: true, preference: 'dark', system: 'light', title: 'Tenant consent granted' },
+  { granted: false, preference: 'light', system: 'dark', title: 'Tenant consent not granted' },
+] as const) {
+  test(`redirect page shows ${outcome.title.toLowerCase()} with the saved appearance`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: outcome.system })
+    await page.addInitScript((preference) => {
+      localStorage.setItem('nuxt-color-mode', preference)
+    }, outcome.preference)
+    await page.goto(
+      `/log-analytics-redirect.html?state=azure-argus-admin-consent&admin_consent=${outcome.granted}`,
+    )
 
-  await expect(page).toHaveTitle('Tenant consent granted')
-  await expect(
-    page.getByText('Tenant consent granted. Return to Azure Argus to continue.'),
-  ).toBeVisible()
-})
+    await expect(page).toHaveTitle(outcome.title)
+    await expect(page.getByRole('heading', { name: outcome.title })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Return to Azure Argus' })).toHaveAttribute(
+      'href',
+      '/logs',
+    )
+    expect(
+      await page
+        .locator('html')
+        .evaluate(
+          (element, preference) => element.classList.contains(preference),
+          outcome.preference,
+        ),
+    ).toBe(true)
+  })
+}

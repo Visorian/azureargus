@@ -16,9 +16,11 @@ const browserProjects = browserExecutablePath
           alias,
         },
         test: {
+          attachmentsDir: '.playwright-cli',
           browser: {
             enabled: true,
             headless: true,
+            screenshotDirectory: '.playwright-cli',
             instances: [{ browser: 'chromium' as const }],
             provider: playwright({
               launchOptions: { executablePath: browserExecutablePath },

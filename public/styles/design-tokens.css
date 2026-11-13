@@ -1,0 +1,188 @@
+:root {
+  color-scheme: light dark;
+  --argus-gray-50: #f6f7f9;
+  --argus-gray-100: #eceff3;
+  --argus-gray-200: #dbdfe6;
+  --argus-gray-300: #b8c0cc;
+  --argus-gray-400: hsl(218, 13%, 61%);
+  --argus-gray-500: #6e788c;
+  --argus-gray-600: #555f72;
+  --argus-gray-700: hsl(221, 17%, 31%);
+  --argus-gray-800: #2f3646;
+  --argus-gray-900: #1f2533;
+  --argus-gray-950: #121621;
+  --argus-blue-50: hsl(212, 100%, 96%);
+  --argus-blue-100: hsl(214, 100%, 93%);
+  --argus-blue-200: hsl(215, 100%, 88%);
+  --argus-blue-300: hsl(217, 100%, 80%);
+  --argus-blue-400: hsl(223, 100%, 72%);
+  --argus-blue-500: hsl(215, 89%, 54%);
+  --argus-blue-600: hsl(232, 94%, 59%);
+  --argus-blue-700: hsl(233, 72%, 51%);
+  --argus-blue-800: hsl(232, 68%, 41%);
+  --argus-blue-900: hsl(231, 59%, 34%);
+  --argus-blue-950: hsl(233, 59%, 19%);
+  --app-page: light-dark(#ffffff, var(--argus-gray-950));
+  --app-chrome: light-dark(var(--argus-gray-50), var(--argus-gray-900));
+  --app-table-header: light-dark(var(--argus-gray-100), var(--argus-gray-900));
+  --app-border: light-dark(var(--argus-gray-200), var(--argus-gray-800));
+  --app-control-border: var(--argus-gray-500);
+  --app-text: light-dark(var(--argus-gray-950), var(--argus-gray-50));
+  --app-muted: light-dark(var(--argus-gray-600), var(--argus-gray-300));
+  --app-primary: light-dark(var(--argus-blue-600), var(--argus-blue-400));
+  --app-on-primary: light-dark(#ffffff, var(--argus-gray-950));
+  --app-success: light-dark(#15803d, #4ade80);
+  --app-error: light-dark(#b91c1c, #f87171);
+  --app-warning: light-dark(#b45309, #fcd34d);
+  --app-switch-active: #1f72e6;
+  --app-radius: 6px;
+}
+
+:root.light {
+  color-scheme: light;
+}
+:root.dark {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--app-page);
+  color: var(--app-text);
+}
+
+.status-page {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 24px;
+  padding: 64px 16px 32px;
+  font:
+    14px/1.5 system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+
+.status-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-page);
+  color: var(--app-text);
+}
+
+.status-card-header,
+.status-card-body,
+.status-card-actions {
+  padding: 16px;
+}
+
+.status-card-header + .status-card-body,
+.status-card-actions {
+  border-top: 1px solid var(--app-border);
+}
+
+.status-card-title,
+.auth-callback h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.status-card-description,
+.auth-callback p {
+  margin: 8px 0 0;
+  color: var(--app-muted);
+}
+
+.status-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-page-theme {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.status-error-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  list-style: disc;
+  display: grid;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.auth-callback {
+  margin: 0;
+}
+.callback-return {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  justify-content: center;
+  padding: 7px 12px;
+  line-height: 20px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--app-primary);
+  color: var(--app-on-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.callback-return:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+}
+
+.status-retry-feedback {
+  margin-top: 12px;
+}
+.callback-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.callback-status[data-state='success'] {
+  color: var(--app-success);
+}
+.callback-status[data-state='error'] {
+  color: var(--app-error);
+}
+.callback-status[data-state='pending'] {
+  color: var(--app-muted);
+}
+@media (forced-colors: active) {
+  .callback-return {
+    border-color: ButtonText;
+  }
+}
+
+.callback-status svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+@media (width < 64rem), (pointer: coarse) {
+  .callback-return {
+    min-height: 44px;
+  }
+}

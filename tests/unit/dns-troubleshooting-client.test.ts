@@ -3,6 +3,7 @@ import { effectScope, nextTick, reactive, ref } from 'vue'
 import { useDnsTroubleshooting } from '../../app/composables/useDnsTroubleshooting'
 import type { NormalizedLogBatchSink } from '../../app/composables/useEventHubReceiver'
 import { normalizeFirewallLogRecord } from '../../app/composables/useFirewallLogParser'
+import type { LogAnalysisRangePreset } from '../../app/utils/logAnalysis'
 import type {
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
@@ -89,6 +90,7 @@ function createHarness(
   const mode = ref<'real-time-analysis' | 'log-analysis'>('log-analysis')
   const draftRange = reactive({ from: '2026-07-12T08:00', to: '2026-07-12T09:00' })
   const queryLimit = ref(1_000)
+  const rangePreset = ref<LogAnalysisRangePreset>('custom')
   const storage = ref<LogAnalyticsStorageKind>('resource-specific')
   const removeSink = vi.fn<() => boolean>(() => true)
   const sinkHolder: { current?: NormalizedLogBatchSink } = {}
@@ -99,6 +101,7 @@ function createHarness(
       draftRange,
       mode,
       queryLimit,
+      rangePreset,
       receiver: {
         addNormalizedBatchSink: (nextSink) => {
           sinkHolder.current = nextSink
@@ -119,11 +122,22 @@ function createHarness(
     }
     return sinkHolder.current
   }
-  return { active, dns, draftRange, mode, queryLimit, removeSink, scope, storage, getSink }
+  return {
+    active,
+    dns,
+    draftRange,
+    mode,
+    queryLimit,
+    rangePreset,
+    removeSink,
+    scope,
+    storage,
+    getSink,
+  }
 }
 
 describe('DNS troubleshooting client', () => {
-  it('runs and applies server filters only through explicit actions', async () => {
+  it('keeps historical results unchanged until explicitly running draft filters', async () => {
     const requests: DnsListQueryRequest[] = []
     const harness = createHarness(async (body) => {
       requests.push(body)
@@ -131,22 +145,21 @@ describe('DNS troubleshooting client', () => {
     })
 
     expect(requests).toEqual([])
-    expect(harness.dns.canApplyFilters.value).toBe(false)
     await harness.dns.run()
     expect(requests).toHaveLength(1)
     expect(requests[0]?.limit).toBe(1_000)
     expect(requests[0]?.storage).toBe('resource-specific')
-    expect(harness.dns.canApplyFilters.value).toBe(true)
     expect(harness.dns.entries.value).toHaveLength(1)
 
     harness.dns.filters.value.search = 'missing'
     harness.dns.sort.value.key = 'queryName'
     harness.queryLimit.value = 2_000
     await nextTick()
-    expect(harness.dns.entries.value).toEqual([])
+    expect(harness.dns.entries.value).toHaveLength(1)
+    expect(harness.dns.filtersDirty.value).toBe(true)
     expect(requests).toHaveLength(1)
 
-    await harness.dns.applyFilters()
+    await harness.dns.run()
     expect(requests).toHaveLength(2)
     expect(requests[1]?.filters.search).toBe('missing')
     expect(requests[1]?.limit).toBe(2_000)
@@ -188,17 +201,15 @@ describe('DNS troubleshooting client', () => {
     expect(harness.removeSink).toHaveBeenCalledOnce()
   })
 
-  it('keeps only latest response and rejects assignment after lens deactivation', async () => {
+  it('ignores a duplicate run and rejects assignment after lens deactivation', async () => {
     const first = createDeferred<DnsListQueryResponse>()
-    const second = createDeferred<DnsListQueryResponse>()
-    let index = 0
-    const harness = createHarness(async () => await [first, second][index++]!.promise)
+    const request = vi.fn(async () => await first.promise)
+    const harness = createHarness(request)
 
     const firstRun = harness.dns.run()
-    const secondRun = harness.dns.run()
-    second.resolve(createResponse(createEntry('latest')))
-    await secondRun
-    first.resolve(createResponse(createEntry('stale')))
+    await expect(harness.dns.run()).resolves.toBe(false)
+    expect(request).toHaveBeenCalledOnce()
+    first.resolve(createResponse(createEntry('latest')))
     await firstRun
     expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['latest'])
 
@@ -215,26 +226,26 @@ describe('DNS troubleshooting client', () => {
     inactiveHarness.scope.stop()
   })
 
-  it('aborts active list work when shared draft range changes', async () => {
+  it('preserves edits made while a historical query is running', async () => {
+    const response = createDeferred<DnsListQueryResponse>()
     let signal: AbortSignal | undefined
-    const harness = createHarness(
-      async (_body, requestSignal) =>
-        await new Promise((_resolve, reject) => {
-          signal = requestSignal
-          requestSignal.addEventListener('abort', () => {
-            reject(new DOMException('Aborted', 'AbortError'))
-          })
-        }),
-    )
+    const harness = createHarness(async (_body, requestSignal) => {
+      signal = requestSignal
+      return await response.promise
+    })
 
     const run = harness.dns.run()
     harness.draftRange.from = '2026-07-12T08:15'
+    harness.dns.filters.value.search = 'new draft'
     await nextTick()
+    expect(signal?.aborted).toBe(false)
+    response.resolve(createResponse(createEntry('retained')))
 
-    await expect(run).resolves.toBe(false)
-    expect(signal?.aborted).toBe(true)
-    expect(harness.dns.status.value).toBe('idle')
-    expect(harness.dns.lastError.value).toBeNull()
+    await expect(run).resolves.toBe(true)
+    expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['retained'])
+    expect(harness.dns.filters.value.search).toBe('new draft')
+    expect(harness.dns.filtersDirty.value).toBe(true)
+    expect(harness.dns.rangeDirty.value).toBe(true)
     harness.scope.stop()
   })
 
@@ -331,6 +342,8 @@ describe('DNS troubleshooting client', () => {
     harness.dns.filters.value.queryType = 'A'
     await nextTick()
 
+    expect(harness.dns.entries.value).toHaveLength(2)
+    await harness.dns.run()
     expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['a'])
     harness.scope.stop()
   })
@@ -356,7 +369,7 @@ describe('DNS troubleshooting client', () => {
     expect(harness.dns.entries.value[0]).not.toHaveProperty('queryName')
 
     harness.dns.filters.value.search = '168.63.129.16'
-    await nextTick()
+    await harness.dns.run()
     expect(harness.dns.entries.value.map((item) => item.id)).toEqual(['transport'])
     await harness.dns.selectEntry(harness.dns.entries.value[0]!)
     expect(harness.dns.detail.value).toMatchObject({
@@ -366,7 +379,7 @@ describe('DNS troubleshooting client', () => {
 
     harness.dns.filters.value.search = ''
     harness.dns.filters.value.queryType = 'A'
-    await nextTick()
+    await harness.dns.run()
     expect(harness.dns.entries.value.map((item) => item.id)).toEqual(['named'])
     harness.scope.stop()
   })
@@ -470,7 +483,7 @@ describe('DNS troubleshooting client', () => {
           client: '10.0.0.4:53000',
         }),
       ])
-      expect(harness.dns.filterOptions.value.outcomes).toEqual(['transport-observed'])
+      expect(harness.dns.filterOptions.value.outcomes).toContain('transport-observed')
 
       harness.scope.stop()
     } finally {

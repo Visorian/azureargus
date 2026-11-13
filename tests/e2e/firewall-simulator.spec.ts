@@ -5,6 +5,7 @@ import { FIREWALL_SIMULATOR_EXAMPLE } from '../../app/utils/firewallSimulatorExa
 import type { FirewallJsonObject } from '../../shared/types/firewallSimulator'
 import { mockTemporaryAzure } from './support/temporaryAzure'
 
+const COPY_COMMAND_PATTERN = /^Copy command/
 const policyScope =
   '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example/providers/Microsoft.Network/firewallPolicies'
 
@@ -216,7 +217,11 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
   await page.getByRole('button', { name: 'Import another configuration', exact: true }).click()
   await page.getByLabel('Configuration text', { exact: true }).fill('not JSON')
   await page.getByRole('button', { name: 'Load configuration', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('Expected JSON')
+  await expect(page.getByLabel('Configuration text', { exact: true })).toHaveAttribute(
+    'aria-invalid',
+    'true',
+  )
+  await expect(page.getByText('Expected JSON', { exact: false })).toBeVisible()
   await expect(page.getByLabel('Effective processing order')).toContainText('private-https')
 
   const downloadPromise = page.waitForEvent('download')
@@ -334,7 +339,9 @@ test('imports pasted JSON and multiple files, retains the loaded policy after in
   await page.getByRole('button', { name: 'Simulate connection', exact: true }).click()
   const result = page.getByRole('status')
   await expect(result.getByRole('heading', { name: 'Indeterminate', exact: true })).toBeVisible()
-  await expect(result).toContainText('Collection groups for p1 are incomplete.')
+  await expect(result).toContainText(
+    'The incomplete configuration above prevents a conclusive result.',
+  )
   await result.getByRole('button', { name: 'Review configuration', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Upload JSON files', exact: true })).toBeFocused()
 })
@@ -377,7 +384,7 @@ test('loads a live policy chain through Azure sign-in and resolves IP groups in 
     await route.fulfill({ headers, json: resource })
   })
   await page.goto('/firewall-simulator')
-  await page.getByRole('button', { name: 'Live Azure', exact: true }).click()
+  await page.getByRole('radio', { name: 'Live Azure', exact: true }).check()
   await page.getByRole('button', { name: 'Connect to Azure', exact: true }).click()
   await expect(page.getByText('temporary@example.com', { exact: true })).toBeVisible()
   await page
@@ -390,6 +397,51 @@ test('loads a live policy chain through Azure sign-in and resolves IP groups in 
   await expect(page.getByRole('status')).toContainText('private-https / allow-private-service')
   expect(readPaths).toContain(`${policyScope}/organization`.toLowerCase())
   expect(readPaths.filter((path) => path.includes('/ipgroups/'))).toHaveLength(2)
+})
+
+test('cancelling an Azure read restores focus to the read action', async ({ page }) => {
+  await mockTemporaryAzure(page)
+  const pendingRead = Promise.withResolvers<undefined>()
+  await page.route('https://management.azure.com/**', async (route) => {
+    if (route.request().method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-headers': 'authorization, content-type',
+          'access-control-allow-methods': 'GET, OPTIONS',
+        },
+      })
+      return
+    }
+    await pendingRead.promise
+    await route.abort()
+  })
+  await page.goto('/firewall-simulator')
+  await page.getByRole('radio', { name: 'Live Azure', exact: true }).check()
+  await page.getByRole('button', { name: 'Connect to Azure', exact: true }).click()
+  await expect(page.getByText('temporary@example.com', { exact: true })).toBeVisible()
+  await page
+    .getByLabel('Policy or firewall resource IDs', { exact: true })
+    .fill(`${policyScope}/workload`)
+  const read = page.getByRole('button', { name: 'Read Azure configuration', exact: true })
+  await expect(read).toBeEnabled()
+  await read.focus()
+  await page.keyboard.press('Enter')
+  try {
+    await expect(read).toHaveAttribute('aria-busy', 'true')
+    await expect(read).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(read).toHaveAttribute('aria-busy', 'true')
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(read).toBeFocused()
+    await expect(read).toBeEnabled()
+    await expect(
+      page.getByText('Reading policies, rule collections and IP groups…', { exact: true }),
+    ).toHaveCount(0)
+  } finally {
+    pendingRead.resolve(undefined)
+  }
 })
 
 test('configures and copies readable Cloud Shell commands from an accessible modal', async ({
@@ -406,7 +458,7 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
   const environment = dialog.getByLabel('Cloud Shell environment', { exact: true })
   await expect(environment).toContainText('Azure CLI in Bash')
   const command = dialog.getByLabel('Export command', { exact: true })
-  const copy = dialog.getByRole('button', { name: 'Copy command', exact: true })
+  const copy = dialog.getByRole('button', { name: COPY_COMMAND_PATTERN })
   await expect(copy).toBeDisabled()
   await expect(command).toHaveCount(0)
   await expect(
@@ -435,12 +487,16 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
       async () => await command.evaluate((element) => element.scrollHeight - element.clientHeight),
     )
     .toBeLessThanOrEqual(1)
-  await dialog.getByRole('button', { name: 'Copy command', exact: true }).click()
-  await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: COPY_COMMAND_PATTERN }).click()
+  await expect(copy).toHaveText('Copied')
+  await expect(dialog.getByRole('status').filter({ hasText: 'Copied to clipboard' })).toHaveText(
+    'Copied to clipboard',
+  )
+  await expect(copy).toBeEnabled()
   expect(await page.evaluate(async () => await navigator.clipboard.readText())).toBe(generated)
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Copied', exact: true })).toBeInViewport()
+  await expect(copy).toBeVisible()
+  await expect(copy).toBeInViewport()
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect
     .poll(
@@ -452,17 +508,59 @@ test('configures and copies readable Cloud Shell commands from an accessible mod
   await expect(
     dialog.getByRole('heading', { name: 'Export Azure Firewall configuration', exact: true }),
   ).toBeInViewport({ ratio: 1 })
+  const rejectClipboard = await page.evaluateHandle(() => {
+    const pending = Promise.withResolvers<undefined>()
+    Object.defineProperty(navigator.clipboard, 'writeText', {
+      configurable: true,
+      value: async () => {
+        await pending.promise
+      },
+    })
+    return () => {
+      pending.reject(new DOMException('Clipboard denied', 'NotAllowedError'))
+    }
+  })
+  try {
+    await copy.focus()
+    await page.keyboard.press('Enter')
+    await expect(copy).toHaveAttribute('aria-busy', 'true')
+    await expect(copy).toBeFocused()
+    await rejectClipboard.evaluate((reject) => {
+      reject()
+    })
+    const manualCopy = dialog.getByRole('alert').filter({ hasText: 'Copy the command manually' })
+    await expect(manualCopy).toBeVisible()
+    const selectCommand = manualCopy.getByRole('button', { name: 'Select command', exact: true })
+    await expect(selectCommand).toBeInViewport()
+    await expect(copy).toBeFocused()
+    await expect(copy).toHaveText('Copy command')
+    await expect(
+      page.getByText('Copy failed. Select the text and copy it manually.', { exact: true }),
+    ).toHaveCount(0)
+    await selectCommand.click()
+    await expect(command).toBeFocused()
+    expect(
+      await command.evaluate(
+        (element) =>
+          element instanceof HTMLTextAreaElement &&
+          element.selectionStart === 0 &&
+          element.selectionEnd === element.value.length,
+      ),
+    ).toBe(true)
+  } finally {
+    await rejectClipboard.dispose()
+  }
   await firewall.fill('')
   await expect(copy).toBeEnabled()
   await policy.fill('*')
   await expect(copy).toBeDisabled()
   await expect(
-    dialog.getByText('Enter exact firewall and policy names. Wildcards are not supported.', {
+    dialog.getByText('Enter an exact name. Wildcards are not supported.', {
       exact: true,
     }),
   ).toBeVisible()
   await expect(command).toHaveCount(0)
-  await expect(dialog.getByRole('status')).toContainText('Wildcards are not supported.')
+  await expect(policy).toHaveAttribute('aria-invalid', 'true')
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await expect(trigger).toBeFocused()

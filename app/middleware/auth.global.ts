@@ -18,8 +18,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return to.path === '/login' ? await navigateTo('/logs') : undefined
   }
 
+  await useAuthSessionReady().load()
   const { loggedIn } = useOidcAuth()
-  if (to.path === '/login' || to.meta['oidcAuth'] === false || loggedIn.value) {
+  if (to.path === '/login') {
+    return loggedIn.value ? await navigateTo('/logs') : undefined
+  }
+  if (to.meta['oidcAuth'] === false || loggedIn.value) {
     return
   }
 

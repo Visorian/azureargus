@@ -21,7 +21,9 @@ export async function mockManagedDeployment(
       contentType: 'application/json',
       json: {
         expireAt: Math.floor(Date.now() / 1_000) + 3_600,
-        name: 'Managed User',
+        canRefresh: false,
+        userName: 'Managed User',
+        claims: { preferred_username: 'managed@example.com' },
         provider: 'entra',
       },
     })

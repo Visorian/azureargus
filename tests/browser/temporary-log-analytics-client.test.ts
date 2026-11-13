@@ -7,14 +7,6 @@ import {
 import type { DnsDetailQueryRequest, DnsListQueryRequest } from '../../shared/types/dns'
 import type { LogAnalyticsQueryRequest } from '../../shared/types/logAnalytics'
 
-const [logsPageSource] = Object.values(
-  import.meta.glob<string>('../../app/pages/logs.vue', {
-    eager: true,
-    import: 'default',
-    query: '?raw',
-  }),
-)
-
 const tenantId = '11111111-1111-4111-8111-111111111111'
 const subscriptionId = '22222222-2222-4222-8222-222222222222'
 const workspaceId = '33333333-3333-4333-8333-333333333333'
@@ -171,15 +163,6 @@ test('temporary transport sends discovery and every query flow only to matching 
         call.path === `/v1/workspaces/${workspaceId}/query`,
     ),
   ).toBe(true)
-})
-
-test('temporary logs workspace has no delegated Nitro route wiring', () => {
-  expect(logsPageSource).not.toContain('/api/log-analytics/delegated-')
-  expect(logsPageSource).toContain('temporaryLogAnalyticsClient.discover(')
-  expect(logsPageSource).toContain('temporaryLogAnalyticsClient.query(')
-  expect(logsPageSource).toContain('temporaryLogAnalyticsClient.dnsReadiness(')
-  expect(logsPageSource).toContain('temporaryLogAnalyticsClient.dnsList(')
-  expect(logsPageSource).toContain('temporaryLogAnalyticsClient.dnsDetail(')
 })
 
 test('temporary transport rejects invalid tenant and workspace IDs before tokens or requests', async () => {

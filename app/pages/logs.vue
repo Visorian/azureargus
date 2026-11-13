@@ -1,2380 +1,471 @@
 <script setup lang="ts">
-import { useMediaQuery } from '@vueuse/core'
-import { RecycleScroller } from 'vue-virtual-scroller'
-
-import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
-import type {
-  DnsDetailQueryRequest,
-  DnsDetailQueryResponse,
-  DnsFilters,
-  DnsListQueryRequest,
-  DnsListQueryResponse,
-  DnsReadinessResponse,
-  DnsSort,
-} from '#shared/types/dns'
-import type { FirewallLogRecord, FirewallLogSortKey } from '#shared/types/firewall'
-import type { LogAnalyticsQueryResponse, LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
-import { hasDnsReadinessData } from '#shared/utils/dnsReadiness'
-import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from '#shared/utils/logAnalytics'
-import visorianNegative from '~/assets/img/visorian-negative.svg'
-import visorianPositive from '~/assets/img/visorian-positive.svg'
-import type { MobileQueryState } from '~/components/logs/LogAnalysisToolbar.vue'
-import type { AnalysisMode } from '~/composables/useAnalysisMode'
-import type { DnsReadinessTarget } from '~/composables/useDnsSourceReadiness'
-import type { EventHubConnectionForm } from '~/composables/useEventHubConnection'
-import { validateEventHubConnectionForm } from '~/composables/useEventHubConnection'
-import {
-  createDefaultLogFilters,
-  isLogCategoryFilterValueActive,
-  isLogFilterValueActive,
-  toggleLogCategoryFilterValue,
-  toggleLogFilterValue,
-} from '~/composables/useLogQuery'
-import { createDefaultLogSort } from '~/composables/useLogSorting'
-import { formatIcmpProtocol } from '~/utils/icmpProtocol'
-import { createDefaultLogAnalysisDateRange, LOG_ANALYSIS_CATEGORIES } from '~/utils/logAnalysis'
-import type { LogAnalysisDateRange } from '~/utils/logAnalysis'
-import { createLogAnalyticsAdminConsentUrl, isEntraId } from '~/utils/logAnalyticsOnboarding'
-import { createTemporaryLogAnalyticsClient } from '~/utils/temporaryLogAnalyticsClient.client'
-
-definePageMeta({
-  layout: 'application',
-})
-
-interface LogTableColumn {
-  key: FirewallLogSortKey
-  label: string
-}
-
-interface DetailField {
-  countryDestination?: string
-  label: string
-  value?: string
-  mono?: boolean
-  wide?: boolean
-}
-
-interface DetailSection {
-  fields: DetailField[]
-  title?: string
-}
-
-interface LogsEmptyState {
-  description: string
-  settingsActionLabel?: string
-  title: string
-}
-
-type QuickFilterKey =
-  | 'category'
-  | 'action'
-  | 'protocol'
-  | 'source'
-  | 'sourcePort'
-  | 'destination'
-  | 'destinationPort'
-type LogsLens = 'all-logs' | 'dns-troubleshooting'
-
+definePageMeta({ layout: 'application' })
 const {
-  browserTimeZone: logBrowserTimeZone,
-  formatTimestamp: formatLogTimestamp,
-  hourCycle: logHourCycle,
-  lastError: logTimeFormatError,
-  timeZone: logTimeZone,
-  use12Hour: use12HourTime,
-  useLocalTime,
-} = useLogTimeFormat()
-const logTableColumns = computed<LogTableColumn[]>(() => [
-  { key: 'timestamp', label: `Date (${logTimeZone.value})` },
-  { key: 'category', label: 'Category' },
-  { key: 'action', label: 'Action' },
-  { key: 'protocol', label: 'Protocol' },
-  { key: 'sourceIp', label: 'Source' },
-  { key: 'sourcePort', label: 'Src port' },
-  { key: 'destinationIp', label: 'Destination' },
-  { key: 'destinationPort', label: 'Dst port' },
-  { key: 'rule', label: 'Rule' },
-])
-const quickFilterButtonClass =
-  'inline-flex size-6 shrink-0 items-center justify-center rounded text-brand-gray-500 hover:bg-brand-gray-200 hover:text-brand-gray-900 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:text-brand-gray-400 dark:hover:bg-brand-gray-800 dark:hover:text-brand-gray-100'
-
-const runtimeConfig = useRuntimeConfig()
-const appConfig = useAppConfig()
-const deployment = useDeploymentCapabilities()
-const capabilities = computed(() => deployment.capabilities.value)
-const managedMode = computed(() => capabilities.value?.mode === 'managed')
-const eventHubSourceAvailable = computed(
-  () => capabilities.value?.mode === 'anonymous' || capabilities.value?.eventHubAvailable === true,
-)
-const logAnalyticsSourceAvailable = computed(() =>
-  capabilities.value?.mode === 'anonymous'
-    ? capabilities.value.temporaryLogAnalyticsAuthAvailable
-    : capabilities.value?.predefinedLogAnalyticsAvailable === true,
-)
-const versionNumber = appConfig.versionNumber
-const activeLens = ref<LogsLens>('all-logs')
-const isMobile = useMediaQuery('(max-width: 1023px)')
-const logToolbar = useTemplateRef('logToolbar')
-const dnsView = useTemplateRef('dnsView')
-const allLogsLensActive = computed(() => activeLens.value === 'all-logs')
-const receiver = useEventHubReceiver({ uiPublishingEnabled: allLogsLensActive })
-const logTableGridClass = computed(() =>
-  use12HourTime.value
-    ? 'grid-cols-[14rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]'
-    : 'grid-cols-[12rem_13rem_8rem_8rem_9rem_5.5rem_11rem_5.5rem_minmax(16rem,1fr)]',
-)
-const logTableMinWidthClass = computed(() => (use12HourTime.value ? 'min-w-360' : 'min-w-352'))
-const connectionForm = reactive<EventHubConnectionForm>(
-  createInitialEventHubConnectionForm(runtimeConfig.public.defaultLookbackMinutes),
-)
-const { enabled: rememberConnectionString, lastError: connectionStringPersistenceError } =
-  useEventHubConnectionPersistence(toRef(connectionForm, 'connectionString'), {
-    active: computed(() => capabilities.value?.mode === 'anonymous'),
-  })
-const connecting = ref(false)
-const eventHubConnectionActive = computed(
-  () =>
-    receiver.status.value === 'connected' ||
-    receiver.status.value === 'reconnecting' ||
-    receiver.status.value === 'paused',
-)
-const settingsOpen = ref(false)
-let settingsReturnTarget: HTMLElement | null = null
-const detailOpen = ref(false)
-const selectedLog = ref<FirewallLogRecord | null>(null)
-const toast = useToast()
-const requestFetch = useRequestFetch()
-const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth()
-const temporaryLogAnalyticsClient = createTemporaryLogAnalyticsClient({
-  getLogAnalyticsAccessToken: temporaryLogAnalyticsAuth.getAccessToken,
-  getManagementAccessToken: temporaryLogAnalyticsAuth.getManagementAccessToken,
-})
-const temporaryTenantId = ref('')
-const temporaryWorkspaceId = ref('')
-const temporaryTenants = ref<AzureAccessibleTenant[]>([])
-const temporaryWorkspaces = ref<AzureAccessibleWorkspace[]>([])
-const temporaryAzureUsername = ref('')
-const temporaryLogAnalyticsAuthorizing = ref(false)
-const temporaryAccessStatus = ref<'idle' | 'loading' | 'success' | 'error'>('idle')
-const temporaryAccessError = ref<string | null>(null)
-let temporaryAccessGeneration = 0
-let temporaryAuthorizationGeneration = 0
-let temporaryAccessController: AbortController | null = null
-onScopeDispose(() => {
-  temporaryAccessController?.abort()
-  temporaryAccessController = null
-})
-const logHistory = useLogHistoryPersistence()
-const ipCountryLookup = useIpCountryLookup()
-watch(allLogsLensActive, (active) => ipCountryLookup.setActive(active), { immediate: true })
-const clearingLogHistory = ref(false)
-const logHistoryEnabled = computed(() => logHistory.enabled.value)
-const logHistoryError = computed(() => logHistory.lastError.value)
-const analysisMode = ref<AnalysisMode>('real-time-analysis')
-watch(
-  capabilities,
-  (current) => {
-    if (current?.mode === 'managed' && !current.eventHubAvailable) {
-      analysisMode.value = 'log-analysis'
-    }
-  },
-  { immediate: true, once: true },
-)
-const logAnalysisActive = computed(() => analysisMode.value === 'log-analysis')
-const allLogsRealTimeActive = computed(
-  () => !logAnalysisActive.value && activeLens.value === 'all-logs',
-)
-const allLogsLogAnalysisActive = computed(
-  () => logAnalysisActive.value && activeLens.value === 'all-logs',
-)
-const dnsLensActive = computed(() => activeLens.value === 'dns-troubleshooting')
-const canUseLogAnalysis = logAnalyticsSourceAvailable
-const logAnalyticsRequirement = computed(() => {
-  if (logAnalyticsSourceAvailable.value) {
-    return null
-  }
-  return managedMode.value
-    ? 'Log Analytics is not configured.'
-    : 'Temporary Log Analytics app registration is not configured.'
-})
-const temporaryLogAnalyticsMode = computed(() => capabilities.value?.mode === 'anonymous')
-const temporaryTenantValid = computed(() => isEntraId(temporaryTenantId.value))
-const temporaryWorkspaceValid = computed(() => isEntraId(temporaryWorkspaceId.value))
-const temporaryAdminConsentUrl = computed(() =>
-  import.meta.client
-    ? createLogAnalyticsAdminConsentUrl(
-        temporaryTenantId.value,
-        runtimeConfig.public.logAnalyticsDelegated.clientId,
-        globalThis.location.origin,
-      )
-    : null,
-)
-const canRunLogAnalytics = computed(
-  () =>
-    managedMode.value ||
-    (temporaryLogAnalyticsAuth.connected.value &&
-      temporaryLogAnalyticsAuth.authorized.value &&
-      temporaryTenantValid.value &&
-      temporaryWorkspaceValid.value),
-)
-const dnsReadinessTarget = computed<DnsReadinessTarget | null>(() => {
-  if (!import.meta.client) {
-    return null
-  }
-  if (managedMode.value && logAnalyticsSourceAvailable.value) {
-    return { mode: 'managed' }
-  }
-  if (
-    temporaryLogAnalyticsMode.value &&
-    temporaryLogAnalyticsAuth.connected.value &&
-    temporaryLogAnalyticsAuth.authorized.value &&
-    temporaryTenantValid.value &&
-    temporaryWorkspaceValid.value
-  ) {
-    return {
-      mode: 'delegated',
-      tenantId: temporaryTenantId.value.trim(),
-      workspaceId: temporaryWorkspaceId.value.trim(),
-    }
-  }
-  return null
-})
-
-async function requestDnsReadiness(target: DnsReadinessTarget, signal: AbortSignal) {
-  if (target.mode === 'managed') {
-    return requestFetch<DnsReadinessResponse>('/api/log-analytics/dns/readiness', { signal })
-  }
-  return temporaryLogAnalyticsClient.dnsReadiness(target.tenantId, target.workspaceId, signal)
-}
-
-const dnsSourceReadiness = useDnsSourceReadiness({
-  request: requestDnsReadiness,
-  target: dnsReadinessTarget,
-})
-
-function temporaryLogAnalyticsRunRequirement() {
-  if (!temporaryLogAnalyticsAuth.connected.value) {
-    return 'Connect to Azure before running a query.'
-  }
-  if (!temporaryTenantValid.value || !temporaryWorkspaceValid.value) {
-    return 'Select an accessible workspace before running a query.'
-  }
-  return 'Grant Log Analytics query permission before running a query.'
-}
-
-const realTimeQuery = useLogQuery(receiver.logs, {
-  active: allLogsRealTimeActive,
-  rawSource: {
-    getRecords: receiver.getRawLogs,
-    version: receiver.snapshotVersion,
-  },
-  visibleLimit: receiver.visibleLimit,
-})
-const realTimeSorting = useLogSorting(realTimeQuery.filteredLogs)
-const logFilters = reactive(createDefaultLogFilters())
-const logSort = reactive(createDefaultLogSort())
-const logDraftRange = reactive(createDefaultLogAnalysisDateRange())
-const logAnalyticsQueryLimit = ref(DEFAULT_LOG_ANALYTICS_QUERY_LIMIT)
-const logAnalyticsStorage = ref<LogAnalyticsStorageKind>('resource-specific')
-watch(
-  dnsReadinessTarget,
-  () => {
-    logAnalyticsStorage.value = 'resource-specific'
-  },
-  { flush: 'sync' },
-)
-watch([dnsSourceReadiness.readiness, dnsSourceReadiness.status], ([readiness, status]) => {
-  if (status !== 'success') {
-    return
-  }
-  const resourceSpecificHasData = hasDnsReadinessData(readiness, 'resource-specific')
-  const azureDiagnosticsHasData = hasDnsReadinessData(readiness, 'azure-diagnostics')
-  if (azureDiagnosticsHasData && !resourceSpecificHasData) {
-    logAnalyticsStorage.value = 'azure-diagnostics'
-  } else if (!azureDiagnosticsHasData) {
-    logAnalyticsStorage.value = 'resource-specific'
-  }
-})
-const logQuery = useLogAnalyticsQuery({
-  active: allLogsLogAnalysisActive,
-  draftRange: logDraftRange,
-  filters: logFilters,
-  queryLimit: logAnalyticsQueryLimit,
-  onBeforeReplace: closeDetail,
-  onError: (message) => {
-    if (isMobile.value) {
-      return
-    }
-    toast.add({
-      title: message,
-      color: 'error',
-      icon: 'i-lucide-circle-alert',
-    })
-  },
-  request: async (body, signal) => {
-    if (managedMode.value) {
-      return requestFetch<LogAnalyticsQueryResponse>('/api/log-analytics/query', {
-        body,
-        method: 'POST',
-        signal,
-      })
-    }
-
-    const tenantId = temporaryTenantId.value.trim()
-    const workspaceId = temporaryWorkspaceId.value.trim()
-    return temporaryLogAnalyticsClient.query(tenantId, workspaceId, body, signal)
-  },
-  sort: logSort,
-  storage: logAnalyticsStorage,
-})
-const {
-  canApplyFilters: logCanApplyFilters,
-  hasRun: logHasRun,
-  appliedRange: logAppliedRange,
-  rangeDirty: logRangeDirty,
-  rangeError: logRangeError,
-  refinementPending: logRefinementPending,
-  status: logQueryStatus,
-  truncated: logResultsTruncated,
-} = logQuery
-const logResultQuery = useLogQuery(logQuery.records, {
-  active: allLogsLogAnalysisActive,
-  datasetKey: logQuery.datasetVersion,
-  filters: logFilters,
-  visibleLimit: logQuery.visibleLimit,
-})
-const logResultSorting = useLogSorting(logResultQuery.filteredLogs, logSort)
-async function requestDnsList(body: DnsListQueryRequest, signal: AbortSignal) {
-  if (managedMode.value) {
-    return requestFetch<DnsListQueryResponse>('/api/log-analytics/dns/list', {
-      body,
-      method: 'POST',
-      signal,
-    })
-  }
-  const tenantId = temporaryTenantId.value.trim()
-  const workspaceId = temporaryWorkspaceId.value.trim()
-  return temporaryLogAnalyticsClient.dnsList(tenantId, workspaceId, body, signal)
-}
-
-async function requestDnsDetail(body: DnsDetailQueryRequest, signal: AbortSignal) {
-  if (managedMode.value) {
-    return requestFetch<DnsDetailQueryResponse>('/api/log-analytics/dns/detail', {
-      body,
-      method: 'POST',
-      signal,
-    })
-  }
-  const tenantId = temporaryTenantId.value.trim()
-  const workspaceId = temporaryWorkspaceId.value.trim()
-  return temporaryLogAnalyticsClient.dnsDetail(tenantId, workspaceId, body, signal)
-}
-
-const dns = useDnsTroubleshooting({
-  active: dnsLensActive,
-  draftRange: logDraftRange,
-  mode: analysisMode,
-  queryLimit: logAnalyticsQueryLimit,
-  receiver,
-  requestDetail: requestDnsDetail,
-  requestList: requestDnsList,
-  storage: logAnalyticsStorage,
-})
-const dnsDetailOpen = computed({
-  get: () => dns.selectedEntry.value !== null,
-  set: (open: boolean) => {
-    if (!open) {
-      dns.closeDetail()
-    }
-  },
-})
-const modeState = useAnalysisMode({
-  abortLogAnalysis: () => {
-    logQuery.abort()
-    dns.abort()
-  },
-  canUseLogAnalysis,
-  canUseRealTime: eventHubSourceAvailable,
-  closeDetail,
-  disconnectRealTime: disconnectEventHub,
-  mode: analysisMode,
-  pauseRealTime: receiver.pause,
-  resetRealTime: resetEventHub,
-})
-const modeTransitioning = modeState.transitioning
-const actionLabels: Record<string, string> = {
-  allow: 'Allow',
-  deny: 'Deny',
-  dnat: 'DNAT',
-  snat: 'SNAT',
-}
-
-const realTimeActions = computed(() => {
-  return createCaseInsensitiveFilterOptions(
-    receiver.actionOptions.value,
-    (value) => actionLabels[value.toLowerCase()] ?? value,
-  )
-})
-const realTimeProtocols = computed(() => {
-  return createCaseInsensitiveFilterOptions(receiver.protocolOptions.value, (value) =>
-    value.toUpperCase(),
-  )
-})
-const activeFilters = computed(() =>
-  logAnalysisActive.value ? logResultQuery.filters : realTimeQuery.filters,
-)
-function createClearableFilterModel(key: 'action' | 'protocol') {
-  return computed<string | null>({
-    get: () => activeFilters.value[key] || null,
-    set: (value) => {
-      activeFilters.value[key] = value ?? ''
-    },
-  })
-}
-const actionFilter = createClearableFilterModel('action')
-const protocolFilter = createClearableFilterModel('protocol')
-const sortedLogs = computed(() =>
-  logAnalysisActive.value ? logResultSorting.sortedLogs.value : realTimeSorting.sortedLogs.value,
-)
-const activeFilterCount = computed(
-  () =>
-    Object.entries(activeFilters.value).filter(
-      ([key, value]) =>
-        key !== 'search' && (Array.isArray(value) ? value.length > 0 : value.trim() !== ''),
-    ).length,
-)
-const activeSort = computed({
-  get: () => (logAnalysisActive.value ? logResultSorting.sort : realTimeSorting.sort),
-  set: (value) =>
-    Object.assign(logAnalysisActive.value ? logResultSorting.sort : realTimeSorting.sort, value),
-})
-const categories = computed(() =>
-  logAnalysisActive.value ? [...LOG_ANALYSIS_CATEGORIES] : receiver.categoryOptions.value,
-)
-const actions = computed(() =>
-  logAnalysisActive.value ? logQuery.actionOptions.value : realTimeActions.value,
-)
-const protocols = computed(() =>
-  logAnalysisActive.value ? logQuery.protocolOptions.value : realTimeProtocols.value,
-)
-const activeStatus = computed(() => {
-  if (!logAnalysisActive.value) {
-    return receiver.status.value
-  }
-  return activeLens.value === 'dns-troubleshooting' ? dns.status.value : logQuery.status.value
-})
-const showRealTimeLag = computed(
-  () =>
-    !logAnalysisActive.value &&
-    (receiver.status.value === 'connected' || receiver.status.value === 'paused') &&
-    receiver.latestSourceTimestamp.value !== null,
-)
-const countLabel = computed(() => {
-  if (!logAnalysisActive.value) {
-    return `${sortedLogs.value.length} visible / ${receiver.receivedCount.value} received`
-  }
-
-  const updating = logQuery.status.value === 'refreshing' || logQuery.refinementPending.value
-  const suffix = logQuery.truncated.value
-    ? ` / first ${logQuery.limit.value?.toLocaleString() ?? ''}`
-    : ''
-  return `${sortedLogs.value.length} visible${suffix}${updating ? ' / updating' : ''}`
-})
-const dnsCountLabel = computed(() => {
-  const transportCount = dns.unidentifiedTransportCount.value
-  if (isMobile.value) {
-    const entryCount = dns.queriedEntryCount.value
-    const entries = `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}`
-    return transportCount > 0
-      ? `${entries} · ${transportCount} unidentified ${transportCount === 1 ? 'transport' : 'transports'}`
-      : entries
-  }
-  return `${dns.queriedEntryCount.value} queried entries · ${transportCount} unidentified ${
-    transportCount === 1 ? 'transport' : 'transports'
-  }`
-})
-const logAppliedRangeLabel = computed(() => {
-  if (logAppliedRange.value === null) {
-    return ''
-  }
-
-  return `${formatTime(logAppliedRange.value.from)} to ${formatTime(logAppliedRange.value.to)} (${logTimeZone.value})`
-})
-const dnsAppliedRangeLabel = computed(() => {
-  if (dns.appliedRange.value === null) {
-    return ''
-  }
-  return `${formatTime(dns.appliedRange.value.from)} to ${formatTime(dns.appliedRange.value.to)} (${logTimeZone.value})`
-})
-const activeAppliedRangeLabel = computed(() =>
-  activeLens.value === 'dns-troubleshooting'
-    ? dnsAppliedRangeLabel.value
-    : logAppliedRangeLabel.value,
-)
-const activeQueryStatus = computed(() =>
-  activeLens.value === 'dns-troubleshooting' ? dns.status.value : logQueryStatus.value,
-)
-const activeRangeDirty = computed(() =>
-  activeLens.value === 'dns-troubleshooting' ? dns.rangeDirty.value : logRangeDirty.value,
-)
-const activeRangeError = computed(() =>
-  activeLens.value === 'dns-troubleshooting' ? dns.rangeError.value : logRangeError.value,
-)
-const activeResultsTruncated = computed(() =>
-  activeLens.value === 'dns-troubleshooting' ? dns.truncated.value : logResultsTruncated.value,
-)
-const mobileAppliedRangeLabel = computed(() => {
-  const range = dnsLensActive.value ? dns.appliedRange.value : logAppliedRange.value
-  if (!range) {
-    return ''
-  }
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: logTimeZone.value,
-    hourCycle: logHourCycle.value,
-  })
-  return `${formatter.formatRange(new Date(range.from), new Date(range.to))} ${logTimeZone.value}`
-})
-const mobileQueryState = computed<MobileQueryState>(() => ({
-  canRun: canRunLogAnalytics.value,
-  hasRun: dnsLensActive.value ? dns.appliedRange.value !== null : logHasRun.value,
-  dirty:
-    activeRangeDirty.value ||
-    (dnsLensActive.value ? dns.filtersDirty.value : logRefinementPending.value),
-  status: activeQueryStatus.value,
-  rangeError: activeRangeError.value,
-  pendingMessage:
-    dnsLensActive.value && dns.filtersDirty.value && !activeRangeDirty.value
-      ? 'Filtering loaded results. Run query to search the full range.'
-      : 'Changes not applied.',
-  error: dnsLensActive.value ? dns.lastError.value : logQuery.lastError.value,
-}))
-const mobileStatusLabel = computed(() => {
-  if (logAnalysisActive.value && mobileQueryState.value.error) {
-    return 'Query failed'
-  }
-  switch (activeStatus.value) {
-    case 'idle': {
-      return logAnalysisActive.value ? 'Ready to query' : 'Not connected'
-    }
-    case 'connected': {
-      return showRealTimeLag.value && !receiver.caughtUp.value ? 'Catching up' : 'Live'
-    }
-    case 'success': {
-      return 'Results ready'
-    }
-    case 'loading': {
-      return 'Running query'
-    }
-    case 'refreshing': {
-      return 'Updating results'
-    }
-    case 'connecting': {
-      return 'Connecting'
-    }
-    case 'reconnecting': {
-      return 'Reconnecting'
-    }
-    case 'paused': {
-      return 'Paused'
-    }
-    case 'error': {
-      return 'Connection failed'
-    }
-    default: {
-      return 'Disconnected'
-    }
-  }
-})
-const mobileSortKey = computed({
-  get: () => activeSort.value.key,
-  set: (key: FirewallLogSortKey) => {
-    activeSort.value = { ...activeSort.value, key }
-  },
-})
-function toggleMobileSortDirection() {
-  activeSort.value = {
-    ...activeSort.value,
-    direction: activeSort.value.direction === 'desc' ? 'asc' : 'desc',
-  }
-}
-
-const parsedDetailSections = computed<DetailSection[]>(() => {
-  const log = selectedLog.value
-  if (log === null) {
-    return []
-  }
-
-  const fields: DetailField[] = [
-    { label: 'Timestamp', value: formatTime(log.timestamp), mono: true },
-    { label: 'Category', value: log.category },
-    { label: 'Action', value: log.action },
-    { label: 'Protocol', value: formatIcmpProtocol(log.protocol) },
-    { label: 'Policy', value: log.policy },
-    { label: 'Rule collection group', value: log.ruleCollectionGroup },
-    { label: 'Rule collection', value: log.ruleCollection },
-    { label: 'Rule', value: log.rule },
-    { label: 'Source IP', value: log.sourceIp, mono: true },
-    { label: 'Source port', value: log.sourcePort, mono: true },
-    {
-      countryDestination: log.destinationIp,
-      label: 'Destination IP',
-      value: log.destinationIp,
-      mono: true,
-    },
-    { label: 'Destination port', value: log.destinationPort, mono: true },
-  ]
-
-  const sections: DetailSection[] = [{ fields }]
-
-  if (!logAnalysisActive.value) {
-    const eventHubFields: DetailField[] = [
-      { label: 'Sequence', value: log.sequenceNumber, mono: true },
-      {
-        label: 'Enqueued',
-        value: log.enqueuedTimeUtc ? formatTime(log.enqueuedTimeUtc) : undefined,
-        mono: true,
-      },
-    ].filter((field) => field.value !== undefined && field.value !== '')
-
-    if (eventHubFields.length > 0) {
-      sections.push({ fields: eventHubFields, title: 'Event Hub metadata' })
-    }
-  }
-
-  return sections
-})
-const rawLogJson = computed(() => {
-  if (selectedLog.value === null) {
-    return ''
-  }
-
-  return JSON.stringify(selectedLog.value.raw, null, 2)
-})
-const rawLogRows = computed(() => Math.min(Math.max(rawLogJson.value.split('\n').length, 6), 24))
-const emptyState = computed<LogsEmptyState>(() => {
-  if (!logAnalysisActive.value) {
-    return receiver.logs.value.length > 0
-      ? {
-          title: 'No matching logs',
-          description: 'Adjust or reset the active filters.',
-        }
-      : {
-          title: 'No logs received',
-          description: managedMode.value
-            ? 'Connect to configured Event Hub.'
-            : 'Connect to an Event Hub with a Listen-only SAS connection string.',
-          settingsActionLabel:
-            receiver.status.value === 'idle' || receiver.status.value === 'error'
-              ? 'Open Event Hub settings'
-              : undefined,
-        }
-  }
-
-  if (!logQuery.hasRun.value) {
-    return {
-      title: 'Explore your firewall logs',
-      description: canRunLogAnalytics.value
-        ? 'Choose a time range to query your Log Analytics workspace.'
-        : 'Connect your Azure workspace, then choose a time range to explore your logs.',
-      settingsActionLabel: canRunLogAnalytics.value ? undefined : 'Open Log Analytics settings',
-    }
-  }
-  if (logQuery.status.value === 'refreshing' || logQuery.refinementPending.value) {
-    return {
-      title: 'Updating results',
-      description: 'Current filters are being applied in Log Analytics.',
-    }
-  }
-  if (activeFilterCount.value || activeFilters.value.search) {
-    return {
-      title: 'No matching logs',
-      description: 'No logs match the applied filters in this time range.',
-    }
-  }
-
-  return {
-    title: 'No logs in range',
-    description: 'No Azure Firewall records were returned for applied time range.',
-  }
-})
-
-watch(receiver.errors, (errors) => {
-  if (errors.length === 0) {
-    return
-  }
-
-  const [title, ...details] = errors
-  toast.add({
-    title,
-    description: details.length > 0 ? details.join('\n') : undefined,
-    color: 'error',
-    icon: 'i-lucide-circle-alert',
-  })
-})
-
-watch(modeState.lastError, (error) => {
-  if (error) {
-    toast.add({ title: error, color: 'error', icon: 'i-lucide-circle-alert' })
-  }
-})
-
-watch(
+  actions,
+  activeFilterCount,
+  activeFilters,
+  activeLens,
+  activeSort,
+  allLogsLensActive,
+  analysisMode,
+  appliedFilterSummary,
+  authorizeTemporaryLogAnalytics,
+  categories,
+  changeTemporaryTenant,
+  changeTemporaryWorkspace,
+  clearActiveResults,
+  clearClosedDetail,
+  clearingLogHistory,
+  commitLogAnalysisInteraction,
+  connect,
+  connectTemporaryLogAnalytics,
+  connecting,
+  connectionForm,
+  connectionStringPersistenceError,
+  countLabel,
+  detailOpen,
+  disconnectEventHub,
+  disconnectTemporaryLogAnalytics,
+  dns,
+  dnsCountLabel,
+  dnsDetailOpen,
+  dnsLensActive,
+  dnsSourceReadiness,
+  dnsView,
+  emptyState,
+  eventHubConnectionActive,
+  formatLogTimestamp,
+  ipCountryLookup,
+  isMobile,
+  isPhone,
+  isQuickFilterActive,
+  lensItems,
+  logAnalysisActive,
+  logAnalyticsQueryLimit,
+  logAnalyticsStorage,
+  logBrowserTimeZone,
+  logDraftRange,
+  logRangePreset,
+  logHistoryEnabled,
+  logHistoryError,
+  logHourCycle,
+  logQuery,
+  logQueryStatus,
+  logResultsTruncated,
+  logTableColumns,
+  logTimeFormatError,
+  logTimeZone,
+  logToolbar,
   managedMode,
-  (managed) => {
-    if (managed) {
-      connectionForm.connectionString = ''
-      connectionForm.eventHubName = ''
-      rememberConnectionString.value = false
-    }
-  },
-  { immediate: true },
-)
-
-async function connect() {
-  if (modeTransitioning.value || logAnalysisActive.value) {
-    return
-  }
-
-  connecting.value = true
-  try {
-    if (!managedMode.value && validateEventHubConnectionForm(connectionForm).length === 0) {
-      clearTemporaryEventHubViewState()
-    }
-    await receiver.connect(connectionForm, managedMode.value ? 'managed' : 'manual')
-  } finally {
-    connecting.value = false
-  }
-}
-
-function updateConnectionForm(value: EventHubConnectionForm) {
-  Object.assign(connectionForm, value)
-}
-
-function updateLogDraftRange(value: LogAnalysisDateRange) {
-  Object.assign(logDraftRange, value)
-}
-
-function updateDnsFilters(value: DnsFilters) {
-  Object.assign(dns.filters.value, value)
-}
-
-function updateDnsSort(value: DnsSort) {
-  Object.assign(dns.sort.value, value)
-}
-
-async function updateLogRetention(enabled: boolean) {
-  if (enabled) {
-    logHistory.enable()
-    return
-  }
-
-  clearingLogHistory.value = true
-  try {
-    await logHistory.disableAndClearHistory()
-  } finally {
-    clearingLogHistory.value = false
-  }
-}
-
-async function updateAnalysisMode(mode: AnalysisMode, event: MouseEvent) {
-  const control = event.currentTarget
-  await modeState.setMode(mode)
-  await nextTick()
-  if (control instanceof HTMLElement && control.isConnected) {
-    control.focus()
-  }
-}
-
-function commitLogAnalysisInteraction(event: Event) {
-  if (!logAnalysisActive.value) {
-    return
-  }
-  const target = event.target
-  if (
-    !(target instanceof Element) ||
-    !target.closest(
-      'a, button, input, select, textarea, [role="button"], [role="checkbox"], [role="combobox"], [role="switch"], [role="textbox"]',
-    )
-  ) {
-    return
-  }
-  void modeState.commitLogAnalysis()
-}
-
-function closeDetail() {
-  detailOpen.value = false
-  selectedLog.value = null
-  dns.closeDetail()
-}
-
-function clearTemporaryEventHubViewState() {
-  if (analysisMode.value === 'real-time-analysis') {
-    closeDetail()
-  }
-  realTimeQuery.resetFilters()
-  dns.resetRealtimeFilters()
-}
-
-async function disconnectEventHub() {
-  const temporarySession = !managedMode.value
-  try {
-    await receiver.disconnect()
-  } finally {
-    if (temporarySession) {
-      clearTemporaryEventHubViewState()
-    }
-  }
-}
-
-async function resetEventHub() {
-  const temporarySession = !managedMode.value
-  try {
-    await receiver.reset()
-  } finally {
-    if (temporarySession) {
-      realTimeQuery.resetFilters()
-      dns.resetRealtimeFilters()
-    }
-  }
-}
-
-function setLens(lens: LogsLens) {
-  if (activeLens.value === lens) {
-    return
-  }
-  closeDetail()
-  activeLens.value = lens
-}
-
-function resetActiveFilters() {
-  if (logAnalysisActive.value) {
-    logResultQuery.resetFilters()
-    return
-  }
-  realTimeQuery.resetFilters()
-}
-
-function setSort(key: FirewallLogSortKey) {
-  if (logAnalysisActive.value) {
-    logResultSorting.setSort(key)
-    return
-  }
-  realTimeSorting.setSort(key)
-}
-
-function getSortIcon(key: FirewallLogSortKey) {
-  return logAnalysisActive.value
-    ? logResultSorting.getSortIcon(key)
-    : realTimeSorting.getSortIcon(key)
-}
-
-function getAriaSort(key: FirewallLogSortKey) {
-  return logAnalysisActive.value
-    ? logResultSorting.getAriaSort(key)
-    : realTimeSorting.getAriaSort(key)
-}
-
-function createAction(value: string) {
-  logQuery.addActionOption(value)
-  activeFilters.value.action = value
-}
-
-function createProtocol(value: string) {
-  logQuery.addProtocolOption(value)
-  activeFilters.value.protocol = value
-}
-
-function isQuickFilterActive(key: QuickFilterKey, value: string | undefined) {
-  if (key === 'category') {
-    return isLogCategoryFilterValueActive(activeFilters.value.category, value)
-  }
-  return isLogFilterValueActive(activeFilters.value[key], value)
-}
-
-function toggleQuickFilter(key: QuickFilterKey, value: string | undefined) {
-  if (key === 'category') {
-    activeFilters.value.category = toggleLogCategoryFilterValue(activeFilters.value.category, value)
-    return
-  }
-  activeFilters.value[key] = toggleLogFilterValue(activeFilters.value[key], value)
-}
-
-const quickFilterKeyLabels: Record<QuickFilterKey, string> = {
-  action: 'action',
-  category: 'category',
-  destination: 'destination',
-  destinationPort: 'destination port',
-  protocol: 'protocol',
-  source: 'source',
-  sourcePort: 'source port',
-}
-
-function quickFilterLabel(key: QuickFilterKey, value: string | undefined) {
-  const action = isQuickFilterActive(key, value) ? 'Remove' : 'Filter by'
-  return `${action} ${quickFilterKeyLabels[key]}: ${displayValue(value)}`
-}
-
-function clearActiveResults() {
-  if (activeLens.value === 'dns-troubleshooting') {
-    dns.clearActiveDataset()
-    return
-  }
-  if (logAnalysisActive.value) {
-    logQuery.clear()
-    return
-  }
-  receiver.clear()
-}
-
-async function runLogAnalysis() {
-  if (!canRunLogAnalytics.value) {
-    toast.add({
-      title: temporaryLogAnalyticsRunRequirement(),
-      color: 'error',
-      icon: 'i-lucide-circle-alert',
-    })
-    return
-  }
-  await logQuery.run()
-}
-
-async function runDnsAnalysis() {
-  if (!canRunLogAnalytics.value) {
-    toast.add({
-      title: temporaryLogAnalyticsRunRequirement(),
-      color: 'error',
-      icon: 'i-lucide-circle-alert',
-    })
-    return
-  }
-  await dns.run()
-}
-
-async function applyDnsFilters() {
-  await dns.applyFilters()
-}
-
-function runActiveLogAnalysis() {
-  return activeLens.value === 'dns-troubleshooting' ? runDnsAnalysis() : runLogAnalysis()
-}
-
-async function disconnectTemporaryLogAnalytics() {
-  temporaryAccessGeneration += 1
-  temporaryAccessController?.abort()
-  temporaryAccessController = null
-  temporaryAuthorizationGeneration += 1
-  temporaryLogAnalyticsAuthorizing.value = false
-  logQuery.abort()
-  logQuery.clear()
-  dns.abort()
-  dns.clearActiveDataset()
-  temporaryTenantId.value = ''
-  temporaryWorkspaceId.value = ''
-  temporaryTenants.value = []
-  temporaryWorkspaces.value = []
-  temporaryAzureUsername.value = ''
-  temporaryAccessStatus.value = 'idle'
-  temporaryAccessError.value = null
-  await temporaryLogAnalyticsAuth.disconnect()
-}
-
-async function authorizeTemporaryLogAnalytics() {
-  if (!temporaryTenantValid.value || temporaryLogAnalyticsAuthorizing.value) {
-    return
-  }
-  const generation = temporaryAuthorizationGeneration
-  const tenantId = temporaryTenantId.value.trim()
-  temporaryLogAnalyticsAuthorizing.value = true
-  try {
-    await temporaryLogAnalyticsAuth.getAccessToken(tenantId, true)
-  } catch {
-    if (
-      generation !== temporaryAuthorizationGeneration ||
-      tenantId !== temporaryTenantId.value.trim()
-    ) {
-      return
-    }
-    toast.add({
-      title: temporaryLogAnalyticsAuth.lastError.value ?? 'Log Analytics authorization failed.',
-      color: 'error',
-      icon: 'i-lucide-circle-alert',
-    })
-    return
-  } finally {
-    if (generation === temporaryAuthorizationGeneration) {
-      temporaryLogAnalyticsAuthorizing.value = false
-    }
-  }
-  refreshTemporaryAzureAccess()
-}
-
-async function checkTemporaryLogAnalyticsAuthorization() {
-  const generation = ++temporaryAuthorizationGeneration
-  const tenantId = temporaryTenantId.value.trim()
-  temporaryLogAnalyticsAuth.invalidateAuthorization()
-  if (!temporaryLogAnalyticsAuth.connected.value || !isEntraId(tenantId)) {
-    temporaryLogAnalyticsAuthorizing.value = false
-    return false
-  }
-  temporaryLogAnalyticsAuthorizing.value = true
-  const authorized = await temporaryLogAnalyticsAuth.checkAuthorization(tenantId)
-  if (generation === temporaryAuthorizationGeneration) {
-    temporaryLogAnalyticsAuthorizing.value = false
-  }
-  return authorized
-}
-
-function selectTemporaryWorkspace(workspaceId: string) {
-  if (workspaceId === temporaryWorkspaceId.value) {
-    return
-  }
-  logQuery.abort()
-  logQuery.clear()
-  dns.abort()
-  dns.clearActiveDataset()
-  temporaryWorkspaceId.value = workspaceId
-}
-
-function mergeCurrentTenant(tenants: AzureAccessibleTenant[], tenantId: string) {
-  if (tenants.some((tenant) => tenant.tenantId === tenantId)) {
-    return tenants
-  }
-  return [...tenants, { defaultDomain: null, displayName: tenantId, tenantId }]
-}
-
-async function discoverTemporaryAzureAccess(tenantId: string) {
-  temporaryAccessController?.abort()
-  const controller = new AbortController()
-  temporaryAccessController = controller
-  const generation = ++temporaryAccessGeneration
-  temporaryTenantId.value = tenantId
-  selectTemporaryWorkspace('')
-  temporaryWorkspaces.value = []
-  temporaryAccessStatus.value = 'loading'
-  temporaryAccessError.value = null
-  try {
-    const authorized = await checkTemporaryLogAnalyticsAuthorization()
-    const access = await temporaryLogAnalyticsClient.discover(tenantId, controller.signal)
-    if (generation !== temporaryAccessGeneration || temporaryTenantId.value !== tenantId) {
-      return
-    }
-    temporaryTenants.value = mergeCurrentTenant(access.tenants, tenantId)
-    temporaryWorkspaces.value = authorized ? access.workspaces : []
-    if (authorized && access.workspaces.length === 1) {
-      selectTemporaryWorkspace(access.workspaces[0]?.workspaceId ?? '')
-    }
-    temporaryAccessStatus.value = 'success'
-  } catch (error: unknown) {
-    if (
-      generation !== temporaryAccessGeneration ||
-      (error instanceof Error && error.name === 'AbortError')
-    ) {
-      return
-    }
-    temporaryAccessStatus.value = 'error'
-    temporaryAccessError.value =
-      error instanceof Error
-        ? error.message
-        : 'Could not discover Azure directories and workspaces.'
-  } finally {
-    if (generation === temporaryAccessGeneration) {
-      temporaryAccessController = null
-    }
-  }
-}
-
-async function connectTemporaryLogAnalytics() {
-  const connection = await temporaryLogAnalyticsAuth.connect()
-  if (!connection) {
-    return
-  }
-  temporaryAzureUsername.value = connection.username
-  await discoverTemporaryAzureAccess(connection.tenantId)
-}
-
-function changeTemporaryTenant(tenantId: string) {
-  if (!isEntraId(tenantId) || tenantId === temporaryTenantId.value) {
-    return
-  }
-  void discoverTemporaryAzureAccess(tenantId)
-}
-
-function changeTemporaryWorkspace(workspaceId: string) {
-  if (isEntraId(workspaceId)) {
-    selectTemporaryWorkspace(workspaceId)
-  }
-}
-
-function refreshTemporaryAzureAccess() {
-  if (!temporaryTenantValid.value) {
-    return
-  }
-  void discoverTemporaryAzureAccess(temporaryTenantId.value)
-}
-
-function applyLogFilters() {
-  if (logQueryStatus.value === 'loading' || logQueryStatus.value === 'refreshing') {
-    return
-  }
-  if (logRangeDirty.value || !logHasRun.value) {
-    void runLogAnalysis()
-    return
-  }
-  logQuery.scheduleRefinement(true)
-}
-
-function displayValue(value: string | undefined) {
-  return value && value.length > 0 ? value : '-'
-}
-
-async function copyValue(label: string, value: string | undefined) {
-  if (!value || value.length === 0) {
-    return
-  }
-
-  try {
-    await navigator.clipboard.writeText(value)
-  } catch {
-    toast.add({
-      title: `Could not copy ${label.toLowerCase()}`,
-      color: 'error',
-      icon: 'i-lucide-circle-alert',
-    })
-    return
-  }
-
-  toast.add({
-    title: `${label} copied`,
-    color: 'success',
-    icon: 'i-lucide-copy-check',
-  })
-}
-
-function selectLog(log: FirewallLogRecord) {
-  selectedLog.value = { ...log }
-  detailOpen.value = true
-}
-
-function clearClosedDetail() {
-  if (!detailOpen.value) {
-    selectedLog.value = null
-  }
-}
-
-function openSettings(trigger?: Event | HTMLElement) {
-  if (trigger instanceof HTMLElement) {
-    settingsReturnTarget = trigger
-  } else if (trigger?.currentTarget instanceof HTMLElement) {
-    settingsReturnTarget = trigger.currentTarget
-  } else {
-    settingsReturnTarget =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
-  }
-  settingsOpen.value = true
-}
-
-function closeSettings() {
-  settingsOpen.value = false
-}
-
-async function restoreDnsFocus(event: Event) {
-  if (dnsView.value) {
-    event.preventDefault()
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve())
-    })
-    await nextTick()
-    dnsView.value?.restoreFocus()
-  }
-}
-
-function focusSettingsClose(event: Event) {
-  event.preventDefault()
-  document.querySelector<HTMLElement>('#logs-settings-close')?.focus({ preventScroll: true })
-}
-
-function keepDesktopSettingsOpen(event: Event) {
-  if (!isMobile.value) {
-    event.preventDefault()
-  }
-}
-
-function restoreSettingsFocus(event: Event) {
-  event.preventDefault()
-  const active = document.activeElement
-  if (
-    active instanceof HTMLElement &&
-    active !== document.body &&
-    !active.closest('#logs-settings-drawer')
-  ) {
-    return
-  }
-  const target = settingsReturnTarget?.isConnected
-    ? settingsReturnTarget
-    : document.querySelector<HTMLElement>('#logs-settings-toggle')
-  target?.focus({ preventScroll: true })
-}
-
-function toggleSettings(event: MouseEvent) {
-  if (settingsOpen.value) {
-    settingsOpen.value = false
-  } else {
-    openSettings(event)
-  }
-}
-
-function formatTime(timestamp: string) {
-  return formatLogTimestamp(timestamp)
-}
-
-function statusColor(status: string) {
-  if (status === 'connected' || status === 'success') {
-    return 'success'
-  }
-  if (status === 'paused' || status === 'refreshing') {
-    return 'warning'
-  }
-  if (status === 'error') {
-    return 'error'
-  }
-  if (status === 'loading' || status === 'connecting' || status === 'reconnecting') {
-    return 'info'
-  }
-  return 'neutral'
-}
+  mobileQueryState,
+  mobileSortKey,
+  mobileStatusLabel,
+  modeTransitioning,
+  openSettings,
+  protocols,
+  receiver,
+  refreshTemporaryAzureAccess,
+  rememberConnectionString,
+  resetActiveFilters,
+  restoreDnsFocus,
+  restoreSettingsFocus,
+  runActiveLogAnalysis,
+  runLogAnalysis,
+  selectLog,
+  selectMode,
+  selectedLog,
+  setLens,
+  setSort,
+  settingsOpen,
+  showRealTimeLag,
+  sortedLogs,
+  sourceItems,
+  statusTone,
+  temporaryAccessError,
+  temporaryAccessStatus,
+  temporaryAdminConsentUrl,
+  temporaryAzureUsername,
+  temporaryLogAnalyticsAuth,
+  temporaryLogAnalyticsAuthorizing,
+  temporaryLogAnalyticsMode,
+  temporaryTenantId,
+  temporaryTenants,
+  temporaryWorkspaceId,
+  temporaryWorkspaces,
+  toggleMobileSortDirection,
+  togglePause,
+  toggleQuickFilter,
+  updateConnectionForm,
+  updateDnsFilters,
+  updateDnsSort,
+  updateLogDraftRange,
+  updateLogRetention,
+  use12HourTime,
+  useLocalTime,
+} = useLogsWorkspace()
 </script>
 
 <template>
-  <div
-    class="flex h-full min-h-0 flex-col overflow-hidden bg-white text-brand-gray-950 dark:bg-brand-gray-950 dark:text-brand-gray-50"
-  >
-    <section
-      v-if="!isMobile"
-      class="shrink-0 border-b border-brand-gray-300 bg-brand-gray-50 px-4 py-3 dark:border-brand-gray-700 dark:bg-brand-gray-900"
-      aria-labelledby="data-source-label"
-    >
-      <div class="flex min-w-0 flex-wrap items-center gap-3">
-        <div class="flex min-w-0 flex-wrap items-center gap-3">
-          <span
-            id="data-source-label"
-            class="text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
-          >
-            Data source
-          </span>
-          <div role="group" aria-labelledby="data-source-label" class="shrink-0">
-            <UFieldGroup size="sm">
-              <UButton
-                class="touch-control"
-                icon="i-lucide-radio"
-                :variant="logAnalysisActive ? 'outline' : 'solid'"
-                :color="logAnalysisActive ? 'neutral' : 'primary'"
-                :aria-pressed="!logAnalysisActive"
-                :aria-describedby="!eventHubSourceAvailable ? 'event-hub-requirement' : undefined"
-                :disabled="!eventHubSourceAvailable || modeTransitioning"
-                :loading="modeTransitioning && logAnalysisActive"
-                @click="updateAnalysisMode('real-time-analysis', $event)"
-              >
-                <span>Live Event Hub</span>
-                <span aria-hidden="true" class="inline-grid size-4 place-items-center">
-                  <UIcon v-if="!logAnalysisActive" name="i-lucide-check" class="size-3.5" />
-                </span>
-              </UButton>
-              <UButton
-                class="touch-control"
-                icon="i-lucide-chart-no-axes-combined"
-                :variant="logAnalysisActive ? 'solid' : 'outline'"
-                :color="logAnalysisActive ? 'primary' : 'neutral'"
-                :aria-pressed="logAnalysisActive"
-                :aria-describedby="!canUseLogAnalysis ? 'log-analytics-requirement' : undefined"
-                :disabled="!canUseLogAnalysis || modeTransitioning"
-                :loading="modeTransitioning && !logAnalysisActive"
-                @click="updateAnalysisMode('log-analysis', $event)"
-              >
-                <span>Log Analytics</span>
-                <span aria-hidden="true" class="inline-grid size-4 place-items-center">
-                  <UIcon v-if="logAnalysisActive" name="i-lucide-check" class="size-3.5" />
-                </span>
-              </UButton>
-            </UFieldGroup>
-          </div>
-          <p
-            v-if="!eventHubSourceAvailable"
-            id="event-hub-requirement"
-            class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
-          >
-            Live Event Hub is not configured.
-          </p>
-          <p
-            v-if="logAnalyticsRequirement"
-            id="log-analytics-requirement"
-            class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
-          >
-            {{ logAnalyticsRequirement }}
-          </p>
-        </div>
-        <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">
-          <span
-            id="logs-lens-label"
-            class="text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
-          >
-            View
-          </span>
-          <div role="group" aria-labelledby="logs-lens-label" class="shrink-0">
-            <UFieldGroup size="sm">
-              <UButton
-                class="touch-control"
-                :variant="activeLens === 'all-logs' ? 'solid' : 'outline'"
-                :color="activeLens === 'all-logs' ? 'primary' : 'neutral'"
-                :aria-pressed="activeLens === 'all-logs'"
-                @click="setLens('all-logs')"
-              >
-                All logs
-              </UButton>
-              <UButton
-                class="touch-control"
-                :variant="activeLens === 'dns-troubleshooting' ? 'solid' : 'outline'"
-                :color="activeLens === 'dns-troubleshooting' ? 'primary' : 'neutral'"
-                :aria-pressed="activeLens === 'dns-troubleshooting'"
-                @click="setLens('dns-troubleshooting')"
-              >
-                DNS troubleshooting
-              </UButton>
-            </UFieldGroup>
-          </div>
-          <UButton
-            id="logs-settings-toggle"
-            icon="i-lucide-settings"
-            label="Settings"
-            aria-controls="logs-settings-drawer"
-            :aria-expanded="settingsOpen"
-            :color="settingsOpen ? 'primary' : 'neutral'"
-            :variant="settingsOpen ? 'solid' : 'outline'"
-            size="sm"
-            class="touch-control shrink-0"
-            @click="toggleSettings"
-          />
-        </div>
-      </div>
+  <div class="logs-workspace flex h-full min-h-0 flex-col overflow-hidden">
+    <section class="logs-context-row" aria-label="Workspace">
+      <AppSegmentedControl
+        :model-value="analysisMode"
+        label="Data source"
+        :items="sourceItems"
+        @update:model-value="selectMode"
+      />
+      <AppSegmentedControl
+        :model-value="activeLens"
+        label="View"
+        :items="lensItems"
+        @update:model-value="setLens"
+      />
+      <UButton
+        id="logs-settings-toggle"
+        icon="i-lucide-settings"
+        :label="isPhone ? undefined : 'Settings'"
+        aria-label="Settings"
+        aria-controls="logs-settings-drawer"
+        :aria-expanded="settingsOpen"
+        color="neutral"
+        variant="outline"
+        @click="openSettings"
+      />
     </section>
-
-    <section
-      v-else
-      class="shrink-0 border-b border-default px-4 py-2"
-      aria-label="Current workspace"
+    <LogsSettingsDrawer
+      v-model:open="settingsOpen"
+      v-model:use12-hour="use12HourTime"
+      v-model:use-local="useLocalTime"
+      :browser-time-zone="logBrowserTimeZone"
+      :time-format-error="logTimeFormatError"
+      @close-auto-focus="restoreSettingsFocus"
     >
+      <LogsEventHubSettingsPanel
+        v-if="!logAnalysisActive"
+        v-model:remember-connection-string="rememberConnectionString"
+        :connection-form="connectionForm"
+        :clearing-log-history="clearingLogHistory"
+        :connection-active="eventHubConnectionActive"
+        :connecting="connecting"
+        :connection-string-persistence-error="connectionStringPersistenceError"
+        :log-history-enabled="logHistoryEnabled"
+        :saved-log-count="receiver.receivedCount.value"
+        :connection-error="receiver.errors.value.join(' ') || null"
+        :log-history-error="logHistoryError"
+        :managed="managedMode"
+        :mode-transitioning="modeTransitioning"
+        :reconnecting="receiver.status.value === 'reconnecting'"
+        @update:connection-form="updateConnectionForm"
+        @connect="connect"
+        @disconnect="disconnectEventHub"
+        @update-log-retention="updateLogRetention"
+      />
       <div
-        role="group"
-        :aria-label="
-          activeLens === 'all-logs'
-            ? 'All logs status and actions'
-            : 'DNS troubleshooting status and actions'
-        "
-      >
-        <div class="flex min-w-0 items-center justify-between gap-2">
-          <div class="min-w-0 flex-1">
-            <h1 class="text-base font-semibold tracking-tight">
-              {{ activeLens === 'all-logs' ? 'All logs' : 'DNS troubleshooting' }}
-            </h1>
-            <p class="flex min-w-0 items-center gap-1.5 text-xs text-muted">
-              <UIcon
-                :name="logAnalysisActive ? 'i-lucide-chart-no-axes-combined' : 'i-lucide-radio'"
-                class="size-3.5 shrink-0"
-              />
-              <span class="truncate"
-                >{{ logAnalysisActive ? 'Log Analytics' : 'Live Event Hub' }} ·
-                {{ logTimeZone }}</span
-              >
-            </p>
-          </div>
-          <div class="flex shrink-0 items-center gap-1">
-            <UButton
-              v-if="!logAnalysisActive && receiver.status.value === 'connected'"
-              icon="i-lucide-pause"
-              aria-label="Pause"
-              title="Pause"
-              color="neutral"
-              variant="outline"
-              class="touch-control min-h-11 min-w-11 justify-center"
-              @click="receiver.pause"
-            />
-            <UButton
-              v-if="!logAnalysisActive && receiver.status.value === 'paused'"
-              icon="i-lucide-play"
-              aria-label="Resume"
-              title="Resume"
-              color="neutral"
-              variant="outline"
-              class="touch-control min-h-11 min-w-11 justify-center"
-              @click="receiver.resume"
-            />
-            <UButton
-              icon="i-lucide-trash-2"
-              :aria-label="
-                activeLens === 'dns-troubleshooting'
-                  ? 'Clear DNS results'
-                  : logAnalysisActive
-                    ? 'Clear results'
-                    : 'Clear'
-              "
-              title="Clear results"
-              color="neutral"
-              variant="outline"
-              class="touch-control min-h-11 min-w-11 justify-center"
-              :disabled="
-                logAnalysisActive
-                  ? activeQueryStatus === 'idle'
-                  : receiver.receivedCount.value === 0
-              "
-              @click="clearActiveResults"
-            />
-            <UButton
-              id="logs-settings-toggle"
-              icon="i-lucide-settings"
-              aria-label="Settings"
-              aria-controls="logs-settings-drawer"
-              :aria-expanded="settingsOpen"
-              color="neutral"
-              variant="ghost"
-              class="touch-control min-h-11 min-w-11 shrink-0"
-              @click="toggleSettings"
-            />
-          </div>
-        </div>
-        <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted">
-          <p role="status" aria-live="polite" aria-atomic="true" class="flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              class="size-1.5 shrink-0 rounded-full"
-              :class="
-                logAnalysisActive && mobileQueryState.error
-                  ? 'bg-red-700 dark:bg-red-400'
-                  : activeStatus === 'connected' || activeStatus === 'success'
-                    ? 'bg-green-700 dark:bg-green-400'
-                    : activeStatus === 'error'
-                      ? 'bg-red-700 dark:bg-red-400'
-                      : 'bg-brand-gray-500'
-              "
-            />
-            <span>{{ mobileStatusLabel }}</span>
-          </p>
-          <span aria-hidden="true">·</span>
-          <p>{{ activeLens === 'all-logs' ? countLabel : dnsCountLabel }}</p>
-        </div>
-        <p
-          v-if="logAnalysisActive && mobileQueryState.hasRun"
-          data-testid="mobile-applied-range"
-          class="mt-1 text-xs text-muted"
-          :title="activeAppliedRangeLabel"
-        >
-          {{ mobileAppliedRangeLabel }}
-        </p>
-      </div>
-    </section>
-    <LogsMobileMenu
-      v-if="isMobile"
-      :log-analysis="logAnalysisActive"
-      :lens="activeLens"
-      :event-hub-available="eventHubSourceAvailable"
-      :log-analytics-available="canUseLogAnalysis"
-      :log-analytics-requirement="logAnalyticsRequirement"
-      :transitioning="modeTransitioning"
-      @mode="updateAnalysisMode"
-      @lens="setLens"
-      @settings="openSettings"
-    />
-
-    <div class="relative grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden">
-      <USlideover
-        v-model:open="settingsOpen"
-        title="Settings"
-        :modal="isMobile"
-        :portal="isMobile"
-        :overlay="isMobile"
-        :content="{
-          onOpenAutoFocus: focusSettingsClose,
-          onCloseAutoFocus: restoreSettingsFocus,
-          onInteractOutside: keepDesktopSettingsOpen,
-          onFocusOutside: keepDesktopSettingsOpen,
-        }"
-        :ui="{
-          overlay: 'z-50',
-          content: 'z-50 w-full max-w-md lg:absolute lg:inset-y-0 motion-reduce:animate-none',
-        }"
-      >
-        <template #content>
-          <div
-            id="logs-settings-drawer"
-            role="region"
-            :aria-label="logAnalysisActive ? 'Log Analytics settings' : 'Live Event Hub settings'"
-            class="flex h-full min-h-0 flex-col"
-          >
-            <header class="flex shrink-0 items-center justify-between border-b border-default p-4">
-              <h2 class="font-semibold">Settings</h2>
-              <UButton
-                id="logs-settings-close"
-                icon="i-lucide-x"
-                aria-label="Close settings"
-                color="neutral"
-                variant="ghost"
-                class="touch-control min-h-11 min-w-11"
-                @click="closeSettings"
-              />
-            </header>
-            <section class="touch-fields min-h-0 flex-1 overflow-y-auto p-4">
-              <LogsEventHubSettingsPanel
-                v-if="!logAnalysisActive"
-                v-model:remember-connection-string="rememberConnectionString"
-                :connection-form="connectionForm"
-                :clearing-log-history="clearingLogHistory"
-                :connection-active="eventHubConnectionActive"
-                :connecting="connecting"
-                :connection-string-persistence-error="connectionStringPersistenceError"
-                :log-history-enabled="logHistoryEnabled"
-                :log-history-error="logHistoryError"
-                :managed="managedMode"
-                :mode-transitioning="modeTransitioning"
-                :reconnecting="receiver.status.value === 'reconnecting'"
-                @update:connection-form="updateConnectionForm"
-                @connect="connect"
-                @disconnect="disconnectEventHub"
-                @update-log-retention="updateLogRetention"
-              />
-              <div
-                v-else
-                @click.capture="commitLogAnalysisInteraction"
-                @input.capture="commitLogAnalysisInteraction"
-                @change.capture="commitLogAnalysisInteraction"
-              >
-                <LogsLogAnalyticsSettingsPanel
-                  v-model:query-storage="logAnalyticsStorage"
-                  v-model:tenant-id="temporaryTenantId"
-                  v-model:workspace-id="temporaryWorkspaceId"
-                  v-model:query-limit="logAnalyticsQueryLimit"
-                  :admin-consent-url="temporaryAdminConsentUrl"
-                  :dns-readiness="dnsSourceReadiness.readiness.value"
-                  :dns-readiness-status="dnsSourceReadiness.status.value"
-                  :lens="activeLens"
-                  :temporary="temporaryLogAnalyticsMode"
-                  :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
-                  :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
-                  :temporary-access-error="temporaryAccessError"
-                  :temporary-access-status="temporaryAccessStatus"
-                  :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
-                  :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
-                  :temporary-azure-username="temporaryAzureUsername"
-                  :tenant-options="temporaryTenants"
-                  :workspace-options="temporaryWorkspaces"
-                  @change-tenant="changeTemporaryTenant"
-                  @change-workspace="changeTemporaryWorkspace"
-                  @connect-azure="connectTemporaryLogAnalytics"
-                  @disconnect-azure="disconnectTemporaryLogAnalytics"
-                  @authorize-log-analytics="authorizeTemporaryLogAnalytics"
-                  @refresh-azure-access="refreshTemporaryAzureAccess"
-                />
-              </div>
-              <div class="mt-4 border-t border-brand-gray-200 pt-4 dark:border-brand-gray-800">
-                <h2 class="text-sm font-semibold">Display settings</h2>
-                <div class="mt-3 flex flex-wrap gap-x-6 gap-y-3">
-                  <USwitch v-model="use12HourTime" label="12-hour time" />
-                  <USwitch v-model="useLocalTime" label="Local time" />
-                </div>
-                <p class="mt-1 text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                  Time format and zone are independent. Local time uses {{ logBrowserTimeZone }};
-                  off uses UTC. Preferences are stored in this browser.
-                </p>
-                <p
-                  v-if="logTimeFormatError"
-                  role="alert"
-                  class="mt-2 text-xs text-red-600 dark:text-red-400"
-                >
-                  {{ logTimeFormatError }}
-                </p>
-              </div>
-            </section>
-            <footer
-              class="shrink-0 space-y-1 border-t border-default px-4 pt-3 pb-[max(.75rem,env(safe-area-inset-bottom))] font-mono text-xs text-muted"
-            >
-              <span class="block select-none">
-                Version: {{ versionNumber }} by
-                <a
-                  href="https://www.visorian.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1 underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
-                >
-                  <img
-                    :src="visorianPositive"
-                    alt=""
-                    aria-hidden="true"
-                    class="h-3 w-auto dark:hidden"
-                  />
-                  <img
-                    :src="visorianNegative"
-                    alt=""
-                    aria-hidden="true"
-                    class="hidden h-3 w-auto dark:inline"
-                  />
-                  Visorian
-                </a>
-              </span>
-              <span class="block select-none">
-                IP geolocation by
-                <a
-                  href="https://db-ip.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="underline hover:text-brand-gray-700 dark:hover:text-brand-gray-300"
-                >
-                  DB-IP
-                </a>
-              </span>
-            </footer>
-          </div>
-        </template>
-      </USlideover>
-
-      <section
-        v-if="activeLens === 'all-logs'"
-        class="flex min-h-0 flex-col overflow-hidden bg-brand-gray-50 lg:order-1 dark:bg-brand-gray-950"
-        @click.capture="commitLogAnalysisInteraction"
-        @input.capture="commitLogAnalysisInteraction"
-        @change.capture="commitLogAnalysisInteraction"
-      >
-        <div class="shrink-0 bg-white dark:bg-brand-gray-950">
-          <div
-            v-if="!isMobile"
-            role="group"
-            aria-label="All logs status and actions"
-            class="flex flex-wrap items-center justify-between gap-3 border-b border-brand-gray-300 px-4 py-3 dark:border-brand-gray-700"
-          >
-            <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-              <UBadge
-                :color="statusColor(activeStatus)"
-                variant="subtle"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                {{ activeStatus }}
-              </UBadge>
-              <UBadge
-                v-if="showRealTimeLag"
-                icon="i-lucide-clock-3"
-                color="neutral"
-                variant="outline"
-              >
-                <span>{{ receiver.caughtUp.value ? 'Latest' : 'Catching up' }}</span>
-                <NuxtTime
-                  class="hidden sm:inline"
-                  :datetime="receiver.latestSourceTimestamp.value!"
-                  relative
-                  relative-style="narrow"
-                  numeric="always"
-                  :time-zone="logTimeZone"
-                  title
-                />
-              </UBadge>
-              <span class="text-xs text-muted sm:text-sm">
-                {{ countLabel }}
-              </span>
-            </div>
-            <div class="ml-auto flex shrink-0 gap-2">
-              <UButton
-                v-if="!logAnalysisActive && receiver.status.value === 'connected'"
-                class="touch-control"
-                variant="outline"
-                color="neutral"
-                icon="i-lucide-pause"
-                label="Pause"
-                aria-label="Pause"
-                :ui="{ label: 'hidden sm:inline' }"
-                @click="receiver.pause"
-              />
-              <UButton
-                v-if="!logAnalysisActive && receiver.status.value === 'paused'"
-                class="touch-control"
-                variant="outline"
-                color="neutral"
-                icon="i-lucide-play"
-                label="Resume"
-                aria-label="Resume"
-                :ui="{ label: 'hidden sm:inline' }"
-                @click="receiver.resume"
-              />
-              <UButton
-                class="touch-control"
-                variant="outline"
-                color="neutral"
-                icon="i-lucide-trash-2"
-                :label="logAnalysisActive ? 'Clear results' : 'Clear'"
-                :aria-label="logAnalysisActive ? 'Clear results' : 'Clear'"
-                :ui="{ label: 'hidden sm:inline' }"
-                @click="clearActiveResults"
-              />
-            </div>
-          </div>
-
-          <LogsLogAnalysisToolbar
-            ref="logToolbar"
-            :result-count="sortedLogs.length"
-            :active-filter-count="activeFilterCount"
-            :query-state="logAnalysisActive ? mobileQueryState : undefined"
-            @run="runActiveLogAnalysis"
-            @interaction="commitLogAnalysisInteraction"
-          >
-            <template #search>
-              <UInput
-                v-model="activeFilters.search"
-                icon="i-lucide-search"
-                placeholder="Search logs"
-                aria-label="Search logs"
-                class="touch-control min-w-0 flex-1 lg:min-w-48"
-                @keydown.enter="logAnalysisActive && applyLogFilters()"
-              />
-            </template>
-            <template #filters>
-              <UFormField :label="isMobile ? 'Categories' : undefined" class="w-38">
-                <USelectMenu
-                  v-model="activeFilters.category"
-                  :items="categories"
-                  :aria-label="isMobile ? undefined : 'Category filter'"
-                  clear
-                  multiple
-                  :placeholder="isMobile ? 'Any category' : 'Categories'"
-                  class="w-full"
-                  :ui="{
-                    content: 'min-w-64 w-max',
-                    itemLabel: 'overflow-visible text-clip whitespace-nowrap',
-                  }"
-                />
-              </UFormField>
-              <UFormField :label="isMobile ? 'Action' : undefined" class="w-34">
-                <USelectMenu
-                  v-model="actionFilter"
-                  :items="actions"
-                  :create-item="logAnalysisActive"
-                  clear
-                  :placeholder="isMobile ? 'Any action' : 'Action'"
-                  :aria-label="isMobile ? undefined : 'Action filter'"
-                  class="w-full"
-                  @create="createAction"
-                />
-              </UFormField>
-              <UFormField :label="isMobile ? 'Protocol' : undefined" class="w-34">
-                <USelectMenu
-                  v-model="protocolFilter"
-                  :items="protocols"
-                  :create-item="logAnalysisActive"
-                  clear
-                  :placeholder="isMobile ? 'Any protocol' : 'Protocol'"
-                  :aria-label="isMobile ? undefined : 'Protocol filter'"
-                  class="w-full"
-                  @create="createProtocol"
-                />
-              </UFormField>
-              <UFormField :label="isMobile ? 'Source address' : undefined" class="w-40">
-                <UInput
-                  v-model="activeFilters.source"
-                  :placeholder="isMobile ? 'e.g. 10.0.0.4' : 'Source'"
-                  aria-label="Source address"
-                  class="w-full"
-                  @keydown.enter="logAnalysisActive && applyLogFilters()"
-                />
-              </UFormField>
-              <UFormField :label="isMobile ? 'Source port' : undefined" class="w-24">
-                <UInput
-                  v-model="activeFilters.sourcePort"
-                  inputmode="numeric"
-                  :placeholder="isMobile ? 'e.g. 443' : 'Src port'"
-                  aria-label="Source port"
-                  class="w-full"
-                  @keydown.enter="logAnalysisActive && applyLogFilters()"
-                />
-              </UFormField>
-              <UFormField :label="isMobile ? 'Destination address' : undefined" class="w-40">
-                <UInput
-                  v-model="activeFilters.destination"
-                  :placeholder="isMobile ? 'e.g. example.com' : 'Destination'"
-                  aria-label="Destination address"
-                  class="w-full"
-                  @keydown.enter="logAnalysisActive && applyLogFilters()"
-                />
-              </UFormField>
-              <UFormField :label="isMobile ? 'Destination port' : undefined" class="w-24">
-                <UInput
-                  v-model="activeFilters.destinationPort"
-                  inputmode="numeric"
-                  :placeholder="isMobile ? 'e.g. 443' : 'Dst port'"
-                  aria-label="Destination port"
-                  class="w-full"
-                  @keydown.enter="logAnalysisActive && applyLogFilters()"
-                />
-              </UFormField>
-              <UFormField v-if="isMobile" label="Sort by" class="col-span-full">
-                <div class="flex gap-2">
-                  <USelect
-                    v-model="mobileSortKey"
-                    :items="logTableColumns"
-                    label-key="label"
-                    value-key="key"
-                    aria-label="Sort by"
-                    class="touch-control min-w-0 flex-1"
-                  />
-                  <UButton
-                    :icon="
-                      activeSort.direction === 'desc' ? 'i-lucide-arrow-down' : 'i-lucide-arrow-up'
-                    "
-                    :aria-label="
-                      activeSort.direction === 'desc' ? 'Sort descending' : 'Sort ascending'
-                    "
-                    :title="activeSort.direction === 'desc' ? 'Sort descending' : 'Sort ascending'"
-                    color="neutral"
-                    variant="outline"
-                    class="touch-control min-h-11 min-w-11 justify-center"
-                    @click="toggleMobileSortDirection"
-                  />
-                </div>
-              </UFormField>
-              <p v-if="isMobile" class="col-span-full text-xs text-muted">
-                Addresses and ports use an exact match. Use Search logs for partial text.
-              </p>
-              <LogsLogFilterActions
-                :show-apply="logAnalysisActive && !isMobile"
-                :apply-disabled="!logCanApplyFilters || logRangeDirty"
-                :apply-loading="logQueryStatus === 'refreshing'"
-                @apply="applyLogFilters"
-                @reset="resetActiveFilters"
-              />
-            </template>
-            <template v-if="logAnalysisActive" #query="{ mobile }">
-              <LogsLogAnalyticsQueryControls
-                :show-run="!mobile"
-                :display-time-zone="logTimeZone"
-                :hour-cycle="logHourCycle"
-                :draft-range="logDraftRange"
-                :applied-range-label="mobile ? mobileAppliedRangeLabel : activeAppliedRangeLabel"
-                :can-run="canRunLogAnalytics"
-                :query-status="activeQueryStatus"
-                :range-dirty="activeRangeDirty"
-                :range-error="activeRangeError"
-                :results-truncated="activeResultsTruncated"
-                @update:draft-range="updateLogDraftRange"
-                @run="runActiveLogAnalysis"
-              />
-            </template>
-          </LogsLogAnalysisToolbar>
-        </div>
-
-        <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-default pt-3 lg:p-4">
-          <LogsMobileLogList
-            v-if="isMobile && sortedLogs.length > 0"
-            :logs="sortedLogs"
-            :lookup="ipCountryLookup"
-            :format-timestamp="formatLogTimestamp"
-            :time-zone="logTimeZone"
-            :hour-cycle="logHourCycle"
-            @select="selectLog"
-          />
-          <div
-            v-if="!isMobile || sortedLogs.length === 0"
-            :role="isMobile ? undefined : 'table'"
-            aria-label="Firewall logs"
-            data-testid="log-table-scroll"
-            class="flex h-full min-h-0 flex-col overflow-x-auto overflow-y-hidden lg:rounded-md lg:border lg:border-default"
-          >
-            <div
-              v-if="!isMobile && sortedLogs.length > 0"
-              role="row"
-              class="grid h-11 shrink-0 border-b border-brand-gray-300 bg-brand-gray-100 text-xs font-semibold text-brand-gray-800 dark:border-brand-gray-700 dark:bg-brand-gray-900 dark:text-brand-gray-100"
-              :class="[logTableGridClass, logTableMinWidthClass]"
-            >
-              <button
-                v-for="column in logTableColumns"
-                :key="column.key"
-                type="button"
-                role="columnheader"
-                :aria-sort="getAriaSort(column.key)"
-                class="flex min-w-0 items-center gap-1 px-2 text-left"
-                @click="setSort(column.key)"
-              >
-                <span class="truncate">{{ column.label }}</span>
-                <UIcon
-                  :name="getSortIcon(column.key)"
-                  class="size-3 shrink-0 text-brand-gray-500"
-                />
-              </button>
-            </div>
-
-            <ClientOnly>
-              <RecycleScroller
-                v-if="sortedLogs.length > 0"
-                v-slot="{ item }"
-                :items="sortedLogs"
-                :item-size="64"
-                :emit-update="false"
-                key-field="id"
-                class="min-h-0 flex-1"
-                :class="[logTableMinWidthClass]"
-              >
-                <div
-                  role="row"
-                  tabindex="0"
-                  class="grid h-16 w-full items-center border-b border-brand-gray-200 bg-white text-left text-sm text-brand-gray-950 hover:bg-brand-blue-50 focus-visible:outline-2 focus-visible:outline-brand-blue-500 dark:border-brand-gray-700 dark:bg-brand-gray-950 dark:text-brand-gray-50 dark:hover:bg-brand-gray-900"
-                  :class="[logTableGridClass]"
-                  @click="selectLog(item)"
-                  @keydown.enter.self="selectLog(item)"
-                  @keydown.space.self.prevent="selectLog(item)"
-                >
-                  <span
-                    role="cell"
-                    class="min-w-0 truncate px-2 font-mono text-xs whitespace-nowrap text-brand-gray-700 dark:text-brand-gray-200"
-                    :title="formatTime(item.timestamp)"
-                  >
-                    <NuxtTime
-                      :datetime="item.timestamp"
-                      year="numeric"
-                      month="short"
-                      day="2-digit"
-                      hour="2-digit"
-                      minute="2-digit"
-                      second="2-digit"
-                      :time-zone="logTimeZone"
-                      :hour-cycle="logHourCycle"
-                    />
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2"
-                    :title="displayValue(item.category)"
-                  >
-                    <span class="truncate">{{ displayValue(item.category) }}</span>
-                    <button
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('category', item.category) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('category', item.category)"
-                      :aria-pressed="isQuickFilterActive('category', item.category)"
-                      :title="quickFilterLabel('category', item.category)"
-                      @click.stop="toggleQuickFilter('category', item.category)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2 font-medium"
-                    :title="displayValue(item.action)"
-                  >
-                    <span class="truncate">{{ displayValue(item.action) }}</span>
-                    <button
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('action', item.action) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('action', item.action)"
-                      :aria-pressed="isQuickFilterActive('action', item.action)"
-                      :title="quickFilterLabel('action', item.action)"
-                      @click.stop="toggleQuickFilter('action', item.action)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2"
-                    :title="displayValue(item.protocol)"
-                  >
-                    <span class="truncate">{{ displayValue(item.protocol) }}</span>
-                    <button
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('protocol', item.protocol) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('protocol', item.protocol)"
-                      :aria-pressed="isQuickFilterActive('protocol', item.protocol)"
-                      :title="quickFilterLabel('protocol', item.protocol)"
-                      @click.stop="toggleQuickFilter('protocol', item.protocol)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2"
-                    :title="displayValue(item.sourceIp)"
-                  >
-                    <span class="truncate">{{ displayValue(item.sourceIp) }}</span>
-                    <button
-                      v-if="item.sourceIp"
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('source', item.sourceIp) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('source', item.sourceIp)"
-                      :aria-pressed="isQuickFilterActive('source', item.sourceIp)"
-                      :title="quickFilterLabel('source', item.sourceIp)"
-                      @click.stop="toggleQuickFilter('source', item.sourceIp)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs"
-                    :title="displayValue(item.sourcePort)"
-                  >
-                    <span class="truncate">{{ displayValue(item.sourcePort) }}</span>
-                    <button
-                      v-if="item.sourcePort"
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('sourcePort', item.sourcePort) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('sourcePort', item.sourcePort)"
-                      :aria-pressed="isQuickFilterActive('sourcePort', item.sourcePort)"
-                      :title="quickFilterLabel('sourcePort', item.sourcePort)"
-                      @click.stop="toggleQuickFilter('sourcePort', item.sourcePort)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2"
-                    :title="displayValue(item.destinationIp)"
-                  >
-                    <DestinationCountryFlag
-                      :destination="item.destinationIp"
-                      :lookup="ipCountryLookup"
-                    />
-                    <span class="truncate">{{ displayValue(item.destinationIp) }}</span>
-                    <button
-                      v-if="item.destinationIp"
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('destination', item.destinationIp) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('destination', item.destinationIp)"
-                      :aria-pressed="isQuickFilterActive('destination', item.destinationIp)"
-                      :title="quickFilterLabel('destination', item.destinationIp)"
-                      @click.stop="toggleQuickFilter('destination', item.destinationIp)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span
-                    role="cell"
-                    class="flex min-w-0 items-center gap-1 px-2 font-mono text-xs"
-                    :title="displayValue(item.destinationPort)"
-                  >
-                    <span class="truncate">{{ displayValue(item.destinationPort) }}</span>
-                    <button
-                      v-if="item.destinationPort"
-                      type="button"
-                      :class="[
-                        quickFilterButtonClass,
-                        isQuickFilterActive('destinationPort', item.destinationPort) &&
-                          'bg-brand-blue-100 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300',
-                      ]"
-                      :aria-label="quickFilterLabel('destinationPort', item.destinationPort)"
-                      :aria-pressed="isQuickFilterActive('destinationPort', item.destinationPort)"
-                      :title="quickFilterLabel('destinationPort', item.destinationPort)"
-                      @click.stop="toggleQuickFilter('destinationPort', item.destinationPort)"
-                    >
-                      <UIcon name="i-lucide-filter" class="size-3.5" />
-                    </button>
-                  </span>
-                  <span role="cell" class="truncate px-2" :title="displayValue(item.rule)">
-                    {{ displayValue(item.rule) }}
-                  </span>
-                </div>
-              </RecycleScroller>
-              <div
-                v-else
-                class="mobile-results grid min-h-0 flex-1 place-items-center overflow-y-auto px-6 py-8 text-center"
-              >
-                <div class="max-w-sm space-y-3">
-                  <UIcon name="i-lucide-list-filter" class="mx-auto size-8 text-brand-gray-400" />
-                  <h2 class="text-lg font-semibold tracking-tight">{{ emptyState.title }}</h2>
-                  <p class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
-                    {{ emptyState.description }}
-                  </p>
-                  <UButton
-                    v-if="emptyState.settingsActionLabel"
-                    icon="i-lucide-settings"
-                    :label="emptyState.settingsActionLabel"
-                    color="primary"
-                    variant="solid"
-                    class="touch-control mt-2 min-h-11"
-                    @click="openSettings"
-                  />
-                  <UButton
-                    v-else-if="
-                      (activeFilterCount || activeFilters.search) &&
-                      (!logAnalysisActive || logHasRun)
-                    "
-                    label="Reset filters"
-                    variant="outline"
-                    color="neutral"
-                    class="touch-control min-h-11"
-                    @click="resetActiveFilters"
-                  />
-                  <UButton
-                    v-else-if="
-                      isMobile &&
-                      logAnalysisActive &&
-                      canRunLogAnalytics &&
-                      logQueryStatus !== 'loading' &&
-                      logQueryStatus !== 'refreshing' &&
-                      !logRefinementPending
-                    "
-                    :label="logHasRun ? 'Change time range' : 'Choose time range'"
-                    icon="i-lucide-calendar-range"
-                    class="touch-control min-h-11"
-                    @click="logToolbar?.openFilters()"
-                  />
-                </div>
-              </div>
-            </ClientOnly>
-          </div>
-        </div>
-      </section>
-      <section
         v-else
-        class="flex min-h-0 flex-col overflow-hidden bg-white lg:order-1 dark:bg-brand-gray-950"
         @click.capture="commitLogAnalysisInteraction"
         @input.capture="commitLogAnalysisInteraction"
         @change.capture="commitLogAnalysisInteraction"
       >
-        <div
-          v-if="!isMobile"
-          role="group"
-          aria-label="DNS troubleshooting status and actions"
-          class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-brand-gray-300 px-4 py-3 dark:border-brand-gray-700"
-        >
-          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-            <UBadge
-              :color="statusColor(activeStatus)"
-              variant="subtle"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {{ activeStatus }}
-            </UBadge>
-            <span class="text-sm text-brand-gray-600 dark:text-brand-gray-300">
-              {{ dnsCountLabel }}
-            </span>
-            <UBadge
+        <LogsLogAnalyticsSettingsPanel
+          v-model:query-storage="logAnalyticsStorage"
+          v-model:tenant-id="temporaryTenantId"
+          v-model:workspace-id="temporaryWorkspaceId"
+          v-model:query-limit="logAnalyticsQueryLimit"
+          :admin-consent-url="temporaryAdminConsentUrl"
+          :dns-readiness="dnsSourceReadiness.readiness.value"
+          :dns-readiness-status="dnsSourceReadiness.status.value"
+          :lens="activeLens"
+          :temporary="temporaryLogAnalyticsMode"
+          :temporary-auth-error="temporaryLogAnalyticsAuth.lastError.value"
+          :temporary-auth-status="temporaryLogAnalyticsAuth.status.value"
+          :temporary-access-error="temporaryAccessError"
+          :temporary-access-status="temporaryAccessStatus"
+          :temporary-log-analytics-authorized="temporaryLogAnalyticsAuth.authorized.value"
+          :temporary-log-analytics-authorizing="temporaryLogAnalyticsAuthorizing"
+          :temporary-azure-username="temporaryAzureUsername"
+          :tenant-options="temporaryTenants"
+          :workspace-options="temporaryWorkspaces"
+          @change-tenant="changeTemporaryTenant"
+          @change-workspace="changeTemporaryWorkspace"
+          @connect-azure="connectTemporaryLogAnalytics"
+          @disconnect-azure="disconnectTemporaryLogAnalytics"
+          @authorize-log-analytics="authorizeTemporaryLogAnalytics"
+          @refresh-azure-access="refreshTemporaryAzureAccess"
+          @refresh-readiness="dnsSourceReadiness.refresh()"
+        />
+      </div>
+    </LogsSettingsDrawer>
+    <div
+      class="logs-status-row"
+      role="group"
+      :aria-label="`${allLogsLensActive ? 'All logs' : 'DNS troubleshooting'} status and actions`"
+    >
+      <AppStatusLabel v-if="!isPhone" :tone="statusTone" :label="mobileStatusLabel" role="status" />
+      <span v-if="!isPhone" class="text-xs text-muted">{{
+        allLogsLensActive ? countLabel : dnsCountLabel
+      }}</span>
+      <span v-if="!isPhone && showRealTimeLag" class="logs-source-lag text-xs text-muted"
+        ><UIcon name="i-lucide-clock-3" class="size-3.5" /><span>Latest</span
+        ><NuxtTime
+          :datetime="receiver.latestSourceTimestamp.value!"
+          relative
+          relative-style="narrow"
+          numeric="always"
+          :time-zone="logTimeZone"
+          title
+      /></span>
+      <div class="ml-auto flex items-center gap-2">
+        <UButton
+          v-if="!isPhone && !logAnalysisActive && eventHubConnectionActive"
+          :icon="receiver.status.value === 'paused' ? 'i-lucide-play' : 'i-lucide-pause'"
+          :label="receiver.status.value === 'paused' ? 'Resume' : 'Pause'"
+          color="neutral"
+          variant="outline"
+          @click="togglePause"
+        />
+        <UButton
+          class="logs-clear"
+          icon="i-lucide-trash-2"
+          :label="
+            dnsLensActive ? 'Clear DNS results' : logAnalysisActive ? 'Clear results' : 'Clear'
+          "
+          color="neutral"
+          variant="ghost"
+          :disabled="
+            dnsLensActive
+              ? dns.queriedEntryCount.value === 0 && dns.unidentifiedTransportCount.value === 0
+              : sortedLogs.length === 0
+          "
+          @click="clearActiveResults"
+        />
+      </div>
+    </div>
+    <section
+      v-if="allLogsLensActive"
+      class="log-results-section flex min-h-0 flex-1 flex-col overflow-hidden"
+      @click.capture="commitLogAnalysisInteraction"
+      @input.capture="commitLogAnalysisInteraction"
+      @change.capture="commitLogAnalysisInteraction"
+    >
+      <LogsLogAnalysisToolbar
+        ref="logToolbar"
+        :result-count="sortedLogs.length"
+        :active-filter-count="activeFilterCount"
+        :query-state="logAnalysisActive ? mobileQueryState : undefined"
+        :applied-summary="appliedFilterSummary"
+        @run="runActiveLogAnalysis"
+        @interaction="commitLogAnalysisInteraction"
+      >
+        <template #compactSummary>
+          <p
+            v-for="(line, index) in appliedFilterSummary"
+            :key="index"
+            :class="index === 0 ? 'font-mono' : 'text-muted'"
+          >
+            {{ line }}
+          </p>
+          <span v-if="!logAnalysisActive" class="flex flex-wrap items-center gap-2"
+            ><AppStatusLabel :label="mobileStatusLabel" :tone="statusTone" /><span
               v-if="showRealTimeLag"
-              icon="i-lucide-clock-3"
-              color="neutral"
-              variant="outline"
-            >
-              <span>{{ receiver.caughtUp.value ? 'Latest' : 'Catching up' }}</span>
+              class="text-xs text-muted"
+              >Latest ·
               <NuxtTime
-                class="hidden sm:inline"
                 :datetime="receiver.latestSourceTimestamp.value!"
                 relative
                 relative-style="narrow"
                 numeric="always"
-                :time-zone="logTimeZone"
-                title
-              />
-            </UBadge>
+                :time-zone="logTimeZone" /></span
+            ><UButton
+              v-if="eventHubConnectionActive"
+              :icon="receiver.status.value === 'paused' ? 'i-lucide-play' : 'i-lucide-pause'"
+              :aria-label="receiver.status.value === 'paused' ? 'Resume' : 'Pause'"
+              color="neutral"
+              variant="ghost"
+              @click="togglePause"
+          /></span>
+        </template>
+        <template #filters
+          ><LogsLogConnectionFields
+            v-model="activeFilters"
+            :actions="actions"
+            :protocols="protocols"
+            :allow-create="logAnalysisActive"
+            @create-action="logQuery.addActionOption"
+            @create-protocol="logQuery.addProtocolOption"
+        /></template>
+        <template #search
+          ><UFormField label="Search" class="min-w-0 flex-1"
+            ><UInput
+              v-model="activeFilters.search"
+              icon="i-lucide-search"
+              placeholder="Search logs"
+              aria-label="Search logs"
+              class="w-full" /></UFormField
+          ><LogsLogCategoryFilter v-model="activeFilters.category" :categories="categories"
+        /></template>
+        <template #query
+          ><LogsLogAnalyticsQueryControls
+            v-if="logAnalysisActive"
+            v-model:preset="logRangePreset"
+            :draft-range="logDraftRange"
+            @update:draft-range="updateLogDraftRange"
+        /></template>
+        <template #actions
+          ><LogsLogFilterActions
+            :reset-disabled="activeFilterCount === 0"
+            @reset="resetActiveFilters"
+        /></template>
+        <template #summary>
+          <div v-if="isMobile" class="connection-sort flex items-center justify-end gap-2">
+            <USelect
+              v-model="mobileSortKey"
+              :items="logTableColumns"
+              label-key="label"
+              value-key="key"
+              aria-label="Sort by"
+            />
+            <UButton
+              :icon="activeSort.direction === 'desc' ? 'i-lucide-arrow-down' : 'i-lucide-arrow-up'"
+              :aria-label="activeSort.direction === 'desc' ? 'Sort descending' : 'Sort ascending'"
+              color="neutral"
+              variant="ghost"
+              @click="toggleMobileSortDirection"
+            />
           </div>
-          <div class="ml-auto flex shrink-0 gap-2">
-            <UButton
-              v-if="!logAnalysisActive && receiver.status.value === 'connected'"
-              class="touch-control"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-pause"
-              label="Pause"
-              aria-label="Pause"
-              :ui="{ label: 'hidden sm:inline' }"
-              @click="receiver.pause"
-            />
-            <UButton
-              v-if="!logAnalysisActive && receiver.status.value === 'paused'"
-              class="touch-control"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-play"
-              label="Resume"
-              aria-label="Resume"
-              :ui="{ label: 'hidden sm:inline' }"
-              @click="receiver.resume"
-            />
-            <UButton
-              class="touch-control"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-trash-2"
-              label="Clear DNS results"
-              aria-label="Clear DNS results"
-              :ui="{ label: 'hidden sm:inline' }"
-              @click="clearActiveResults"
-            />
-          </div>
-        </div>
-        <LogsDnsTroubleshootingView
-          ref="dnsView"
-          v-model:show-unidentified-transports="dns.showUnidentifiedTransports.value"
-          :hour-cycle="logHourCycle"
+        </template>
+      </LogsLogAnalysisToolbar>
+      <div
+        class="logs-results flex min-h-0 flex-1 flex-col"
+        :aria-busy="
+          logAnalysisActive && (logQueryStatus === 'loading' || logQueryStatus === 'refreshing')
+        "
+      >
+        <AppNotice
+          v-if="logResultsTruncated && logAnalysisActive"
+          tone="warning"
+          title="Result incomplete"
+          description="Result limit reached. Narrow filters or the time range for complete results."
+        />
+        <AppNotice
+          v-if="!logAnalysisActive && receiver.errors.value.length"
+          tone="error"
+          title="Connection failed"
+          :description="receiver.errors.value.join(' ')"
+        />
+        <LogsMobileLogList
+          v-if="isMobile && sortedLogs.length"
+          :logs="sortedLogs"
+          :lookup="ipCountryLookup"
+          :format-timestamp="formatLogTimestamp"
           :time-zone="logTimeZone"
-          :filters="dns.filters.value"
-          :sort="dns.sort.value"
-          :entries="dns.entries.value"
-          :sources="dns.sources.value"
-          :status="dns.status.value"
-          :error="dns.lastError.value"
-          :entries-truncated="dns.entriesTruncated.value"
-          :transports-truncated="dns.transportsTruncated.value"
-          :log-analysis="logAnalysisActive"
-          :query-state="logAnalysisActive ? mobileQueryState : undefined"
-          :can-apply-filters="dns.canApplyFilters.value"
-          :filter-options="dns.filterOptions.value"
-          :selected-entry-id="dns.selectedEntry.value?.id ?? null"
-          @interaction="commitLogAnalysisInteraction"
-          @run="runActiveLogAnalysis"
-          @settings="openSettings"
-          @update:filters="updateDnsFilters"
-          @update:sort="updateDnsSort"
-          @apply="applyDnsFilters"
-          @reset="dns.resetFilters"
-          @select="dns.selectEntry"
-        >
-          <template v-if="logAnalysisActive" #queryControls="{ mobile }">
-            <LogsLogAnalyticsQueryControls
-              :show-run="!mobile"
-              :display-time-zone="logTimeZone"
-              :hour-cycle="logHourCycle"
-              :draft-range="logDraftRange"
-              :applied-range-label="mobile ? mobileAppliedRangeLabel : activeAppliedRangeLabel"
-              :can-run="canRunLogAnalytics"
-              :query-status="activeQueryStatus"
-              :range-dirty="activeRangeDirty"
-              :range-error="activeRangeError"
-              :results-truncated="activeResultsTruncated"
-              @update:draft-range="updateLogDraftRange"
-              @run="runActiveLogAnalysis"
-            />
-          </template>
-        </LogsDnsTroubleshootingView>
-      </section>
-    </div>
-
-    <UModal
-      v-if="activeLens === 'all-logs'"
-      v-model:open="detailOpen"
-      title="Log detail"
-      :description="`Times shown in ${logTimeZone}`"
-      :ui="{ content: 'select-none', body: 'select-none' }"
-      @after:leave="clearClosedDetail"
-    >
-      <template #body>
-        <div v-if="selectedLog" class="space-y-4">
-          <section
-            v-for="(section, sectionIndex) in parsedDetailSections"
-            :key="section.title ?? sectionIndex"
-            class="space-y-3"
-          >
-            <div v-if="section.title" class="flex items-center gap-3">
-              <h3
-                class="shrink-0 text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
-              >
-                {{ section.title }}
-              </h3>
-              <div class="h-px flex-1 bg-brand-gray-200 dark:bg-brand-gray-700" />
-            </div>
-            <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              <div
-                v-for="field in section.fields"
-                :key="field.label"
-                :class="field.wide ? 'sm:col-span-2' : ''"
-              >
-                <dt class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                  {{ field.label }}
-                </dt>
-                <dd
-                  class="mt-1 flex min-w-0 items-center gap-2 text-brand-gray-950 dark:text-brand-gray-50"
-                >
-                  <DestinationCountryFlag
-                    v-if="field.countryDestination"
-                    :destination="field.countryDestination"
-                    :lookup="ipCountryLookup"
-                  />
-                  <span
-                    class="min-w-0 break-words"
-                    :class="[field.mono ? 'font-mono text-xs' : '']"
-                  >
-                    {{ displayValue(field.value) }}
-                  </span>
-                  <UButton
-                    class="touch-control shrink-0"
-                    variant="ghost"
-                    color="neutral"
-                    size="xs"
-                    icon="i-lucide-copy"
-                    :aria-label="`Copy ${field.label}`"
-                    :disabled="!field.value"
-                    @click.stop="copyValue(field.label, field.value)"
-                  />
-                </dd>
-              </div>
-            </dl>
-          </section>
-          <section
-            class="rounded-md border border-brand-gray-200 bg-brand-gray-50 dark:border-brand-gray-700 dark:bg-brand-gray-900"
-          >
-            <div
-              class="flex items-center justify-between border-b border-brand-gray-200 px-3 py-2 dark:border-brand-gray-700"
-            >
-              <h3 class="text-xs font-semibold text-brand-gray-700 dark:text-brand-gray-200">
-                Raw message
-              </h3>
-              <UButton
-                class="touch-control"
-                variant="ghost"
-                color="neutral"
-                size="xs"
-                icon="i-lucide-copy"
-                label="Copy raw"
-                @click="copyValue('Raw message', rawLogJson)"
-              />
-            </div>
-            <textarea
-              :value="rawLogJson"
-              :rows="rawLogRows"
-              aria-label="Raw message"
-              readonly
-              spellcheck="false"
-              wrap="off"
-              class="block max-h-96 w-full resize-none overflow-auto border-0 bg-transparent p-3 font-mono text-xs leading-5 text-brand-gray-950 select-text focus:outline-none dark:text-brand-gray-50"
-            />
-          </section>
+          :hour-cycle="logHourCycle"
+          @select="selectLog"
+        />
+        <LogsLogResultsTable
+          v-else-if="sortedLogs.length"
+          :logs="sortedLogs"
+          :lookup="ipCountryLookup"
+          :time-zone="logTimeZone"
+          :hour-cycle="logHourCycle"
+          :sort="activeSort"
+          :active="isQuickFilterActive"
+          @select="selectLog"
+          @sort="setSort"
+          @filter="toggleQuickFilter"
+        />
+        <div v-else class="logs-empty-state">
+          <UIcon
+            v-if="logQueryStatus === 'loading'"
+            name="i-lucide-loader-circle"
+            class="app-spinner size-6"
+          />
+          <h2 class="text-lg font-semibold">
+            {{
+              logAnalysisActive && logQueryStatus === 'loading'
+                ? 'Loading logs'
+                : logAnalysisActive && logQuery.lastError.value
+                  ? 'Query failed'
+                  : emptyState.title
+            }}
+          </h2>
+          <p class="text-sm text-muted">
+            {{
+              logAnalysisActive && logQuery.lastError.value
+                ? logQuery.lastError.value
+                : logQueryStatus === 'loading' && logAnalysisActive
+                  ? 'Querying your Log Analytics workspace…'
+                  : emptyState.description
+            }}
+          </p>
+          <UButton
+            v-if="emptyState.settingsActionLabel"
+            :label="emptyState.settingsActionLabel"
+            color="neutral"
+            variant="outline"
+            @click="openSettings"
+          />
+          <UButton
+            v-else-if="logAnalysisActive && logQuery.lastError.value"
+            label="Retry query"
+            color="neutral"
+            variant="outline"
+            @click="runLogAnalysis()"
+          />
         </div>
-      </template>
-    </UModal>
+      </div>
+    </section>
+    <section
+      v-else
+      class="log-results-section flex min-h-0 flex-1 flex-col overflow-hidden"
+      @click.capture="commitLogAnalysisInteraction"
+      @input.capture="commitLogAnalysisInteraction"
+      @change.capture="commitLogAnalysisInteraction"
+    >
+      <LogsDnsTroubleshootingView
+        ref="dnsView"
+        v-model:show-unidentified-transports="dns.showUnidentifiedTransports.value"
+        :hour-cycle="logHourCycle"
+        :time-zone="logTimeZone"
+        :filters="dns.filters.value"
+        :sort="dns.sort.value"
+        :entries="dns.entries.value"
+        :sources="dns.sources.value"
+        :status="dns.status.value"
+        :error="dns.lastError.value"
+        :entries-truncated="dns.entriesTruncated.value"
+        :transports-truncated="dns.transportsTruncated.value"
+        :log-analysis="logAnalysisActive"
+        :live-connected="eventHubConnectionActive"
+        :query-state="logAnalysisActive ? mobileQueryState : undefined"
+        :filter-options="dns.filterOptions.value"
+        :applied-filters="dns.appliedFilters.value"
+        :applied-range="dns.appliedRange.value"
+        @interaction="commitLogAnalysisInteraction"
+        @run="runActiveLogAnalysis"
+        @settings="openSettings"
+        @update:filters="updateDnsFilters"
+        @update:sort="updateDnsSort"
+        @reset="dns.resetFilters"
+        @select="dns.selectEntry"
+      >
+        <template v-if="logAnalysisActive" #queryControls>
+          <LogsLogAnalyticsQueryControls
+            v-model:preset="logRangePreset"
+            :draft-range="logDraftRange"
+            @update:draft-range="updateLogDraftRange"
+          />
+        </template>
+      </LogsDnsTroubleshootingView>
+    </section>
+    <LogsLogDetailModal
+      v-model:open="detailOpen"
+      :record="selectedLog"
+      :lookup="ipCountryLookup"
+      :time-zone="logTimeZone"
+      :format-timestamp="formatLogTimestamp"
+      :live="!logAnalysisActive"
+      @after-leave="clearClosedDetail"
+    />
     <LogsDnsDetailModal
       v-model:open="dnsDetailOpen"
       :hour-cycle="logHourCycle"
@@ -2384,6 +475,7 @@ function statusColor(status: string) {
       :error="dns.detailError.value"
       :loading="dns.detailStatus.value === 'loading'"
       @close-auto-focus="restoreDnsFocus"
+      @retry="dns.selectedEntry.value && dns.selectEntry(dns.selectedEntry.value)"
     />
   </div>
 </template>

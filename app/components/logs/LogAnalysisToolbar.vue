@@ -1,264 +1,220 @@
-<script lang="ts">
-export interface MobileQueryState {
-  canRun: boolean
-  hasRun: boolean
-  dirty: boolean
-  status: 'idle' | 'loading' | 'refreshing' | 'success' | 'error'
-  pendingMessage: string
-  rangeError: string | null
-  error: string | null
-}
-</script>
-
 <script setup lang="ts">
 import { useMediaQuery } from '@vueuse/core'
+
+import type { MobileQueryState } from '~/types/logs'
 
 const props = withDefaults(
   defineProps<{
     activeFilterCount?: number
     resultCount: number
     queryState?: MobileQueryState | null
+    appliedSummary?: string[]
   }>(),
-  { activeFilterCount: 0, queryState: null },
+  { activeFilterCount: 0, queryState: null, appliedSummary: () => [] },
 )
 const emit = defineEmits<{ interaction: [event: Event]; run: [] }>()
 defineSlots<{
   search?: () => unknown
   filters?: () => unknown
   query?: (props: { mobile: boolean }) => unknown
+  actions?: () => unknown
   summary?: () => unknown
+  compactSummary?: () => unknown
 }>()
-const isMobile = useMediaQuery('(max-width: 1023px)')
+const id = useId()
+const phone = useMediaQuery('(max-width: 640px)')
 const filtersOpen = ref(false)
 const root = useTemplateRef('root')
-const queryArea = useTemplateRef('queryArea')
-const sheetBody = useTemplateRef('sheetBody')
-let returnTarget: HTMLElement | null = null
-const needsQuery = computed(
-  () =>
-    props.queryState &&
-    (!props.queryState.hasRun || props.queryState.dirty || props.queryState.error !== null),
-)
-const queryLoading = computed(
+const editor = useTemplateRef('editor')
+const toggle = useTemplateRef('toggle')
+const runButton = useTemplateRef('runButton')
+const loading = computed(
   () => props.queryState?.status === 'loading' || props.queryState?.status === 'refreshing',
 )
-const triggerLabel = computed(
-  () =>
-    `${props.queryState ? 'Query & filters' : 'Filters'}${props.activeFilterCount ? ` (${props.activeFilterCount})` : ''}`,
+const unavailable = computed(
+  () => loading.value || !props.queryState?.canRun || Boolean(props.queryState?.rangeError),
 )
-const footerLabel = computed(() => {
-  if (queryLoading.value) {
-    return 'Running query'
+const feedback = computed(() => {
+  if (props.queryState?.rangeError) {
+    return props.queryState.rangeError
   }
-  if (needsQuery.value) {
-    return 'Run query'
+  if (loading.value) {
+    return props.queryState?.hasRun
+      ? 'Running query… Previous results remain visible.'
+      : 'Running query…'
   }
-  return props.resultCount === 0
-    ? 'Done'
-    : `Show ${props.resultCount} ${props.resultCount === 1 ? 'result' : 'results'}`
+  if (props.queryState?.error) {
+    return props.queryState.hasRun
+      ? `Last query failed. Showing previous results. ${props.queryState.error}`
+      : props.queryState.error
+  }
+  if (props.queryState?.dirty) {
+    return 'Changes not applied.'
+  }
+  if (props.queryState && !props.queryState.canRun) {
+    return 'Connect your Azure workspace in Settings to run a query.'
+  }
+  return `${props.resultCount} ${props.resultCount === 1 ? 'result' : 'results'}${props.queryState ? '' : ' · Live filters update immediately.'}`
 })
-watch(isMobile, () => {
-  filtersOpen.value = false
-})
-watch(
-  filtersOpen,
-  (open) => {
-    if (open) {
-      returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    }
-  },
-  { flush: 'sync' },
-)
-
-function focusInitialField(event: Event) {
-  const field =
-    props.queryState &&
-    (!props.queryState.hasRun || props.queryState.rangeError !== null) &&
-    sheetBody.value?.querySelector<HTMLInputElement>('input[type="datetime-local"]')
-  if (field) {
-    event.preventDefault()
-    field.focus({ preventScroll: true })
-  }
-}
-
-function restoreFocus(event: Event) {
-  event.preventDefault()
-  const target = returnTarget?.isConnected
-    ? returnTarget
-    : root.value?.querySelector<HTMLElement>('[data-query-trigger]')
-  if (target instanceof HTMLElement) {
-    target.focus({ preventScroll: true })
-  }
-}
-
 function openFilters() {
-  if (isMobile.value) {
-    filtersOpen.value = true
-  } else {
-    queryArea.value?.querySelector('input')?.focus()
+  filtersOpen.value = true
+  nextTick(() => editor.value?.querySelector<HTMLElement>('input,button')?.focus())
+}
+function focusRun() {
+  runButton.value?.$el.focus({ preventScroll: true })
+}
+async function openRange() {
+  filtersOpen.value = true
+  await nextTick()
+  const range = root.value?.querySelector<HTMLDetailsElement>('details.filter-range')
+  if (range) {
+    range.open = true
+    range.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true })
   }
 }
-
-function finish(event: MouseEvent) {
-  if (queryLoading.value || (needsQuery.value && !props.queryState?.canRun)) {
+function closeFilters() {
+  filtersOpen.value = false
+  nextTick(() => toggle.value?.$el.focus({ preventScroll: true }))
+}
+function runStarted() {
+  for (const panel of root.value?.querySelectorAll<HTMLDetailsElement>('details[open]') ?? []) {
+    const focused = panel.contains(document.activeElement)
+    panel.open = false
+    if (focused && !phone.value) {
+      panel.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true })
+    }
+  }
+  if (phone.value) {
+    filtersOpen.value = false
+    nextTick(() => runButton.value?.$el.focus({ preventScroll: true }))
+  }
+}
+function run(event: Event) {
+  if (!props.queryState || unavailable.value) {
     return
   }
   emit('interaction', event)
-  if (needsQuery.value) {
-    emit('run')
-  } else {
-    filtersOpen.value = false
+  if (event.type === 'click') {
+    runButton.value?.$el.focus({ preventScroll: true })
+  }
+  runStarted()
+  emit('run')
+}
+function keydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && phone.value && filtersOpen.value) {
+    if (root.value?.querySelector('details[open]')) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    closeFilters()
+  }
+  if (
+    event.key === 'Enter' &&
+    !event.isComposing &&
+    (event.target instanceof HTMLInputElement ||
+      (event.target instanceof HTMLButtonElement &&
+        event.target.getAttribute('role') === 'checkbox'))
+  ) {
+    event.preventDefault()
+    run(event)
   }
 }
-
-defineExpose({ openFilters })
+watch(phone, (mobile) => {
+  if (mobile && editor.value?.contains(document.activeElement)) {
+    filtersOpen.value = true
+  }
+})
+defineExpose({ openFilters, openRange, focusRun, runStarted })
 </script>
 
 <template>
   <div
     ref="root"
-    class="shrink-0 border-b border-default px-4 py-2 lg:py-3"
+    class="connection-filters touch-fields"
+    :data-collapsed="phone && !filtersOpen"
     data-testid="log-analysis-toolbar"
+    @keydown="keydown"
   >
-    <div class="flex flex-wrap items-center gap-2" data-testid="log-filter-row">
-      <slot name="search" />
-      <template v-if="!isMobile"><slot name="filters" /></template>
-      <USlideover
-        v-else
-        v-model:open="filtersOpen"
-        side="bottom"
-        :title="queryState ? 'Query & filters' : 'Filters'"
-        :content="{ onOpenAutoFocus: focusInitialField, onCloseAutoFocus: restoreFocus }"
-        :ui="{
-          overlay: 'z-50',
-          content: 'z-50 mx-auto max-h-[90dvh] max-w-2xl rounded-t-xl motion-reduce:animate-none',
-          footer: 'pb-[max(1rem,env(safe-area-inset-bottom))]',
-        }"
-      >
-        <UButton
-          data-query-trigger
-          icon="i-lucide-sliders-horizontal"
-          :aria-label="triggerLabel"
-          :color="activeFilterCount ? 'primary' : 'neutral'"
-          variant="outline"
-          class="min-h-11 min-w-11 shrink-0 justify-center"
+    <UButton
+      v-if="phone"
+      ref="toggle"
+      data-query-trigger
+      color="neutral"
+      variant="outline"
+      :aria-expanded="filtersOpen"
+      :aria-controls="`${id}-filter-editor`"
+      class="connection-edit-toggle"
+      @click="filtersOpen ? closeFilters() : (filtersOpen = true)"
+    >
+      {{ filtersOpen ? 'Hide filters' : 'Edit filters'
+      }}<span class="filter-count" :aria-hidden="activeFilterCount === 0">{{
+        activeFilterCount ? `(${activeFilterCount})` : ''
+      }}</span>
+      <UIcon :name="filtersOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" />
+    </UButton>
+    <div v-if="phone && !filtersOpen" class="connection-overview">
+      <slot name="compactSummary">
+        <p
+          v-for="(line, index) in appliedSummary"
+          :key="index"
+          :class="index === 0 ? 'font-mono' : 'text-muted'"
         >
-          <span class="hidden min-[360px]:inline">{{ triggerLabel }}</span>
-          <span v-if="activeFilterCount" class="min-[360px]:hidden">{{ activeFilterCount }}</span>
-        </UButton>
-        <template #close>
-          <UButton
-            icon="i-lucide-x"
-            aria-label="Close"
-            color="neutral"
-            variant="ghost"
-            class="ms-auto min-h-11 min-w-11"
-          />
-        </template>
-        <template #body>
-          <div
-            ref="sheetBody"
-            class="touch-fields space-y-5"
-            @click.capture="emit('interaction', $event)"
-            @input.capture="emit('interaction', $event)"
-            @change.capture="emit('interaction', $event)"
-          >
-            <div v-if="$slots['query']" class="space-y-3">
-              <slot name="query" :mobile="true" />
-              <p
-                v-if="queryState?.error"
-                role="alert"
-                class="text-sm text-red-700 dark:text-red-400"
-              >
-                {{ queryState.error }}
-              </p>
-              <p
-                v-else-if="queryState?.hasRun && !needsQuery && !queryLoading"
-                role="status"
-                class="text-sm text-muted"
-              >
-                {{ resultCount }}
-                {{ resultCount === 1 ? 'result' : 'results' }} ready.
-              </p>
-              <p v-if="queryState && !queryState.canRun" class="text-sm text-muted">
-                Connect your Azure workspace in Settings to run a query.
-              </p>
-            </div>
-            <div :class="$slots['query'] && 'border-t border-default pt-4'">
-              <p class="mb-4 text-sm text-muted">
-                {{
-                  queryState
-                    ? 'Refine your query with filters, or leave them empty to include all entries.'
-                    : 'Filters update results as you change them.'
-                }}
-              </p>
-              <div
-                class="mobile-filter-fields grid grid-cols-2 gap-3"
-                data-testid="log-filter-panel"
-              >
-                <slot name="filters" />
-              </div>
-            </div>
-            <slot name="summary" />
-          </div>
-        </template>
-        <template #footer>
-          <UButton
-            :label="footerLabel"
-            :icon="queryLoading ? 'i-lucide-loader-circle' : undefined"
-            :ui="{ leadingIcon: queryLoading ? 'animate-spin motion-reduce:animate-none' : '' }"
-            :aria-disabled="Boolean(queryLoading || (needsQuery && !queryState?.canRun))"
-            :aria-busy="queryLoading"
-            class="min-h-11"
-            block
-            @click="finish"
-          />
-        </template>
-      </USlideover>
+          {{ line }}
+        </p>
+      </slot>
     </div>
     <div
-      v-if="
-        isMobile &&
-        queryState &&
-        !filtersOpen &&
-        !queryLoading &&
-        (queryState.error || queryState.dirty)
-      "
-      role="status"
-      class="mt-1 flex min-h-11 items-center justify-between gap-2 text-xs"
-      :class="
-        queryState.error ? 'text-red-700 dark:text-red-400' : 'text-amber-800 dark:text-amber-300'
-      "
+      v-show="!phone || filtersOpen"
+      :id="`${id}-filter-editor`"
+      ref="editor"
+      class="connection-editor"
+      data-testid="log-filter-panel"
+      @click.capture="emit('interaction', $event)"
+      @input.capture="emit('interaction', $event)"
+      @change.capture="emit('interaction', $event)"
     >
-      <span>{{
-        queryState.error
-          ? queryState.hasRun && resultCount > 0
-            ? 'Last query failed. Showing previous results.'
-            : 'Last query failed.'
-          : queryState.pendingMessage
-      }}</span>
+      <div class="connection-fields"><slot name="filters" /></div>
+      <div class="connection-toolbar-row" data-testid="log-filter-row">
+        <div class="connection-search"><slot name="search" /></div>
+        <div class="connection-tools">
+          <slot name="query" :mobile="phone" />
+          <slot name="actions" />
+        </div>
+      </div>
+    </div>
+    <div class="connection-feedback-row">
+      <p
+        :role="queryState?.rangeError || queryState?.error ? 'alert' : 'status'"
+        aria-live="polite"
+        :class="
+          queryState?.rangeError || queryState?.error
+            ? 'text-error'
+            : queryState?.dirty
+              ? 'text-warning'
+              : 'text-muted'
+        "
+      >
+        {{ feedback }}
+      </p>
       <UButton
-        label="Review query"
-        color="neutral"
-        variant="link"
-        class="touch-control shrink-0 p-0 text-xs underline"
-        @click="openFilters"
+        v-if="queryState"
+        ref="runButton"
+        data-run
+        :icon="loading ? 'i-lucide-loader-circle' : 'i-lucide-search'"
+        label="Run query"
+        :aria-busy="loading"
+        :aria-disabled="unavailable"
+        class="connection-run"
+        @click="run"
       />
     </div>
+    <div v-show="!phone || filtersOpen" class="connection-extra"><slot name="summary" /></div>
     <div
-      v-if="!isMobile && ($slots['query'] || $slots['summary'])"
-      ref="queryArea"
-      class="mt-3 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between"
-      data-testid="log-query-row"
+      v-if="!phone && appliedSummary.length > 0 && queryState?.hasRun"
+      class="connection-applied-summary text-xs text-muted"
     >
-      <slot name="query" :mobile="false" />
-      <div
-        v-if="$slots['summary']"
-        class="py-2 text-xs text-muted"
-        :class="$slots['query'] ? 'w-full xl:w-auto xl:self-end' : 'w-full'"
-      >
-        <slot name="summary" />
-      </div>
+      <p v-for="line in appliedSummary" :key="line">{{ line }}</p>
     </div>
   </div>
 </template>

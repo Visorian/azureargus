@@ -2,7 +2,7 @@ import { defineOxlintConfig } from '@visorian/code-standards/oxlint'
 
 export default defineOxlintConfig({
   debt: {
-    maxWarnings: 817,
+    maxWarnings: 815,
     rules: [
       'anti-slop/no-module-mocking',
       'anti-slop/no-unsafe-dictionary-type',

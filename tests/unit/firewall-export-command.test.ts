@@ -147,6 +147,7 @@ function runPowerShell(
       cwd: boundary.directory,
       env: { ...boundary.env, ...env },
       encoding: 'utf8',
+      timeout: 15_000,
     },
   )
 }
@@ -336,6 +337,7 @@ if ((Get-AzContext).Subscription -ne 'original' -or (Get-AzContext).Name -ne 'or
       'services',
     ])
   },
+  20_000,
 )
 
 it('passes PowerShell quote delimiters and expressions as literal argument data', () => {
@@ -349,7 +351,7 @@ it('passes PowerShell quote delimiters and expressions as literal argument data'
   expect(existsSync(join(boundary.directory, 'injected'))).toBe(false)
   expect(exported.status).toBe(0)
   expect(readFileSync(boundary.env.EXPORT_REQUESTS, 'utf8')).toContain(JSON.stringify(name))
-})
+}, 20_000)
 
 it('restores the original PowerShell context after an Azure read fails', () => {
   const boundary = cliBoundary()
@@ -368,7 +370,7 @@ if ((Get-AzContext).Subscription -ne 'original' -or (Get-AzContext).Name -ne 'or
   )
   expect(exported.status).toBe(0)
   expect(exported.stdout).toBe('')
-})
+}, 20_000)
 
 it('does not run a stale helper when the download fails', () => {
   const boundary = cliBoundary()

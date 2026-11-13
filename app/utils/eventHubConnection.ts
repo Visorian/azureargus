@@ -12,7 +12,7 @@ export const DEFAULT_BUFFER_SIZE = 5_000
 export const RAW_BUFFER_MULTIPLIER = 10
 export const MAX_RAW_BUFFER_SIZE = 50_000
 
-export function getRawLogBufferSize(visibleLimit: number) {
+export function getRawLogBufferSize(visibleLimit: number): number {
   const boundedLimit = Number.isFinite(visibleLimit) ? Math.max(0, Math.floor(visibleLimit)) : 0
   return Math.min(Math.max(boundedLimit, boundedLimit * RAW_BUFFER_MULTIPLIER), MAX_RAW_BUFFER_SIZE)
 }
@@ -45,7 +45,7 @@ export function createInitialEventHubConnectionForm(
   }
 }
 
-export function parseEventHubConnectionString(connectionString: string) {
+export function parseEventHubConnectionString(connectionString: string): Map<string, string> {
   const values = new Map<string, string>()
 
   for (const part of connectionString.split(';')) {
@@ -64,58 +64,90 @@ export function parseEventHubConnectionString(connectionString: string) {
   return values
 }
 
-export function getEventHubName(form: EventHubConnectionForm) {
+export function getEventHubName(form: EventHubConnectionForm): string {
   const values = parseEventHubConnectionString(form.connectionString)
-  return values.get('entitypath') || form.eventHubName.trim()
+  return values.get('entitypath') ?? form.eventHubName.trim()
 }
 
-export function getEventHubLookbackStart(lookbackMinutes: number, now = new Date()) {
+export function getEventHubLookbackStart(lookbackMinutes: number, now = new Date()): Date {
   const boundedMinutes = Number.isFinite(lookbackMinutes) ? Math.max(0, lookbackMinutes) : 0
   return new Date(now.getTime() - boundedMinutes * 60_000)
 }
 
-export function validateEventHubConnectionForm(form: EventHubConnectionForm) {
-  const errors: string[] = []
+export function validateEventHubConnectionForm(form: EventHubConnectionForm): string[] {
+  return validateEventHubFields(form).map((error) => error.message)
+}
+
+export interface EventHubFieldError {
+  name: keyof EventHubConnectionForm
+  message: string
+}
+
+export function validateEventHubFields(
+  form: EventHubConnectionForm,
+  managed = false,
+): EventHubFieldError[] {
+  const errors: EventHubFieldError[] = []
   const values = parseEventHubConnectionString(form.connectionString)
 
-  if (form.connectionString.trim().length === 0) {
-    errors.push('Connection string is required.')
+  if (!managed) {
+    if (form.connectionString.trim().length === 0) {
+      errors.push({ name: 'connectionString', message: 'Connection string is required.' })
+    } else {
+      if (!values.has('endpoint')) {
+        errors.push({
+          name: 'connectionString',
+          message: 'Connection string must include Endpoint.',
+        })
+      }
+      if (!values.has('sharedaccesskeyname')) {
+        errors.push({
+          name: 'connectionString',
+          message: 'Connection string must include SharedAccessKeyName.',
+        })
+      }
+      if (!values.has('sharedaccesskey')) {
+        errors.push({
+          name: 'connectionString',
+          message: 'Connection string must include SharedAccessKey.',
+        })
+      }
+      if (!getEventHubName(form)) {
+        errors.push({
+          name: 'eventHubName',
+          message: 'Event Hub name is required when EntityPath is not present.',
+        })
+      }
+    }
   }
 
-  if (!values.has('endpoint')) {
-    errors.push('Connection string must include Endpoint.')
-  }
-
-  if (!values.has('sharedaccesskeyname')) {
-    errors.push('Connection string must include SharedAccessKeyName.')
-  }
-
-  if (!values.has('sharedaccesskey')) {
-    errors.push('Connection string must include SharedAccessKey.')
-  }
-
-  if (!getEventHubName(form)) {
-    errors.push('Event Hub name is required when EntityPath is not present.')
-  }
-
-  errors.push(...validateEventHubReceiverSettings(form))
-
+  errors.push(...validateReceiverFields(form))
   return errors
 }
 
-export function validateEventHubReceiverSettings(form: EventHubConnectionForm) {
-  const errors: string[] = []
+export function validateEventHubReceiverSettings(form: EventHubConnectionForm): string[] {
+  return validateReceiverFields(form).map((error) => error.message)
+}
+
+function validateReceiverFields(form: EventHubConnectionForm) {
+  const errors: EventHubFieldError[] = []
 
   if (form.consumerGroup.trim().length === 0) {
-    errors.push('Consumer group is required.')
+    errors.push({ name: 'consumerGroup', message: 'Consumer group is required.' })
   }
 
   if (!isEventHubLookbackMinutes(form.lookbackMinutes)) {
-    errors.push('Lookback window must be 1, 3, 5, 10, or 15 minutes.')
+    errors.push({
+      name: 'lookbackMinutes',
+      message: 'Lookback window must be 1, 3, 5, 10, or 15 minutes.',
+    })
   }
 
   if (!Number.isInteger(form.bufferSize) || form.bufferSize < 100) {
-    errors.push('Visible row limit must be at least 100 log entries.')
+    errors.push({
+      name: 'bufferSize',
+      message: 'Visible row limit must be at least 100 log entries.',
+    })
   }
 
   return errors

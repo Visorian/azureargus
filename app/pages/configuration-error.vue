@@ -4,56 +4,54 @@ definePageMeta({
   oidcAuth: false,
 })
 
-const deployment = useDeploymentCapabilities()
-const retrying = ref(false)
-const errors = computed(() => deployment.capabilities.value?.errors ?? [])
+const { checking, errors, feedback, retrying, unavailable, retry } = useConfigurationRecovery()
 
-async function loadCapabilities() {
-  try {
-    await deployment.load()
-  } catch {
-    // Error state is exposed by composable.
-  }
-}
-
-onMounted(() => {
-  if (deployment.capabilities.value === null && deployment.status.value === 'idle') {
-    void loadCapabilities()
-  }
-})
-
-async function retry() {
-  retrying.value = true
-  try {
-    const capabilities = await deployment.load(true)
-    if (capabilities.mode !== 'invalid') {
-      await navigateTo(capabilities.mode === 'anonymous' ? '/logs' : '/login')
-    }
-  } catch {
-    // Error state is exposed by composable.
-  } finally {
-    retrying.value = false
-  }
-}
+useHead({ title: 'Deployment configuration · Azure Argus' })
 </script>
 
 <template>
-  <UCard>
-    <template #header>
-      <div class="space-y-1">
-        <h1 class="text-lg font-semibold">Deployment configuration unavailable</h1>
-        <p class="text-sm text-muted">Azure Argus cannot determine a safe authentication mode.</p>
-      </div>
+  <AppStatusCard
+    :title="
+      checking
+        ? 'Checking deployment configuration'
+        : unavailable
+          ? 'Deployment configuration unavailable'
+          : 'Configuration ready'
+    "
+    :description="
+      checking
+        ? 'Loading the application settings…'
+        : unavailable
+          ? 'Azure Argus cannot load its authentication configuration.'
+          : 'Opening Azure Argus…'
+    "
+  >
+    <p v-if="checking" role="status" class="text-sm text-muted">Checking configuration…</p>
+    <AppNotice
+      v-else-if="unavailable"
+      tone="error"
+      title="Configuration needs attention"
+      :description="
+        errors.length === 0
+          ? 'Deployment configuration could not be loaded. Check the connection and retry.'
+          : undefined
+      "
+    >
+      <template v-if="errors.length > 0" #default>
+        <ul class="status-error-list">
+          <li v-for="error in errors" :key="error.code">{{ error.message }}</li>
+        </ul>
+      </template>
+    </AppNotice>
+    <p v-if="feedback" role="status" class="status-retry-feedback">{{ feedback }}</p>
+    <template #actions>
+      <UButton
+        label="Retry"
+        :icon="retrying ? 'i-lucide-loader-circle' : 'i-lucide-refresh-cw'"
+        :aria-disabled="checking || retrying || !unavailable"
+        :aria-busy="retrying"
+        @click="retry"
+      />
     </template>
-
-    <div class="space-y-3">
-      <ul v-if="errors.length > 0" class="list-disc space-y-1 pl-5 text-sm" role="alert">
-        <li v-for="error in errors" :key="error.code">{{ error.message }}</li>
-      </ul>
-      <p v-else class="text-sm" role="alert">
-        {{ deployment.lastError.value ?? 'Deployment configuration could not be loaded.' }}
-      </p>
-      <UButton label="Retry" icon="i-lucide-refresh-cw" :loading="retrying" @click="retry" />
-    </div>
-  </UCard>
+  </AppStatusCard>
 </template>

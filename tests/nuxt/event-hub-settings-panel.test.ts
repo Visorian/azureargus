@@ -1,12 +1,10 @@
 import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
+import { onTestFinished } from 'vitest'
+import { reactive } from 'vue'
 
 import EventHubSettingsPanel from '../../app/components/logs/EventHubSettingsPanel.vue'
-import type { EventHubConnectionForm } from '../../app/composables/useEventHubConnection'
-
-const DEPLOY_EVENT_HUB_URL =
-  'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json'
-const DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL =
-  'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json'
+import type { EventHubConnectionForm } from '../../app/utils/eventHubConnection'
 
 function createConnectionForm(): EventHubConnectionForm {
   return {
@@ -37,142 +35,154 @@ function createProps(connectionForm = createConnectionForm()) {
   }
 }
 
-const mountOptions = {
-  global: {
-    stubs: {
-      UTooltip: {
-        template: '<div><slot /><slot name="content" /></div>',
-      },
-    },
-  },
-}
-
 describe('EventHubSettingsPanel', () => {
-  it('offers a safe deployment handoff in anonymous mode', async () => {
-    const wrapper = await mountSuspended(EventHubSettingsPanel, {
-      ...mountOptions,
-      props: createProps(),
-    })
-
-    const eventHubLink = wrapper.get(`a[href="${DEPLOY_EVENT_HUB_URL}"]`)
-    const diagnosticsLink = wrapper.get(`a[href="${DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL}"]`)
-
-    expect(
-      wrapper.findAll('a[href^="https://portal.azure.com/#create/Microsoft.Template/uri/"]'),
-    ).toHaveLength(2)
-    expect(eventHubLink.text()).toContain('Event Hub only')
-    expect(eventHubLink.attributes('aria-label')).toBe(
-      'Deploy Event Hub only to Azure (opens in new tab)',
+  it('offers deployment handoff without retaining credentials', async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, { props: createProps() })
+    const deploymentLinks = wrapper.findAll(
+      'a[href^="https://portal.azure.com/#create/Microsoft.Template/uri/"]',
     )
-    expect(diagnosticsLink.text()).toContain('Event Hub + firewall diagnostics')
-    expect(diagnosticsLink.attributes('aria-label')).toBe(
-      'Deploy Event Hub and firewall diagnostics to Azure (opens in new tab)',
-    )
-    for (const deployLink of [eventHubLink, diagnosticsLink]) {
-      expect(deployLink.attributes('target')).toBe('_blank')
-      expect(deployLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(deploymentLinks.map((link) => link.text())).toStrictEqual([
+      'Event Hub only',
+      'Event Hub + firewall diagnostics',
+    ])
+    for (const link of deploymentLinks) {
+      expect(link.attributes('target')).toBe('_blank')
+      expect(link.attributes('rel')).toBe('noopener noreferrer')
+      expect(link.attributes('aria-label')).toContain('(opens in new tab)')
     }
     expect(wrapper.text()).toContain('azureargus-listen')
     expect(wrapper.text()).toContain('EntityPath')
-  })
-
-  it('renders connection settings, updates form values, and emits connection intents', async () => {
-    const connectionForm = createConnectionForm()
-    const wrapper = await mountSuspended(EventHubSettingsPanel, {
-      ...mountOptions,
-      props: createProps(connectionForm),
-    })
-
-    expect(wrapper.get('h2').text()).toBe('Live Event Hub settings')
-    expect(wrapper.text()).toContain('Connection string')
-    expect(wrapper.text()).toContain('Consumer group')
-    expect(wrapper.text()).toContain('Event Hub name')
-    expect(wrapper.text()).toContain('Lookback')
-    expect(wrapper.text()).toContain('Visible rows')
-
-    await wrapper.get('textarea').setValue('Endpoint=sb://example/;EntityPath=firewall')
-    const inputs = wrapper.findAll('input')
-    await inputs[1]!.setValue('firewall-events')
-    await inputs[2]!.setValue('1000')
-
-    expect(connectionForm.connectionString).toBe('Endpoint=sb://example/;EntityPath=firewall')
-    expect(connectionForm.eventHubName).toBe('firewall-events')
-    expect(connectionForm.bufferSize).toBe(1_000)
-    expect(wrapper.emitted('update:connectionForm')).toHaveLength(3)
-
     await wrapper.get('[role="checkbox"]').trigger('click')
-    expect(wrapper.emitted('update:rememberConnectionString')).toEqual([[true]])
-
-    await wrapper.get('form').trigger('submit')
-    expect(wrapper.emitted('connect')).toHaveLength(1)
-
-    const disconnect = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('Disconnect'))
-    expect(disconnect).toBeDefined()
-    await disconnect!.trigger('click')
-    expect(wrapper.emitted('disconnect')).toHaveLength(1)
+    expect(wrapper.emitted('update:rememberConnectionString')).toStrictEqual([[true]])
   })
 
-  it('emits retention changes and renders persistence and retention errors', async () => {
+  it('shows invalid connection fields and prevents connecting', async () => {
+    const connectionForm = reactive(createConnectionForm())
     const wrapper = await mountSuspended(EventHubSettingsPanel, {
-      ...mountOptions,
+      props: createProps(connectionForm),
+      attachTo: document.body,
+      global: { stubs: { UTooltip: { inheritAttrs: false, template: '<slot />' } } },
+    })
+    onTestFinished(() => {
+      wrapper.unmount()
+    })
+    const connect = wrapper.findAll('button').find((button) => button.text() === 'Connect')!
+    await connect.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('connect')).toBeUndefined()
+    expect(wrapper.get('textarea').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.text()).toContain('Connection string is required.')
+    expect(wrapper.text()).not.toContain(
+      'Event Hub name is required when EntityPath is not present.',
+    )
+    expect(document.activeElement).toBe(wrapper.get('textarea').element)
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'Review the highlighted connection settings.',
+    )
+    await wrapper.get('textarea').setValue('Endpoint=sb://example.servicebus.windows.net/;')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Event Hub name is required when EntityPath is not present.')
+    await wrapper
+      .get('textarea')
+      .setValue(
+        'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=firewall',
+      )
+    await flushPromises()
+    expect(wrapper.find('[aria-invalid="true"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain(
+      'Event Hub name is required when EntityPath is not present.',
+    )
+    expect(wrapper.find('.settings-validation-summary').exists()).toBe(false)
+    const consumerGroup = wrapper.get('input[name="consumerGroup"]')
+    await consumerGroup.setValue('')
+    await flushPromises()
+    expect(consumerGroup.attributes('aria-invalid')).toBe('true')
+    await consumerGroup.setValue('$Default')
+    await flushPromises()
+    expect(consumerGroup.attributes('aria-invalid')).toBe('false')
+  })
+
+  it('connects a valid form and makes disconnect available only for an active connection', async () => {
+    const form = createConnectionForm()
+    form.connectionString =
+      'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;SharedAccessKey=secret;EntityPath=firewall'
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
+      props: createProps(form),
+      attachTo: document.body,
+    })
+    onTestFinished(() => {
+      wrapper.unmount()
+    })
+    const connect = wrapper.findAll('button').find((button) => button.text() === 'Connect')!
+    const disconnect = wrapper.findAll('button').find((button) => button.text() === 'Disconnect')!
+    expect(disconnect.attributes('aria-disabled')).toBe('true')
+    await disconnect.trigger('click')
+    expect(wrapper.emitted('disconnect')).toBeUndefined()
+    connect.element.focus()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.emitted('connect')).toHaveLength(1)
+    await wrapper.setProps({ connecting: true })
+    expect(connect.attributes('aria-busy')).toBe('true')
+    expect(document.activeElement).toBe(connect.element)
+    await connect.trigger('click')
+    expect(wrapper.emitted('connect')).toHaveLength(1)
+    expect(disconnect.attributes('aria-disabled')).toBe('false')
+    await disconnect.trigger('click')
+    expect(wrapper.emitted('disconnect')).toHaveLength(1)
+    await wrapper.setProps({ connecting: false, connectionActive: true })
+    expect(connect.attributes('aria-disabled')).toBe('true')
+    expect(connect.attributes()).not.toHaveProperty('disabled')
+    expect(disconnect.attributes('aria-disabled')).toBe('false')
+    expect(wrapper.text()).toContain('Connected to Event Hub.')
+    expect(wrapper.get('textarea').attributes()).toHaveProperty('disabled')
+    await disconnect.trigger('click')
+    expect(wrapper.emitted('disconnect')).toHaveLength(2)
+  })
+
+  it('explains retention and confirms clearing saved records', async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
+      props: { ...createProps(), savedLogCount: 3 },
+      attachTo: document.body,
+    })
+    expect(wrapper.text()).toContain(
+      'Turning retention off or starting a new session clears saved records.',
+    )
+    await wrapper.get('[role="switch"]').trigger('click')
+    expect(wrapper.emitted('updateLogRetention')).toBeUndefined()
+    await flushPromises()
+    const dialog = document.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('Saved Live Event Hub records will be cleared')
+    const confirm = Array.from(dialog?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Turn off and clear saved logs',
+    )
+    expect(confirm).toBeDefined()
+    confirm?.click()
+    await flushPromises()
+    expect(wrapper.emitted('updateLogRetention')).toStrictEqual([[false]])
+    wrapper.unmount()
+  })
+
+  it('keeps persistence errors beside their settings and omits deployment-managed credentials', async () => {
+    const wrapper = await mountSuspended(EventHubSettingsPanel, {
       props: {
         ...createProps(),
-        connectionStringPersistenceError: 'Credential could not be saved.',
-        logHistoryError: 'Saved logs could not be cleared.',
+        connectionStringPersistenceError: 'Storage is unavailable.',
+        logHistoryError: 'Browser records could not be cleared.',
       },
     })
-
-    const alerts = wrapper.findAll('[role="alert"]')
-    expect(alerts.map((alert) => alert.text())).toEqual([
-      'Credential could not be saved.',
-      'Saved logs could not be cleared.',
-    ])
-
-    const retention = wrapper.get('[role="switch"]')
-    expect(retention.attributes('aria-checked')).toBe('true')
-    await retention.trigger('click')
-    expect(wrapper.emitted('updateLogRetention')).toEqual([[false]])
-  })
-
-  it('disables deployment-managed credential settings', async () => {
-    const wrapper = await mountSuspended(EventHubSettingsPanel, {
-      ...mountOptions,
-      props: { ...createProps(), managed: true },
-    })
-
+    expect(
+      wrapper
+        .findAll('[role="alert"]')
+        .map((alert) => alert.text())
+        .join(' '),
+    ).toContain('Storage is unavailable.')
+    expect(wrapper.text()).toContain('Browser records could not be cleared.')
+    await wrapper.setProps({ managed: true, reconnecting: true })
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.find('a[href^="https://portal.azure.com/#create/"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Connection is configured by deployment.')
-    expect(wrapper.find(`a[href="${DEPLOY_EVENT_HUB_URL}"]`).exists()).toBe(false)
-    expect(wrapper.find(`a[href="${DEPLOY_EVENT_HUB_WITH_DIAGNOSTICS_URL}"]`).exists()).toBe(false)
-    expect(wrapper.find('textarea').attributes()).toHaveProperty('disabled')
-    expect(wrapper.text()).not.toContain('Remember connection string')
-    const eventHubName = wrapper.findAll('input')[1]
-    expect(eventHubName?.attributes()).toHaveProperty('disabled')
-  })
-
-  it('disables connection fields while the connection is active', async () => {
-    const wrapper = await mountSuspended(EventHubSettingsPanel, {
-      ...mountOptions,
-      props: { ...createProps(), connectionActive: true },
-    })
-
-    expect(wrapper.get('textarea').attributes()).toHaveProperty('disabled')
+    expect(wrapper.text()).toContain('Reconnecting to Event Hub')
     expect(wrapper.findAll('input').every((input) => 'disabled' in input.attributes())).toBe(true)
-    expect(wrapper.get('[role="combobox"]').attributes()).toHaveProperty('disabled')
-    expect(wrapper.get('[role="checkbox"]').attributes()).not.toHaveProperty('disabled')
-    expect(wrapper.get('[role="switch"]').attributes()).not.toHaveProperty('disabled')
-  })
-
-  it('shows reconnect progress and disables connection fields', async () => {
-    const wrapper = await mountSuspended(EventHubSettingsPanel, {
-      ...mountOptions,
-      props: { ...createProps(), reconnecting: true },
-    })
-
-    expect(wrapper.get('[role="status"]').text()).toContain('Reconnecting to Event Hub')
-    expect(wrapper.get('textarea').attributes()).toHaveProperty('disabled')
-    expect(wrapper.findAll('input').every((input) => 'disabled' in input.attributes())).toBe(true)
-    expect(wrapper.get('[role="combobox"]').attributes()).toHaveProperty('disabled')
   })
 })

@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises'
 
 const root = new URL('../../', import.meta.url)
-const APP_ASSET_PATTERN = /entry\.js|app\.js|router|__NUXT__/i
-const REDIRECT_BRIDGE_PATTERN = /return `([^`]*@azure\/msal-browser\/redirect-bridge[^`]*)`/
-const APP_FRAMEWORK_PATTERN = /nuxt|vue|router/i
+const APP_ASSET_PATTERN = /entry\.js|app\.js|router|__NUXT__/iu
+const REDIRECT_BRIDGE_PATTERN = /return `([^`]*@azure\/msal-browser\/redirect-bridge[^`]*)`/u
+const APP_FRAMEWORK_PATTERN = /(?:import\s*\(|from\s*)["'](?:nuxt|vue|vue-router|#app)(?:[/'"])/iu
 
 describe('MSAL redirect bridge', () => {
   it('serves a dedicated page that loads only the bridge asset', async () => {
