@@ -2,14 +2,14 @@ import type { Mock } from 'vitest'
 import { computed, shallowRef } from 'vue'
 import type { Ref } from 'vue'
 
-import { createInitialEventHubConnectionForm } from '../../app/composables/useEventHubConnection'
-import type { EventHubConnectionForm } from '../../app/composables/useEventHubConnection'
 import { eventsToFirewallLogs } from '../../app/composables/useEventHubReceiver'
 import type {
   CreateEventHubReceiverClient,
   EventHubLogEvent,
   EventHubReceiverClient,
 } from '../../app/composables/useEventHubReceiver'
+import { createInitialEventHubConnectionForm } from '../../app/utils/eventHubConnection'
+import type { EventHubConnectionForm } from '../../app/utils/eventHubConnection'
 import type { FirewallLogRecord } from '../../shared/types/firewall'
 
 type ReceiverHandlers = Parameters<EventHubReceiverClient['subscribe']>[0]
@@ -304,6 +304,8 @@ describe('Event Hub receiver helpers', () => {
     await vi.waitFor(() => {
       expect(managedFetch).toHaveBeenCalledTimes(2)
     })
+    expect(receiver.status.value).toBe('connected')
+    expect(receiver.errors.value).toStrictEqual([])
     expect(JSON.parse(requestBody(managedFetch.mock.calls[1]?.[1]))).toEqual({
       consumerGroup: '$Default',
       lookbackMinutes: 15,
@@ -1591,6 +1593,7 @@ describe('Event Hub receiver helpers', () => {
     expect(receiver.errors.value).toEqual(['transient receive failure', 'paused receive failure'])
     await vi.advanceTimersByTimeAsync(1_000)
     expect(receiver.status.value).toBe('connected')
+    expect(receiver.errors.value).toStrictEqual([])
     expect(startPositions[1]).toEqual({ '0': { sequenceNumber: 4, isInclusive: false } })
     expect(mocks.historyClear).toHaveBeenCalledOnce()
 

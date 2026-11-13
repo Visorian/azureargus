@@ -12,8 +12,8 @@ import {
 } from './support/managedEventHub'
 
 const LOGS_URL_PATTERN = /\/logs/
-const RETENTION_OFF_ROW_PATTERN = /Jul 21, 2026, 10:00:00 AZFWNetworkRule/
-const RETENTION_ON_ROW_PATTERN = /Jul 21, 2026, 10:01:00 AZFWNetworkRule/
+const RETENTION_OFF_ROW_PATTERN = /Jul 21.*10:00:00.*Network rules/u
+const RETENTION_ON_ROW_PATTERN = /Jul 21.*10:01:00.*Network rules/u
 
 async function getStoredLogCount(page: Page) {
   return await page.evaluate(
@@ -101,22 +101,25 @@ test('local log retention is opt-in and clearing is persistent', async ({ page }
       },
     ],
   })
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByText('1 visible / 1 received')).toBeVisible()
   await expect(page.getByRole('row', { name: RETENTION_OFF_ROW_PATTERN })).toBeVisible()
   settingsDrawer = await openSettings(page)
   await settingsDrawer.getByRole('button', { name: 'Disconnect' }).click()
   await settingsDrawer.getByRole('button', { name: 'Connect', exact: true }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(
     page.getByRole('group', { name: 'All logs status and actions' }).getByRole('status'),
-  ).toHaveText('connected')
+  ).toHaveText('Live')
   await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
 
   await page.reload()
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
   settingsDrawer = await openSettings(page)
   await expect(logRetentionSwitch).not.toBeChecked()
+  await settingsDrawer.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(page.getByText('No logs received')).toBeVisible()
+  settingsDrawer = await openSettings(page)
 
   await logRetentionSwitch.click()
   await expect(logRetentionSwitch).toBeChecked()
@@ -142,19 +145,26 @@ test('local log retention is opt-in and clearing is persistent', async ({ page }
       },
     ],
   })
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
+  await settingsDrawer.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByText('1 visible / 1 received')).toBeVisible()
   await expect(page.getByRole('row', { name: RETENTION_ON_ROW_PATTERN })).toBeVisible()
   await expect.poll(async () => await getStoredLogCount(page)).toBe(1)
 
   await openSettings(page)
   await logRetentionSwitch.click()
+  const confirmation = page.getByRole('dialog', { name: 'Turn off local log retention?' })
+  await expect(confirmation).toBeVisible()
+  await expect(
+    page.getByRole('switch', { name: 'Local log retention', includeHidden: true }),
+  ).toBeChecked()
+  await confirmation.getByRole('button', { name: 'Turn off and clear saved logs' }).click()
   await expect(logRetentionSwitch).not.toBeChecked()
   await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
   await page.reload()
   await expect(page).toHaveURL(LOGS_URL_PATTERN)
-  await openSettings(page)
+  const reloadedSettings = await openSettings(page)
   await expect(logRetentionSwitch).not.toBeChecked()
+  await reloadedSettings.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(page.getByText('No logs received')).toBeVisible()
 })
 
@@ -191,6 +201,7 @@ test('starting a temporary Event Hub session removes predecessor history', async
 
   await expect.poll(async () => await getStoredLogCount(page)).toBe(0)
   await expect(logRetentionSwitch).toBeChecked()
+  await settingsDrawer.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(searchInput).toHaveValue('')
   await expect(page.getByRole('main')).toBeVisible()
 })
@@ -204,13 +215,23 @@ test('invalid Event Hub settings stay idle and show validation errors', async ({
     .fill('Endpoint=sb://example.servicebus.windows.net/;')
   await page.getByRole('textbox', { name: 'Consumer group*' }).press('Enter')
 
-  const notification = page.getByRole('listitem')
-  await expect(notification).toContainText('Connection string must include SharedAccessKeyName.')
-  await expect(notification).toContainText('Connection string must include SharedAccessKey.')
-  await expect(notification).toContainText(
-    'Event Hub name is required when EntityPath is not present.',
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await expect(settings.getByRole('textbox', { name: 'Connection string*' })).toHaveAttribute(
+    'aria-invalid',
+    'true',
   )
-  await expect(page.getByText('idle', { exact: true })).toBeVisible()
+  await expect(
+    settings.getByText('Connection string must include SharedAccessKeyName.'),
+  ).toBeVisible()
+  await settings
+    .getByRole('textbox', { name: 'Connection string*' })
+    .fill('Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=Listen;')
+  await settings.getByRole('textbox', { name: 'Consumer group*' }).press('Enter')
+  await expect(settings.getByText('Connection string must include SharedAccessKey.')).toBeVisible()
+  await expect(
+    settings.getByText('Event Hub name is required when EntityPath is not present.'),
+  ).toBeVisible()
+  await expect(settings.getByRole('button', { name: 'Disconnect', exact: true })).toBeDisabled()
 })
 
 test('connection string persistence is explicit and reversible', async ({ page }) => {
@@ -262,13 +283,17 @@ test('connection string remains opted in when browser storage removal fails', as
   await connectionStringInput.fill(connectionString)
   await rememberConnectionString.check()
   await page.evaluate((key) => {
-    // oxlint-disable-next-line typescript/unbound-method -- keeps the native method to delegate with the patched receiver via .call(this)
-    const removeItem = Storage.prototype.removeItem
+    const removeLocalItem = localStorage.removeItem.bind(localStorage)
+    const removeSessionItem = sessionStorage.removeItem.bind(sessionStorage)
     Storage.prototype.removeItem = function (itemKey) {
       if (itemKey === key) {
         throw new DOMException('Storage is blocked', 'SecurityError')
       }
-      removeItem.call(this, itemKey)
+      if (this === localStorage) {
+        removeLocalItem(itemKey)
+      } else {
+        removeSessionItem(itemKey)
+      }
     }
   }, EVENT_HUB_CONNECTION_STRING_STORAGE_KEY)
 
@@ -294,13 +319,17 @@ test('connection string stays opted out when browser storage saving fails', asyn
   })
   await connectionStringInput.fill(connectionString)
   await page.evaluate((key) => {
-    // oxlint-disable-next-line typescript/unbound-method -- keeps the native method to delegate with the patched receiver via .call(this)
-    const setItem = Storage.prototype.setItem
+    const setLocalItem = localStorage.setItem.bind(localStorage)
+    const setSessionItem = sessionStorage.setItem.bind(sessionStorage)
     Storage.prototype.setItem = function (itemKey, value) {
       if (itemKey === key) {
         throw new DOMException('Storage is blocked', 'SecurityError')
       }
-      setItem.call(this, itemKey, value)
+      if (this === localStorage) {
+        setLocalItem(itemKey, value)
+      } else {
+        setSessionItem(itemKey, value)
+      }
     }
   }, EVENT_HUB_CONNECTION_STRING_STORAGE_KEY)
 

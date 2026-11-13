@@ -91,24 +91,48 @@ function createMsalRedirectBridgePlugin(): Plugin {
       if (id !== RESOLVED_MSAL_REDIRECT_MODULE_ID) {
         return null
       }
-      return `const parameters = new URLSearchParams(window.location.search);
+      return `try {
+  const preference = window.localStorage.getItem("nuxt-color-mode");
+  if (preference === "light" || preference === "dark") {
+    document.documentElement.classList.add(preference);
+  }
+} catch {}
+
+function showOutcome(title, text, state) {
+  document.title = title;
+  const heading = document.getElementById("status-title");
+  if (heading) heading.textContent = title;
+  const message = document.querySelector("p");
+  if (message) message.textContent = text;
+  const status = document.querySelector(".callback-status");
+  if (status) {
+    status.dataset.state = state;
+    const path = status.querySelector("path");
+    if (path) path.setAttribute("d", state === "success"
+      ? "M22 11.1V12a10 10 0 1 1-5.9-9.1 M22 4 12 14l-3-3"
+      : "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M8 8l8 8 M16 8l-8 8");
+  }
+}
+
+const parameters = new URLSearchParams(window.location.search);
 if (parameters.get("state") === "azure-argus-admin-consent") {
   const granted = parameters.get("admin_consent")?.toLowerCase() === "true";
-  document.title = granted ? "Tenant consent granted" : "Tenant consent not granted";
-  const message = document.querySelector("p");
-  if (message) {
-    message.textContent = granted
+  showOutcome(
+    granted ? "Tenant consent granted" : "Tenant consent not granted",
+    granted
       ? "Tenant consent granted. Return to Azure Argus to continue."
-      : "Tenant consent was not granted. Return to Azure Argus and try again.";
-  }
+      : "Tenant consent was not granted. Return to Azure Argus and try again.",
+    granted ? "success" : "error"
+  );
 } else {
   void import("@azure/msal-browser/redirect-bridge").then(({ broadcastResponseToMainFrame }) => {
     return broadcastResponseToMainFrame();
   }).catch(() => {
-    const message = document.querySelector("p");
-    if (message) {
-      message.textContent = "Azure authentication response could not be processed. Close this window and try again.";
-    }
+    showOutcome(
+      "Authentication response unavailable",
+      "Azure authentication response could not be processed. Return to Azure Argus and try again.",
+      "error"
+    );
   });
 }`
     },
@@ -123,6 +147,7 @@ export default defineNuxtConfig({
     head: {
       title: 'Azure Argus',
       htmlAttrs: { lang: 'en' },
+      link: [{ rel: 'stylesheet', href: '/styles/design-tokens.css' }],
       meta: [
         {
           name: 'description',
@@ -209,7 +234,7 @@ export default defineNuxtConfig({
   },
   icon: {
     clientBundle: {
-      scan: true,
+      scan: { globInclude: ['app/**/*.{vue,ts}'] },
     },
   },
   oidc: {

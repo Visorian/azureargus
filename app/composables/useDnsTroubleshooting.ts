@@ -13,10 +13,15 @@ import type {
   DnsSort,
 } from '#shared/types/dns'
 import type { LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
-import { createDnsDetailSelector, DNS_QUERY_TYPE_LABELS } from '#shared/utils/dns'
+import {
+  createDnsDetailSelector,
+  DNS_OUTCOME_LABELS,
+  DNS_QUERY_TYPE_LABELS,
+  dnsObservationEndpoint,
+} from '#shared/utils/dns'
 import { createDnsObservationStore } from '~/utils/dnsObservationStore'
-import { parseLogAnalysisDateRange } from '~/utils/logAnalysis'
-import type { LogAnalysisDateRange } from '~/utils/logAnalysis'
+import { parseLogAnalysisDateRange, resolveLogAnalysisDateRange } from '~/utils/logAnalysis'
+import type { LogAnalysisDateRange, LogAnalysisRangePreset } from '~/utils/logAnalysis'
 
 import type { AnalysisMode } from './useAnalysisMode'
 import { DEFAULT_LOG_UI_PUBLISH_INTERVAL_MS } from './useBoundedLogBuffer'
@@ -40,6 +45,7 @@ interface UseDnsTroubleshootingOptions {
   draftRange: LogAnalysisDateRange
   mode: Readonly<Ref<AnalysisMode>>
   queryLimit: Readonly<Ref<number>>
+  rangePreset: Readonly<Ref<LogAnalysisRangePreset>>
   receiver: DnsReceiverSource
   requestDetail: DetailRequest
   requestList: ListRequest
@@ -155,8 +161,8 @@ function transportEntry(observation: DnsObservation): DnsEntry {
   return {
     id: observation.id,
     timestamp: observation.timestamp,
-    client: [observation.clientIp, observation.clientPort].filter(Boolean).join(':'),
-    destination: [observation.serverIp, observation.serverPort].filter(Boolean).join(':'),
+    client: dnsObservationEndpoint(observation, 'client'),
+    destination: dnsObservationEndpoint(observation, 'server'),
     protocol: observation.protocol,
     path: observation.path,
     outcome: observation.outcome,
@@ -288,10 +294,15 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       ? (logResponse.value?.transportObservations ?? [])
       : realtimeTransports.value,
   )
+  const visibleFilters = computed(() =>
+    options.mode.value === 'log-analysis'
+      ? (appliedFilters.value ?? defaultFilters())
+      : realtimeFilters,
+  )
   const filteredNamedEntries = computed(() => {
     const currentEntries = entries.value
-    const filtered = hasActiveFilters(filters.value)
-      ? currentEntries.filter((entry) => matchesEntry(entry, filters.value))
+    const filtered = hasActiveFilters(visibleFilters.value)
+      ? currentEntries.filter((entry) => matchesEntry(entry, visibleFilters.value))
       : currentEntries
     if (sort.value.key === 'timestamp' && sort.value.direction === 'desc') {
       return filtered
@@ -299,8 +310,10 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     return filtered.toSorted((left, right) => compareEntries(left, right, sort.value))
   })
   const filteredTransports = computed(() =>
-    hasActiveFilters(filters.value)
-      ? transports.value.filter((observation) => matchesTransport(observation, filters.value))
+    hasActiveFilters(visibleFilters.value)
+      ? transports.value.filter((observation) =>
+          matchesTransport(observation, visibleFilters.value),
+        )
       : transports.value,
   )
   const filteredEntries = computed(() => {
@@ -313,10 +326,9 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     ].toSorted((left, right) => compareEntries(left, right, sort.value))
   })
   const filterOptions = computed<DnsFilterOptions>(() => ({
-    outcomes: sortedOptions([
-      ...entries.value.map((entry) => entry.outcome),
-      ...transports.value.map((observation) => observation.outcome),
-    ]),
+    outcomes: Object.keys(DNS_OUTCOME_LABELS).filter(
+      (value): value is keyof typeof DNS_OUTCOME_LABELS => Object.hasOwn(DNS_OUTCOME_LABELS, value),
+    ),
     protocols: sortedOptions([
       'TCP',
       'UDP',
@@ -328,6 +340,11 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
       ...entries.value.map((entry) => entry.queryType),
     ]),
     sources: sortedOptions([
+      'dns-proxy',
+      'proxy-structured',
+      'dns-flow-trace',
+      'internal-fqdn-failure',
+      'network-rule',
       ...entries.value.map((entry) => entry.source),
       ...transports.value.map((observation) => observation.source),
     ]),
@@ -364,13 +381,6 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     () =>
       appliedFilters.value !== null &&
       JSON.stringify(logFilters) !== JSON.stringify(appliedFilters.value),
-  )
-  const canApplyFilters = computed(
-    () =>
-      options.mode.value === 'log-analysis' &&
-      appliedRange.value !== null &&
-      !rangeDirty.value &&
-      logStatus.value !== 'loading',
   )
 
   function abortList() {
@@ -443,9 +453,13 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
   }
 
   async function run() {
-    if (options.mode.value !== 'log-analysis') {
+    if (options.mode.value !== 'log-analysis' || logStatus.value === 'loading') {
       return false
     }
+    Object.assign(
+      options.draftRange,
+      resolveLogAnalysisDateRange(options.draftRange, options.rangePreset.value),
+    )
     const parsed = parseLogAnalysisDateRange(options.draftRange)
     if (!parsed.ok) {
       rangeError.value = parsed.error
@@ -453,13 +467,6 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     }
     rangeError.value = null
     return await executeList(parsed.value)
-  }
-
-  async function applyFilters() {
-    if (options.mode.value !== 'log-analysis' || !appliedRange.value || rangeDirty.value) {
-      return false
-    }
-    return await executeList(appliedRange.value)
   }
 
   async function selectEntry(entry: DnsEntry) {
@@ -563,9 +570,6 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
     () => [options.draftRange.from, options.draftRange.to],
     () => {
       rangeError.value = null
-      if (logStatus.value === 'loading') {
-        abortList()
-      }
     },
   )
   onScopeDispose(() => {
@@ -576,9 +580,8 @@ export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
 
   return {
     abort,
+    appliedFilters,
     appliedRange,
-    applyFilters,
-    canApplyFilters,
     clearActiveDataset,
     closeDetail,
     detail,

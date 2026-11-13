@@ -3,9 +3,6 @@ import type { Ref } from 'vue'
 
 import type { FirewallLogRecord } from '#shared/types/firewall'
 import type { ManagedEventHubStreamRequest } from '#shared/types/managedEventHub'
-import { consumeManagedEventHubStream } from '~/utils/managedEventHubStream'
-import { createNetworkRuleCorrelator } from '~/utils/networkRuleCorrelation'
-
 import {
   DEFAULT_BUFFER_SIZE,
   getEventHubLookbackStart,
@@ -14,8 +11,11 @@ import {
   parseEventHubConnectionString,
   validateEventHubConnectionForm,
   validateEventHubReceiverSettings,
-} from './useEventHubConnection'
-import type { EventHubConnectionForm } from './useEventHubConnection'
+} from '~/utils/eventHubConnection'
+import type { EventHubConnectionForm } from '~/utils/eventHubConnection'
+import { consumeManagedEventHubStream } from '~/utils/managedEventHubStream'
+import { createNetworkRuleCorrelator } from '~/utils/networkRuleCorrelation'
+
 import { expandAzureMonitorRecords, normalizeFirewallLogRecord } from './useFirewallLogParser'
 import { createLogBatcher } from './useLogBatcher'
 import { compareFirewallLogs } from './useLogSorting'
@@ -546,8 +546,21 @@ export function useEventHubReceiver({
     }
   }
 
+  const connectionErrors = new Set<string>()
+
+  function recordConnectionError(message: string) {
+    connectionErrors.add(message)
+    errors.value = [message, ...errors.value].slice(0, 5)
+  }
+
+  function clearConnectionErrors() {
+    errors.value = errors.value.filter((message) => !connectionErrors.has(message))
+    connectionErrors.clear()
+  }
+
   function markRecovered() {
     reconnectAttempts = 0
+    clearConnectionErrors()
   }
 
   function scheduleReconnect(generation: number) {
@@ -564,7 +577,7 @@ export function useEventHubReceiver({
     }
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      errors.value = ['Event Hub reconnect attempts exhausted', ...errors.value].slice(0, 5)
+      recordConnectionError('Event Hub reconnect attempts exhausted')
       status.value = 'error'
       return
     }
@@ -612,6 +625,7 @@ export function useEventHubReceiver({
         return false
       }
 
+      clearConnectionErrors()
       status.value = 'connected'
       const streamConsumption = consumeManagedEventHubStream(
         response.body,
@@ -629,7 +643,7 @@ export function useEventHubReceiver({
             return
           }
           if (envelope.type === 'error') {
-            errors.value = [envelope.message, ...errors.value].slice(0, 5)
+            recordConnectionError(envelope.message)
             if (envelope.message === 'Session expired') {
               const sessionRecovered = await revalidateManagedSession().catch(() => false)
               if (generation !== connectionGeneration) {
@@ -639,10 +653,7 @@ export function useEventHubReceiver({
               if (sessionRecovered) {
                 scheduleReconnect(generation)
               } else {
-                errors.value = [
-                  'Event Hub session expired. Sign in again to reconnect.',
-                  ...errors.value,
-                ].slice(0, 5)
+                recordConnectionError('Event Hub session expired. Sign in again to reconnect.')
                 status.value = 'error'
               }
             }
@@ -666,12 +677,12 @@ export function useEventHubReceiver({
         try {
           await streamConsumption
           if (generation === connectionGeneration && !controller.signal.aborted) {
-            errors.value = ['Managed Event Hub stream ended', ...errors.value].slice(0, 5)
+            recordConnectionError('Managed Event Hub stream ended')
             scheduleReconnect(generation)
           }
         } catch (error: unknown) {
           if (generation === connectionGeneration && !controller.signal.aborted) {
-            errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
+            recordConnectionError(getErrorMessage(error))
             scheduleReconnect(generation)
           }
         } finally {
@@ -719,7 +730,7 @@ export function useEventHubReceiver({
           if (generation !== connectionGeneration) {
             return
           }
-          errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
+          recordConnectionError(getErrorMessage(error))
           scheduleReconnect(generation)
         },
       },
@@ -733,6 +744,7 @@ export function useEventHubReceiver({
         ),
       },
     )
+    clearConnectionErrors()
     status.value = 'connected'
     return true
   }
@@ -760,7 +772,7 @@ export function useEventHubReceiver({
       retryFailed = !opened
     } catch (error: unknown) {
       if (generation === connectionGeneration) {
-        errors.value = [getErrorMessage(error), ...errors.value].slice(0, 5)
+        recordConnectionError(getErrorMessage(error))
         retryFailed = true
       }
     } finally {
@@ -783,6 +795,7 @@ export function useEventHubReceiver({
     }
 
     const generation = ++connectionGeneration
+    connectionErrors.clear()
     cancelReconnect()
     reconnectAttempts = 0
     resumeFrom.clear()
@@ -845,7 +858,7 @@ export function useEventHubReceiver({
       }
 
       if (generation === connectionGeneration) {
-        errors.value = [connectionError, ...errors.value].slice(0, 5)
+        recordConnectionError(connectionError)
         status.value = 'connected'
         scheduleReconnect(generation)
       }

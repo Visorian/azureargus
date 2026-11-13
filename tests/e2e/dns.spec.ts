@@ -1,11 +1,22 @@
 import { expect, test } from '@playwright/test'
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
+import type { DnsEntry, DnsObservation } from '../../shared/types/dns'
 import { mockManagedDeployment } from './support/deployment'
-import { openSettings } from './support/logsWorkspace'
+import {
+  expectActiveResultVisible,
+  expectResultsScrollAndNavigate,
+  openSettings,
+} from './support/logsWorkspace'
 
-const COULD_NOT_BE_QUERIED_PATTERN = /could not be queried/
-const OPEN_DNS_DETAILS_PATTERN = /Open DNS details/
+const EDIT_FILTERS_PATTERN = /Edit filters/
+async function expectActiveDnsEntry(page: Page, row: Locator) {
+  const results = page.getByRole('grid', { name: 'DNS results', exact: true })
+  await expect(results).toBeFocused()
+  await expect(async () => {
+    await expect(results).toHaveAttribute('aria-activedescendant', (await row.getAttribute('id'))!)
+  }).toPass()
+}
 
 async function expectAlignedColumns(header: Locator, row: Locator) {
   await expect(async () => {
@@ -71,7 +82,7 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
     parseState: 'parsed',
     warnings: [],
     raw: { ResponseSize: 300 },
-  }
+  } satisfies DnsObservation
   const selector = {
     source: 'proxy-structured',
     resourceId: observation.resourceId,
@@ -94,10 +105,11 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
     serverIp: '168.63.129.16',
     serverPort: '53',
     protocol: 'UDP',
+    responseFlags: [],
     parseState: 'parsed',
     warnings: [],
     raw: {},
-  }
+  } satisfies DnsObservation
 
   await page.route('**/api/log-analytics/dns/readiness', async (route) => {
     readinessRequests += 1
@@ -293,180 +305,154 @@ test('managed DNS lens queries explicitly and shows decoded response size', asyn
   await page.goto('/logs')
   await expect.poll(() => readinessRequests, { timeout: 15_000 }).toBe(1)
   expect(listRequests).toBe(0)
-  await expect(page.getByRole('button', { name: 'DNS troubleshooting' })).toBeVisible()
-  await page.getByRole('button', { name: 'DNS troubleshooting' }).click()
-  let settingsDrawer = await openSettings(page)
+  await page.getByRole('radio', { name: 'DNS troubleshooting', exact: true }).check()
   await expect(page.getByText('Run DNS query to load entries.')).toBeVisible()
-  await expect(
-    page.getByTestId('log-query-row').getByRole('button', { name: 'Apply filters' }),
-  ).toBeVisible()
-  await expect(
-    page.getByTestId('log-query-row').getByRole('button', { name: 'Reset' }),
-  ).toBeVisible()
-  await expect(
-    page.getByTestId('log-query-row').getByRole('button', { name: 'Run query' }),
-  ).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Source readiness' })).toBeVisible()
-  await expect(page.getByText('Legacy DNS proxy logs', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('DNS flow trace logs', { exact: true })).toBeVisible()
-  await expect(
-    page.getByText('AZFWDnsFlowTrace / AZFWDnsAdditional', { exact: true }),
-  ).toBeVisible()
-  await expect(page.getByText('Internal FQDN resolution failures', { exact: true })).toBeVisible()
-  await expect(
-    page.getByText('AZFWInternalFqdnResolutionFailure / AZFWFqdnResolveFailure', { exact: true }),
-  ).toBeVisible()
-  await expect(page.getByText('Network rule logs', { exact: true })).toBeVisible()
-  await expect(page.getByText('AZFWNetworkRule · TCP/UDP port 53', { exact: true })).toBeVisible()
-  await expect(page.getByText('General firewall logs', { exact: true })).toBeVisible()
-  await expect(page.getByRole('img', { name: 'Dedicated table: available' }).first()).toBeVisible()
-  const readinessTable = page.getByRole('table', {
-    name: 'Source availability in dedicated tables and AzureDiagnostics',
-  })
-  expect(
-    await readinessTable.evaluate((element) => element.scrollWidth <= element.clientWidth),
-  ).toBe(true)
-  const sourceSelect = page.getByRole('combobox', { name: 'Query source' })
-  await expect(sourceSelect).toBeEnabled()
-  await expect(sourceSelect).toContainText('Dedicated tables')
-  expect(readinessRequests).toBe(1)
-  expect(listRequests).toBe(0)
-  expect(detailRequests).toBe(0)
-
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
-  await page.setViewportSize({ width: 1024, height: 768 })
-  await expect
-    .poll(async () => {
-      const [start, end] = await Promise.all([
-        page.getByRole('textbox', { name: 'Start' }).boundingBox(),
-        page.getByRole('textbox', { name: 'End' }).boundingBox(),
-      ])
-      return start !== null && end !== null ? Math.abs(start.y - end.y) : Infinity
-    })
-    .toBeLessThanOrEqual(1)
-  await page.setViewportSize({ width: 1280, height: 720 })
-  await page.getByRole('button', { name: 'Run query' }).click()
-  expect(readinessRequests).toBe(1)
-  const dnsStatusRail = page.getByRole('group', {
-    name: 'DNS troubleshooting status and actions',
-  })
-  await expect(
-    dnsStatusRail.getByText('2 queried entries · 0 unidentified transports'),
-  ).toBeVisible()
-  await expect(dnsStatusRail.getByRole('status')).toHaveCount(1)
-  await expect.poll(() => listRequests).toBe(1)
-  await expect(page.getByText('Response received', { exact: true }).first()).toBeVisible()
-  await expect(
-    page.getByText('Some DNS sources could not be queried.', { exact: true }),
-  ).toBeVisible()
-  await expect(page.getByText('DNS transport query failed', { exact: true })).toBeVisible()
-
-  settingsDrawer = await openSettings(page)
-  await sourceSelect.click()
-  await page.getByRole('option', { name: 'AzureDiagnostics' }).click()
-  await expect(sourceSelect).toContainText('AzureDiagnostics')
-  await expect(page.getByText('Run DNS query to load entries.')).toBeVisible()
-  expect(listRequests).toBe(1)
-  await sourceSelect.click()
-  await page.getByRole('option', { name: 'Dedicated tables' }).click()
-  await expect(sourceSelect).toContainText('Dedicated tables')
-
-  await settingsDrawer.getByRole('button', { name: 'Close settings' }).click()
-  await page.getByRole('button', { name: 'Run query' }).click()
-  expect(readinessRequests).toBe(1)
-  await expect.poll(() => listRequests).toBe(2)
-  await expect(
-    dnsStatusRail.getByText('2 queried entries · 1 unidentified transport'),
-  ).toBeVisible()
-  await expect(page.getByText('Transport observed', { exact: true })).toHaveCount(0)
-  const showUnidentified = page.getByRole('checkbox', {
-    name: 'Show unidentified DNS transport',
-  })
-  await showUnidentified.check()
-  await expect(page.getByText('Transport observed', { exact: true })).toBeVisible()
-  await expect(page.getByText('Not observed', { exact: true })).toBeVisible()
-  await expect(
-    page
-      .locator('section[aria-labelledby="dns-entry-heading"]')
-      .getByText('Partial', { exact: true }),
-  ).toBeVisible()
-  await expect(page.getByText('response-unknown', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('DNS results may be incomplete', { exact: true })).toHaveCount(0)
-  await expect(page.getByText(COULD_NOT_BE_QUERIED_PATTERN)).toHaveCount(0)
-  await expect(page.getByText('DNS transport query failed', { exact: true })).toHaveCount(0)
-
-  const resultFilter = page.getByRole('button', { name: 'DNS result', exact: true })
+  await expect(page.getByRole('button', { name: 'Apply filters' })).toHaveCount(0)
+  const resultFilter = page.getByRole('combobox', { name: 'DNS result', exact: true })
   await resultFilter.click()
   await expect(page.getByRole('option', { name: 'Response received' })).toBeVisible()
   await expect(page.getByRole('option', { name: 'Transport observed' })).toBeVisible()
   await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.getByRole('button', { name: 'Run query', exact: true }).click()
+  await expect.poll(() => listRequests).toBe(1)
+  await expect(page.getByText('DNS transport query failed', { exact: false })).toBeVisible()
+  const entryRows = page.locator('[data-dns-entry]')
+  await expect(entryRows).toHaveCount(2)
+  const entryHeader = page.getByTestId('dns-entry-header')
+  const entryRow = page.locator('[data-dns-entry="dns-query:proxy-structured:0"]')
+  await expectAlignedColumns(entryHeader, entryRow)
+  await expectNoHorizontalOverflow(page.locator('.dns-scroller'))
+  await page
+    .getByRole('textbox', { name: 'Domain or DNS search', exact: true })
+    .fill('not-in-results')
+  await expect(entryRows).toHaveCount(2)
+  await expect(page.getByText('Changes not applied.', { exact: true })).toBeVisible()
+  expect(listRequests).toBe(1)
+  await page.getByRole('textbox', { name: 'Domain or DNS search', exact: true }).fill('')
+  await entryRow.focus()
+  await page.keyboard.press('ArrowDown')
+  await expectActiveDnsEntry(page, page.locator('[data-dns-entry="dns-query:proxy-structured:1"]'))
+  await page.keyboard.press('ArrowUp')
+  await expectActiveDnsEntry(page, entryRow)
 
-  const filterControlTops = await page
-    .getByTestId('dns-filter-grid')
-    .locator(':scope > *')
-    .evaluateAll((controls) => controls.map((control) => control.getBoundingClientRect().top))
-  expect(filterControlTops).toHaveLength(6)
-  expect(Math.max(...filterControlTops) - Math.min(...filterControlTops)).toBeLessThanOrEqual(1)
-
-  const entryRows = page
-    .locator('section[aria-labelledby="dns-entry-heading"]')
-    .getByRole('button', { name: OPEN_DNS_DETAILS_PATTERN })
-  await expect(entryRows.first()).toHaveAccessibleName('Open DNS details for example.com.')
+  const settingsDrawer = await openSettings(page)
+  const sourceSelect = settingsDrawer.getByRole('combobox', { name: 'Query source' })
+  await sourceSelect.click()
+  await page.getByRole('option', { name: 'AzureDiagnostics', exact: true }).click()
+  await expect(page.getByText('Run DNS query to load entries.')).toBeVisible()
+  await sourceSelect.click()
+  await page.getByRole('option', { name: 'Dedicated tables', exact: true }).click()
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Run query', exact: true }).click()
+  await expect.poll(() => listRequests).toBe(2)
+  await page.getByRole('checkbox', { name: 'Show unidentified DNS transport' }).check()
+  const transportRow = page.locator('[data-dns-entry="dns-transport:network-rule:0"]')
+  await expect(transportRow).toBeVisible()
+  await expectAlignedColumns(entryHeader, transportRow)
+  await expect(transportRow).toContainText('Partial')
+  await expect(page.getByText('Result incomplete', { exact: true })).toHaveCount(0)
   const sortOrder = page.getByRole('combobox', { name: 'DNS sort order' })
-  await expect(sortOrder).toContainText('Newest first')
   await sortOrder.click()
   await page.getByRole('option', { name: 'Oldest first' }).click()
-  await expect(entryRows.first()).toHaveAccessibleName('Open DNS details for older.example.com.')
-
-  const entryHeader = page.getByTestId('dns-entry-header')
-  const entryRow = page.getByRole('button', { name: 'Open DNS details for example.com.' })
-  const transportRow = page.getByRole('button', {
-    name: 'Open DNS transport details for ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.254:65535',
-  })
-
-  await expectAlignedColumns(entryHeader, entryRow)
-  await expectAlignedColumns(entryHeader, transportRow)
-  await expectNoHorizontalOverflow(entryRow.locator(':scope > *').nth(4))
-  await expectNoHorizontalOverflow(transportRow.locator(':scope > *').nth(5))
-
-  await page.setViewportSize({ width: 820, height: 1180 })
-  await expect(transportRow).toHaveCount(1)
-  await page.setViewportSize({ width: 390, height: 812 })
-  await expect(transportRow).toHaveCount(1)
-  await transportRow.scrollIntoViewIfNeeded()
-  await expect(entryHeader).toHaveCount(0)
+  await expect(entryRows.first()).toHaveAttribute('data-dns-entry', 'dns-query:proxy-structured:1')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('button', { name: EDIT_FILTERS_PATTERN })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Domain or DNS search' })).toBeHidden()
   await expectNoHorizontalOverflow(transportRow)
-  await expect(transportRow).toContainText('168.63.129.16:53')
-
   await transportRow.click()
   const transportDetail = page.getByRole('dialog', { name: 'DNS transport detail' })
   await expect(transportDetail).toBeVisible()
-  await expect(transportDetail.getByText('168.63.129.16:53', { exact: true })).toBeVisible()
-  await expect.poll(() => detailRequests).toBe(0)
+  await expect(transportDetail.getByText('168.63.129.16:53', { exact: true }).first()).toBeVisible()
+  expect(detailRequests).toBe(0)
   await page.keyboard.press('Escape')
-  await expect(transportRow).toBeFocused()
-
-  await page.getByRole('button', { name: 'Open DNS details for example.com.' }).click()
-
+  await expectActiveDnsEntry(page, transportRow)
+  await entryRow.click()
   const resolutionDetail = page.getByRole('dialog', { name: 'DNS resolution detail' })
   await expect(resolutionDetail).toBeVisible()
   await expect(resolutionDetail.getByText('Loading DNS observations…')).toBeVisible()
-  await resolutionDetail.evaluate(async (element) => {
-    await Promise.all(element.getAnimations().map(async (animation) => await animation.finished))
-  })
-  const loadingBox = await resolutionDetail.boundingBox()
   releaseDetail()
-  await expect(page.getByText('300 bytes, not TTL')).toBeVisible()
-  const loadedBox = await resolutionDetail.boundingBox()
-  expect(loadingBox).not.toBeNull()
-  expect(loadedBox).not.toBeNull()
-  expect(Math.abs(loadedBox!.width - loadingBox!.width)).toBeLessThanOrEqual(1)
-  expect(Math.abs(loadedBox!.height - loadingBox!.height)).toBeLessThanOrEqual(1)
-  await expect(page.getByRole('button', { name: 'Copy raw' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Raw message' })).toHaveValue(
+  await expect(resolutionDetail.getByText('300 bytes, not TTL')).toBeVisible()
+  await expect(resolutionDetail.getByRole('button', { name: 'Copy raw' })).toBeVisible()
+  await expect(resolutionDetail.locator('pre[aria-label="Raw message"]')).toHaveText(
     JSON.stringify(observation.raw, null, 2),
   )
   await expect.poll(() => detailRequests).toBe(1)
+  expect(
+    await resolutionDetail
+      .locator('.app-field-list')
+      .first()
+      .evaluate((element) => getComputedStyle(element).userSelect),
+  ).not.toBe('none')
   await page.keyboard.press('Escape')
-  await expect(entryRow).toBeFocused()
+  await expectActiveDnsEntry(page, entryRow)
+
+  const manyEntries = Array.from({ length: 600 }, (_, index) => {
+    const timestamp = new Date(Date.parse(observation.timestamp) - index * 1_000).toISOString()
+    const queryName = `record-${index}.example.`
+    return {
+      id: `bulk-${index}`,
+      timestamp,
+      queryName,
+      queryType: observation.queryType,
+      client: '10.0.0.4:53000',
+      protocol: observation.protocol,
+      path: observation.path,
+      outcome: observation.outcome,
+      observationCount: 1,
+      completeness: 'complete',
+      confidence: 'uncorrelated',
+      source: observation.source,
+      warnings: [],
+      observations: [{ ...observation, id: `bulk-observation-${index}`, timestamp, queryName }],
+    } satisfies DnsEntry
+  })
+  await page.route('**/api/log-analytics/dns/list', async (route) => {
+    await route.fulfill({
+      json: {
+        queriedEntries: manyEntries,
+        transportObservations: [],
+        queriedEntriesTruncated: false,
+        transportObservationsTruncated: false,
+        sources: [],
+      },
+    })
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await sortOrder.click()
+  await page.getByRole('option', { name: 'Newest first', exact: true }).click()
+  await page.getByRole('button', { name: 'Run query', exact: true }).click()
+  const firstBulkRow = page.locator('[data-dns-entry="bulk-0"]')
+  const lastBulkRow = page.locator('[data-dns-entry="bulk-599"]')
+  await expect(firstBulkRow).toBeVisible()
+  expect(await page.locator('[data-dns-entry]').count()).toBeLessThan(manyEntries.length)
+  await firstBulkRow.focus()
+  await page.keyboard.press('End')
+  await expectActiveDnsEntry(page, lastBulkRow)
+  await expectActiveResultVisible(page.getByRole('grid', { name: 'DNS results', exact: true }))
+  await page.keyboard.press('Enter')
+  await expect(
+    page
+      .getByRole('dialog', { name: 'DNS resolution detail' })
+      .getByText('record-599.example.', { exact: true })
+      .first(),
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expectActiveDnsEntry(page, lastBulkRow)
+  await page.keyboard.press('Home')
+  await expectActiveDnsEntry(page, firstBulkRow)
+  const viewport = page.locator('.dns-scroller')
+  await viewport.hover()
+  await page.mouse.wheel(0, 1000)
+  await expect.poll(async () => await viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(800)
+  await expect(page.getByRole('grid', { name: 'DNS results', exact: true })).toBeFocused()
+  await expectActiveResultVisible(page.getByRole('grid', { name: 'DNS results', exact: true }))
+  await page.keyboard.press('PageDown')
+  await page.keyboard.press('PageDown')
+  await page.keyboard.press('PageUp')
+  const results = page.getByRole('grid', { name: 'DNS results', exact: true })
+  await expect(results).toBeFocused()
+  await expectActiveResultVisible(results)
+  await expectResultsScrollAndNavigate(page, results, 375)
+  await expectResultsScrollAndNavigate(page, results, 768)
 })

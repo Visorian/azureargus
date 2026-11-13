@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useElementSize, useMediaQuery } from '@vueuse/core'
 import { RecycleScroller } from 'vue-virtual-scroller'
+import type { RecycleScrollerExposed } from 'vue-virtual-scroller'
 
 import type { FirewallLogRecord } from '#shared/types/firewall'
 import type { IpCountryLookupClient } from '~/composables/useIpCountryLookup'
 import type { LogHourCycle } from '~/composables/useLogTimeFormat'
+import { formatLogEndpoint, logActionTone, logDestination } from '~/utils/logFilterPresentation'
 
-defineProps<{
+const props = defineProps<{
   formatTimestamp: (timestamp: string) => string
   lookup: IpCountryLookupClient
   logs: FirewallLogRecord[]
@@ -15,99 +17,111 @@ defineProps<{
 }>()
 const emit = defineEmits<{ select: [log: FirewallLogRecord] }>()
 const viewport = useTemplateRef('viewport')
+const scroller = useTemplateRef<RecycleScrollerExposed<FirewallLogRecord>>('scroller')
 const { width } = useElementSize(viewport)
 const tablet = useMediaQuery('(min-width: 768px)')
 const columns = computed(() => (tablet.value ? 2 : 1))
-
-function destination(log: FirewallLogRecord) {
-  return log.destinationIp || log.dns?.queryName || log.message || log.category
-}
-
-function source(log: FirewallLogRecord) {
-  return log.sourceIp || log.dns?.clientIp || 'Not recorded'
-}
-
-function actionClass(action: string) {
-  if (action.toLowerCase() === 'deny') {
-    return 'text-red-700 dark:text-red-400'
-  }
-  if (action.toLowerCase() === 'allow') {
-    return 'text-green-700 dark:text-green-400'
-  }
-  return 'text-default'
-}
+const navigation = useVirtualResultsNavigation(
+  computed(() => props.logs),
+  viewport,
+  scroller,
+  columns,
+  (record) => emit('select', record),
+)
 </script>
 
 <template>
-  <div ref="viewport" class="min-h-0 flex-1 px-4" data-testid="mobile-log-list">
+  <div
+    ref="viewport"
+    class="virtual-results min-h-0 flex-1"
+    data-testid="mobile-log-list"
+    role="grid"
+    aria-label="Firewall logs"
+    :aria-rowcount="logs.length"
+    :aria-colcount="1"
+    :aria-activedescendant="navigation.activeDescendant.value"
+    tabindex="0"
+    @keydown="navigation.keydown"
+    @scroll.capture.passive="navigation.scrolled"
+  >
     <RecycleScroller
       v-if="width > 0"
+      ref="scroller"
       v-slot="{ item, index, active }"
       :items="logs"
-      :item-size="152"
+      :item-size="136"
       :grid-items="columns"
       :item-secondary-size="width / columns"
       key-field="id"
       class="mobile-results h-full"
-      role="region"
-      aria-label="Firewall logs"
+      emit-update
+      @update="navigation.updateRange"
     >
-      <button
+      <div
         v-if="active"
-        type="button"
-        class="flex h-36 min-w-0 flex-col gap-1 rounded-lg border border-default bg-default p-3 text-left text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
-        :class="tablet ? ['w-[calc(100%-0.25rem)]', index % 2 === 1 && 'ml-1'] : 'w-full'"
-        :aria-label="`Open log details for ${destination(item)} at ${formatTimestamp(item.timestamp)}. ${item.action || 'Unknown action'}, ${item.protocol || 'unknown protocol'}, from ${source(item)}. ${item.category}.`"
-        @click="emit('select', item)"
+        :id="navigation.rowId(item.id)"
+        :data-result-index="index"
+        role="row"
+        :data-active="item.id === navigation.activeId.value"
+        :aria-selected="item.id === navigation.activeId.value"
+        :aria-rowindex="index + 1"
+        class="log-mobile-row"
       >
-        <span class="flex items-center justify-between gap-2 text-xs">
-          <NuxtTime
-            :datetime="item.timestamp"
-            month="short"
-            day="2-digit"
-            hour="2-digit"
-            minute="2-digit"
-            second="2-digit"
-            :time-zone="timeZone"
-            :hour-cycle="hourCycle"
-            class="text-muted"
-          />
-          <span class="font-semibold" :class="actionClass(item.action)">{{
-            item.action || 'Unknown action'
-          }}</span>
-        </span>
-        <span
-          class="mobile-log-endpoint flex min-w-0 items-start gap-1 font-mono text-sm leading-[18px] font-medium"
-        >
-          <DestinationCountryFlag
-            v-if="item.destinationIp"
-            :destination="item.destinationIp"
-            :lookup="lookup"
-          />
-          <span class="line-clamp-3 wrap-anywhere"
-            >{{ destination(item)
-            }}<span v-if="item.destinationPort" class="whitespace-nowrap text-muted"
-              >:{{ item.destinationPort }}</span
-            ></span
+        <div role="gridcell">
+          <button
+            tabindex="-1"
+            type="button"
+            class="log-mobile-card"
+            :class="tablet && index % 2 === 1 && 'log-mobile-card-second'"
+            :aria-label="`Open log details. ${item.action || 'Unknown action'}, ${item.protocol || 'unknown protocol'}, from ${formatLogEndpoint(item.sourceIp, item.sourcePort)} to ${formatLogEndpoint(item.destinationIp, item.destinationPort)} at ${formatTimestamp(item.timestamp)}. ${item.rule || item.category}.`"
+            @click="navigation.select(item)"
           >
-        </span>
-        <span class="flex min-w-0 items-center gap-2 text-xs">
-          <span class="shrink-0 text-muted">Source</span>
-          <span class="truncate font-mono"
-            >{{ source(item)
-            }}<span v-if="item.sourcePort || item.dns?.clientPort" class="text-muted"
-              >:{{ item.sourcePort || item.dns?.clientPort }}</span
-            ></span
-          >
-        </span>
-        <span class="mt-auto flex items-center justify-between gap-2 text-xs text-muted">
-          <span class="truncate" :title="item.category">{{ item.category }}</span>
-          <span class="flex shrink-0 items-center gap-2"
-            ><span class="font-mono">{{ item.protocol || 'Unknown protocol' }}</span
-            ><UIcon name="i-lucide-chevron-right" class="size-4"
-          /></span>
-        </span>
-      </button>
+            <span class="flex items-center justify-between gap-2"
+              ><NuxtTime
+                :datetime="item.timestamp"
+                month="short"
+                day="2-digit"
+                hour="2-digit"
+                minute="2-digit"
+                second="2-digit"
+                :time-zone="timeZone"
+                :hour-cycle="hourCycle"
+                class="font-mono text-xs text-muted" /><AppStatusLabel
+                :label="item.action || 'Unknown'"
+                :tone="logActionTone(item.action)"
+            /></span>
+            <span class="log-mobile-endpoint"
+              ><span class="text-muted">From</span
+              ><span class="truncate font-mono">{{
+                formatLogEndpoint(
+                  item.sourceIp || item.dns?.clientIp,
+                  item.sourcePort || item.dns?.clientPort,
+                )
+              }}</span></span
+            >
+            <span class="log-mobile-endpoint"
+              ><span class="text-muted">To</span
+              ><span class="mobile-log-endpoint flex min-w-0 items-center gap-1"
+                ><DestinationCountryFlag
+                  v-if="item.destinationIp"
+                  :destination="item.destinationIp"
+                  :lookup="lookup"
+                /><span class="min-w-0 truncate font-mono">{{
+                  formatLogEndpoint(logDestination(item), item.destinationPort)
+                }}</span></span
+              ></span
+            >
+            <span class="flex min-w-0 items-center justify-between gap-2 text-xs text-muted"
+              ><span class="truncate font-mono" :title="item.rule || item.category">{{
+                item.rule || item.category
+              }}</span
+              ><span class="flex shrink-0 items-center gap-1"
+                >{{ item.protocol || 'Unknown'
+                }}<UIcon name="i-lucide-chevron-right" class="size-4" /></span
+            ></span>
+          </button>
+        </div>
+      </div>
     </RecycleScroller>
     <p class="sr-only">Times shown in {{ timeZone }}. Open a log to view all fields.</p>
   </div>

@@ -7,6 +7,8 @@ import type {
   DnsRawProjection,
   DnsSourceKind,
   DnsStage,
+  DnsTraceCompleteness,
+  DnsCorrelationConfidence,
 } from '../types/dns'
 import type { LogAnalyticsStorageKind } from '../types/logAnalytics'
 
@@ -19,6 +21,89 @@ export const DNS_OUTCOME_LABELS: Readonly<Record<DnsOutcome, string>> = {
   'transport-error': 'Transport error',
   'transport-observed': 'Transport observed',
   pending: 'Pending or partial',
+}
+
+export function isDnsOutcome(value: string): value is DnsOutcome {
+  return Object.hasOwn(DNS_OUTCOME_LABELS, value)
+}
+
+export const DNS_OUTCOME_TONES = {
+  'answer-observed': 'success',
+  'no-data': 'neutral',
+  'response-unknown': 'neutral',
+  'dns-error': 'error',
+  blocked: 'error',
+  'transport-error': 'error',
+  'transport-observed': 'neutral',
+  pending: 'warning',
+} as const satisfies Readonly<Record<DnsOutcome, string>>
+
+export const DNS_PATH_LABELS: Readonly<Record<DnsPathKind, string>> = {
+  proxy: 'Proxy',
+  direct: 'Direct',
+  internal: 'Internal',
+  unknown: 'Unknown path',
+}
+
+export const DNS_COMPLETENESS_LABELS: Readonly<Record<DnsTraceCompleteness, string>> = {
+  complete: 'Complete',
+  partial: 'Partial',
+  'range-truncated': 'Range truncated',
+  'source-unavailable': 'Source unavailable',
+}
+
+export const DNS_CONFIDENCE_LABELS: Readonly<Record<DnsCorrelationConfidence, string>> = {
+  explicit: 'Explicit correlation',
+  'exact-derived': 'Exact derived match',
+  likely: 'Likely match',
+  uncorrelated: 'Uncorrelated',
+}
+
+export const DNS_STAGE_LABELS: Readonly<Record<DnsStage, string>> = {
+  'proxy-exchange': 'Proxy exchange',
+  'dns-flow-trace': 'DNS flow trace',
+  'internal-resolution': 'Internal resolution failure',
+  transport: 'Transport',
+}
+
+export function formatDnsDuration(seconds: number | undefined) {
+  if (seconds === undefined) {
+    return 'Not observed'
+  }
+  if (seconds < 0.001) {
+    return `${Math.round(seconds * 1_000_000)} µs`
+  }
+  if (seconds < 1) {
+    return `${(seconds * 1_000).toFixed(2)} ms`
+  }
+  return `${seconds.toFixed(2)} s`
+}
+
+export function formatDnsEndpoint(ip: string | undefined, port?: string) {
+  if (!ip) {
+    return port ? `Any:${port}` : 'Not observed'
+  }
+  return port ? `${ip.includes(':') ? `[${ip}]` : ip}:${port}` : ip
+}
+
+export function dnsObservationEndpoint(observation: DnsObservation, side: 'client' | 'server') {
+  return side === 'client'
+    ? formatDnsEndpoint(observation.clientIp, observation.clientPort)
+    : formatDnsEndpoint(observation.serverIp, observation.serverPort)
+}
+
+export function dnsEntryDestination(entry: DnsEntry) {
+  const observation = entry.observations.find((item) => item.serverIp || item.serverPort)
+  return observation
+    ? dnsObservationEndpoint(observation, 'server')
+    : entry.destination || 'Not observed'
+}
+
+export function dnsEntryClient(entry: DnsEntry) {
+  const observation = entry.observations.find((item) => item.clientIp)
+  return observation
+    ? dnsObservationEndpoint(observation, 'client')
+    : entry.client || 'Not observed'
 }
 
 const RAW_FIELD_LIMIT = 2_048

@@ -1,41 +1,30 @@
 <script setup lang="ts">
-import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
-import type { DnsReadinessSourceKind, DnsSourceReadiness } from '#shared/types/dns'
 import type { LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
-import { DNS_READINESS_SOURCE_DEFINITIONS, hasDnsReadinessData } from '#shared/utils/dnsReadiness'
-import type { DnsReadinessSourceGroup } from '#shared/utils/dnsReadiness'
 import {
+  DEFAULT_LOG_ANALYTICS_QUERY_LIMIT,
+  isLogAnalyticsQueryLimit,
   MAX_LOG_ANALYTICS_QUERY_LIMIT,
   MIN_LOG_ANALYTICS_QUERY_LIMIT,
 } from '#shared/utils/logAnalytics'
-import type { DnsReadinessStatus } from '~/composables/useDnsSourceReadiness'
-import { isEntraId, LOG_ANALYTICS_WORKSPACES_URL } from '~/utils/logAnalyticsOnboarding'
+import type { LogAnalyticsSettingsState } from '~/composables/useLogAnalyticsSettings'
+import { LOG_ANALYTICS_WORKSPACES_URL } from '~/utils/logAnalyticsOnboarding'
 
 const tenantId = defineModel<string>('tenantId', { required: true })
-
 const workspaceId = defineModel<string>('workspaceId', { required: true })
-
 const queryLimit = defineModel<number>('queryLimit', { required: true })
-
 const queryStorage = defineModel<LogAnalyticsStorageKind>('queryStorage', { required: true })
 
-const props = defineProps<{
-  adminConsentUrl: string | null
-  dnsReadiness: DnsSourceReadiness[]
-  dnsReadinessStatus: DnsReadinessStatus
-  lens: 'all-logs' | 'dns-troubleshooting'
-  temporary: boolean
-  temporaryAccessError: string | null
-  temporaryAccessStatus: 'idle' | 'loading' | 'success' | 'error'
-  temporaryLogAnalyticsAuthorized: boolean
-  temporaryLogAnalyticsAuthorizing: boolean
-  temporaryAuthError: string | null
-  temporaryAuthStatus: 'idle' | 'connecting' | 'connected' | 'error'
-  temporaryAzureUsername: string
-  tenantOptions: AzureAccessibleTenant[]
-  workspaceOptions: AzureAccessibleWorkspace[]
-}>()
-
+const props = defineProps<
+  LogAnalyticsSettingsState & {
+    adminConsentUrl: string | null
+    lens: 'all-logs' | 'dns-troubleshooting'
+    temporary: boolean
+    temporaryAccessError: string | null
+    temporaryLogAnalyticsAuthorizing: boolean
+    temporaryAuthError: string | null
+    temporaryAzureUsername: string
+  }
+>()
 const emit = defineEmits<{
   changeTenant: [tenantId: string]
   changeWorkspace: [workspaceId: string]
@@ -43,576 +32,373 @@ const emit = defineEmits<{
   disconnectAzure: []
   authorizeLogAnalytics: []
   refreshAzureAccess: []
+  refreshReadiness: []
 }>()
+const connectActions = useTemplateRef<HTMLElement>('connectActions')
+const directoryStep = useTemplateRef('directoryStep')
+const {
+  tenantValid,
+  workspaceValid,
+  tenantItems,
+  workspaceItems,
+  selectedTenant,
+  selectedWorkspace,
+  directoryPlaceholder,
+  workspacePlaceholder,
+  queryStorageSelectionEnabled,
+  readinessSummary,
+} = useLogAnalyticsSettings(props, tenantId, workspaceId, connectActions)
+const queryStorageItems: { label: string; value: LogAnalyticsStorageKind }[] = [
+  { label: 'Dedicated tables', value: 'resource-specific' },
+  { label: 'AzureDiagnostics', value: 'azure-diagnostics' },
+]
+const queryLimitValue = computed({
+  get: () => queryLimit.value,
+  set: (value: number | undefined) => {
+    queryLimit.value = isLogAnalyticsQueryLimit(value) ? value : DEFAULT_LOG_ANALYTICS_QUERY_LIMIT
+  },
+})
+const connectBlocked = computed(
+  () => props.temporaryAuthStatus === 'connecting' || props.temporaryAuthStatus === 'connected',
+)
+const consentBlocked = computed(() => !tenantValid.value || props.temporaryLogAnalyticsAuthorizing)
+const discoveryBlocked = computed(
+  () => !tenantValid.value || props.temporaryAccessStatus === 'loading',
+)
+const workspaceRefreshBlocked = computed(
+  () => discoveryBlocked.value || !props.temporaryLogAnalyticsAuthorized,
+)
 
-const tenantValid = computed(() => isEntraId(tenantId.value))
-const workspaceValid = computed(() => isEntraId(workspaceId.value))
-const tenantItems = computed(() =>
-  props.tenantOptions.map((tenant) => ({
-    ...tenant,
-    label: tenant.defaultDomain
-      ? `${tenant.displayName} · ${tenant.defaultDomain}`
-      : tenant.displayName,
-  })),
-)
-const workspaceItems = computed(() =>
-  props.workspaceOptions.map((workspace) => ({
-    ...workspace,
-    label: `${workspace.name} · ${workspace.subscriptionName}`,
-  })),
-)
 function changeTenant(value: unknown) {
   if (typeof value === 'string' && value !== tenantId.value) {
     emit('changeTenant', value)
   }
 }
-
 function changeWorkspace(value: unknown) {
   if (typeof value === 'string' && value !== workspaceId.value) {
     emit('changeWorkspace', value)
   }
 }
 
-type ReadinessIndicatorState =
-  | 'available'
-  | 'empty'
-  | 'missing'
-  | 'forbidden'
-  | 'failed'
-  | 'checking'
-  | 'unchecked'
-
-interface ReadinessIndicator {
-  label: string
-  state: ReadinessIndicatorState
-  statusLabel: string
-}
-
-interface ReadinessItem {
-  indicators: ReadinessIndicator[]
-  label: string
-  mapping: string
-}
-
-const readinessIndicatorStyle: Record<
-  ReadinessIndicatorState,
-  { icon: string; iconClass?: string; text: string }
-> = {
-  available: {
-    icon: 'i-lucide-circle-check',
-    text: 'text-green-700 dark:text-green-300',
-  },
-  empty: {
-    icon: 'i-lucide-circle-minus',
-    text: 'text-brand-gray-500 dark:text-brand-gray-400',
-  },
-  missing: {
-    icon: 'i-lucide-circle-minus',
-    text: 'text-brand-gray-500 dark:text-brand-gray-400',
-  },
-  forbidden: {
-    icon: 'i-lucide-lock-keyhole',
-    text: 'text-amber-700 dark:text-amber-300',
-  },
-  failed: {
-    icon: 'i-lucide-circle-x',
-    text: 'text-red-700 dark:text-red-300',
-  },
-  checking: {
-    icon: 'i-lucide-loader-circle',
-    iconClass: 'animate-spin',
-    text: 'text-brand-blue-600 dark:text-brand-blue-300',
-  },
-  unchecked: {
-    icon: 'i-lucide-circle-dashed',
-    text: 'text-brand-gray-400 dark:text-brand-gray-500',
-  },
-}
-
-const readinessColumns = [
-  { label: 'Dedicated table', storage: 'resource-specific' },
-  { label: 'AzureDiagnostics', storage: 'azure-diagnostics' },
-] as const satisfies readonly { label: string; storage: LogAnalyticsStorageKind }[]
-
-function sourceIndicator(
-  source: DnsReadinessSourceKind,
-  storage: LogAnalyticsStorageKind,
-  label: string,
-): ReadinessIndicator {
-  const readiness = props.dnsReadiness.find(
-    (item) => item.source === source && item.storage === storage,
-  )
-  if (!readiness) {
-    return props.dnsReadinessStatus === 'loading'
-      ? { label, state: 'checking', statusLabel: 'checking' }
-      : { label, state: 'unchecked', statusLabel: 'not checked' }
-  }
-  if (readiness.status === 'success') {
-    if (storage === 'azure-diagnostics' && readiness.sampleCount === 0) {
-      return { label, state: 'empty', statusLabel: 'no matching records' }
-    }
-    return { label, state: 'available', statusLabel: 'available' }
-  }
-  if (readiness.status === 'missing') {
-    return { label, state: 'missing', statusLabel: 'not found' }
-  }
-  if (readiness.status === 'forbidden') {
-    return { label, state: 'forbidden', statusLabel: 'access denied' }
-  }
-  return { label, state: 'failed', statusLabel: 'check failed' }
-}
-
-function sourceIndicators(source: DnsReadinessSourceKind): ReadinessIndicator[] {
-  return readinessColumns.map(({ label, storage }) => sourceIndicator(source, storage, label))
-}
-
-function readinessMapping(
-  resourceSpecificTable: string,
-  azureDiagnosticsCategory: string,
-  queryScope?: string,
-): string {
-  const storageMapping =
-    resourceSpecificTable === azureDiagnosticsCategory
-      ? resourceSpecificTable
-      : `${resourceSpecificTable} / ${azureDiagnosticsCategory}`
-  return queryScope ? `${storageMapping} · ${queryScope}` : storageMapping
-}
-
-function readinessItem(
-  friendlyLabel: string,
-  source: DnsReadinessSourceKind,
-  resourceSpecificTable: string,
-  azureDiagnosticsCategory: string,
-  queryScope?: string,
-): ReadinessItem {
-  return {
-    label: friendlyLabel,
-    mapping: readinessMapping(resourceSpecificTable, azureDiagnosticsCategory, queryScope),
-    indicators: sourceIndicators(source),
+function connectAzure() {
+  if (!connectBlocked.value) {
+    emit('connectAzure')
   }
 }
 
-const readinessGroupLabels: Record<DnsReadinessSourceGroup, string> = {
-  dns: 'DNS sources',
-  general: 'General firewall logs',
+function disconnectAzure() {
+  if (props.temporaryAuthStatus === 'connected') {
+    emit('disconnectAzure')
+  }
 }
-const readinessGroups = computed(() =>
-  (['dns', 'general'] as const).map((group) => ({
-    label: readinessGroupLabels[group],
-    items: DNS_READINESS_SOURCE_DEFINITIONS.filter((definition) => definition.group === group).map(
-      (definition) =>
-        readinessItem(
-          definition.friendlyLabel,
-          definition.source,
-          definition.resourceSpecificTable,
-          definition.azureDiagnosticsCategory,
-          'queryScope' in definition ? definition.queryScope : undefined,
-        ),
-    ),
-  })),
-)
-const resourceSpecificAvailable = computed(() =>
-  hasDnsReadinessData(props.dnsReadiness, 'resource-specific'),
-)
-const azureDiagnosticsAvailable = computed(() =>
-  hasDnsReadinessData(props.dnsReadiness, 'azure-diagnostics'),
-)
-const queryStorageSelectionEnabled = computed(
-  () => resourceSpecificAvailable.value && azureDiagnosticsAvailable.value,
-)
-const queryStorageItems: { label: string; value: LogAnalyticsStorageKind }[] = [
-  { label: 'Dedicated tables', value: 'resource-specific' },
-  { label: 'AzureDiagnostics', value: 'azure-diagnostics' },
-]
-const readinessSourceCount = DNS_READINESS_SOURCE_DEFINITIONS.length
-const resourceSpecificReadyCount = computed(
-  () =>
-    props.dnsReadiness.filter(
-      (item) => item.storage === 'resource-specific' && item.status === 'success',
-    ).length,
-)
-const azureDiagnosticsReadyCount = computed(
-  () =>
-    props.dnsReadiness.filter(
-      (item) =>
-        item.storage === 'azure-diagnostics' && item.status === 'success' && item.sampleCount > 0,
-    ).length,
-)
+
+function refreshConsent() {
+  if (!consentBlocked.value) {
+    emit('authorizeLogAnalytics')
+  }
+}
+
+function refreshWorkspace() {
+  if (!workspaceRefreshBlocked.value) {
+    emit('refreshAzureAccess')
+  }
+}
+
+async function retryDiscovery(event: MouseEvent) {
+  if (discoveryBlocked.value) {
+    return
+  }
+  const trigger = event.currentTarget
+  emit('refreshAzureAccess')
+  await nextTick()
+  if (trigger instanceof HTMLElement && !trigger.isConnected) {
+    directoryStep.value?.focus()
+  }
+}
+
+function checkReadiness() {
+  if (props.dnsReadinessStatus !== 'loading') {
+    emit('refreshReadiness')
+  }
+}
+
+function guardConsent(event: MouseEvent) {
+  if (props.adminConsentUrl === null) {
+    event.preventDefault()
+  }
+}
 </script>
 
 <template>
-  <div class="space-y-3">
-    <div>
-      <h2 class="text-sm font-semibold">Log Analytics settings</h2>
-      <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-        {{
-          lens === 'dns-troubleshooting'
-            ? 'Query DNS diagnostics in configured Azure Firewall workspace.'
-            : 'Query configured Azure Firewall workspace.'
-        }}
+  <LogsSettingsSection
+    title="Log Analytics settings"
+    :description="
+      lens === 'dns-troubleshooting'
+        ? 'Query DNS diagnostics in configured Azure Firewall workspace.'
+        : 'Query configured Azure Firewall workspace.'
+    "
+  >
+    <div v-if="temporary" class="space-y-4">
+      <p class="settings-description">
+        Sign in once to discover accessible Azure directories and workspaces. The session stays in
+        browser memory.
       </p>
+      <ol aria-label="Temporary Log Analytics setup">
+        <LogsSettingsStep
+          :number="1"
+          title="Connect Azure account"
+          description="Use a work or school account to discover available directories."
+        >
+          <div ref="connectActions" class="settings-actions">
+            <UButton
+              :color="temporaryAuthStatus === 'connected' ? 'neutral' : 'primary'"
+              :variant="temporaryAuthStatus === 'connected' ? 'outline' : 'solid'"
+              :icon="
+                temporaryAuthStatus === 'connecting' ? 'i-lucide-loader-circle' : 'i-lucide-log-in'
+              "
+              label="Connect to Azure"
+              :aria-busy="temporaryAuthStatus === 'connecting'"
+              :aria-disabled="connectBlocked"
+              @click="connectAzure"
+            />
+            <UButton
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-unplug"
+              label="Disconnect"
+              :aria-disabled="temporaryAuthStatus !== 'connected'"
+              @click="disconnectAzure"
+            />
+          </div>
+          <AppStatusLabel
+            v-if="temporaryAuthStatus === 'connected'"
+            role="status"
+            tone="success"
+            :label="`Connected${temporaryAzureUsername ? ` as ${temporaryAzureUsername}` : ''}.`"
+          />
+          <AppNotice
+            v-if="temporaryAuthError && temporaryAuthStatus !== 'connected'"
+            tone="error"
+            title="Azure sign-in failed"
+            :description="temporaryAuthError"
+          />
+        </LogsSettingsStep>
+
+        <LogsSettingsStep
+          v-if="temporaryAuthStatus === 'connected'"
+          ref="directoryStep"
+          :number="2"
+          title="Choose Azure directory and grant consent"
+          description="A tenant admin must approve Log Analytics access before workspace selection."
+        >
+          <UFormField label="Directory" name="tenantId">
+            <USelectMenu
+              :model-value="selectedTenant"
+              :items="tenantItems"
+              value-key="tenantId"
+              label-key="label"
+              class="w-full"
+              :loading="temporaryAccessStatus === 'loading'"
+              :disabled="temporaryAccessStatus === 'loading' || tenantItems.length === 0"
+              :placeholder="directoryPlaceholder"
+              @update:model-value="changeTenant"
+            />
+          </UFormField>
+          <p v-if="tenantValid && tenantItems.length > 0" class="settings-identifier">
+            {{ tenantId }}
+          </p>
+          <div class="settings-actions">
+            <UButton
+              :to="adminConsentUrl ?? undefined"
+              target="_blank"
+              rel="noopener noreferrer"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-shield-check"
+              label="Grant tenant consent"
+              :aria-disabled="adminConsentUrl === null"
+              @click="guardConsent"
+            />
+            <UButton
+              color="neutral"
+              variant="outline"
+              :icon="
+                temporaryLogAnalyticsAuthorizing ? 'i-lucide-loader-circle' : 'i-lucide-refresh-cw'
+              "
+              label="Refresh consent"
+              :aria-busy="temporaryLogAnalyticsAuthorizing"
+              :aria-disabled="consentBlocked"
+              @click="refreshConsent"
+            />
+          </div>
+          <AppStatusLabel
+            v-if="temporaryLogAnalyticsAuthorized && !temporaryAuthError"
+            role="status"
+            tone="success"
+            label="Log Analytics access available for selected directory."
+          />
+          <AppNotice
+            v-if="temporaryAuthError"
+            tone="error"
+            title="Log Analytics authorization failed"
+            :description="temporaryAuthError"
+          />
+          <AppNotice
+            v-if="temporaryAccessError && tenantItems.length === 0"
+            tone="error"
+            title="Directory discovery failed"
+            :description="temporaryAccessError"
+          >
+            <template #actions>
+              <UButton
+                color="neutral"
+                variant="outline"
+                label="Try again"
+                :aria-disabled="discoveryBlocked"
+                :aria-busy="temporaryAccessStatus === 'loading'"
+                @click="retryDiscovery"
+              />
+            </template>
+          </AppNotice>
+        </LogsSettingsStep>
+
+        <LogsSettingsStep
+          v-if="temporaryAuthStatus === 'connected'"
+          :number="3"
+          title="Select accessible workspace"
+          description="Missing workspace access requires Log Analytics Data Reader at workspace scope."
+        >
+          <UFormField label="Workspace" name="workspaceId">
+            <USelectMenu
+              :model-value="selectedWorkspace"
+              :items="workspaceItems"
+              value-key="workspaceId"
+              label-key="label"
+              class="w-full"
+              :loading="temporaryAccessStatus === 'loading'"
+              :disabled="
+                !temporaryLogAnalyticsAuthorized ||
+                temporaryAccessStatus === 'loading' ||
+                workspaceItems.length === 0
+              "
+              :placeholder="workspacePlaceholder"
+              @update:model-value="changeWorkspace"
+            />
+          </UFormField>
+          <p v-if="workspaceValid && workspaceItems.length > 0" class="settings-identifier">
+            {{ workspaceId }}
+          </p>
+          <div class="settings-actions">
+            <UButton
+              color="neutral"
+              variant="outline"
+              :icon="
+                temporaryAccessStatus === 'loading'
+                  ? 'i-lucide-loader-circle'
+                  : 'i-lucide-refresh-cw'
+              "
+              label="Refresh"
+              :aria-busy="temporaryAccessStatus === 'loading'"
+              :aria-disabled="workspaceRefreshBlocked"
+              @click="refreshWorkspace"
+            />
+            <UButton
+              :to="tenantValid ? LOG_ANALYTICS_WORKSPACES_URL : undefined"
+              target="_blank"
+              rel="noopener noreferrer"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-external-link"
+              label="Permissions"
+              :disabled="!tenantValid || !temporaryLogAnalyticsAuthorized"
+            />
+          </div>
+          <AppNotice
+            v-if="temporaryAccessError && tenantItems.length > 0"
+            tone="error"
+            title="Workspace discovery failed"
+            :description="temporaryAccessError"
+          />
+          <AppStatusLabel
+            v-else-if="
+              temporaryLogAnalyticsAuthorized &&
+              temporaryAccessStatus === 'success' &&
+              workspaceItems.length === 0
+            "
+            role="status"
+            tone="warning"
+            label="No accessible Log Analytics workspace found in selected directory."
+          />
+          <AppStatusLabel
+            v-else-if="!temporaryLogAnalyticsAuthorized"
+            role="status"
+            tone="warning"
+            label="Grant tenant consent before selecting a workspace."
+          />
+        </LogsSettingsStep>
+      </ol>
     </div>
 
-    <UFormField label="Query result limit" name="queryLimit">
+    <UFormField
+      label="Query result limit"
+      name="queryLimit"
+      hint="100–5,000"
+      description="Caps All logs rows and each DNS result list. Applies to next query."
+    >
       <UInputNumber
-        v-model="queryLimit"
+        v-model="queryLimitValue"
         :min="MIN_LOG_ANALYTICS_QUERY_LIMIT"
         :max="MAX_LOG_ANALYTICS_QUERY_LIMIT"
         :step="100"
         class="w-full"
       />
-      <template #hint>100–5,000</template>
-      <template #description>
-        Caps All logs rows and each DNS result list. Applies to next query.
-      </template>
     </UFormField>
-
-    <div v-if="temporary" class="space-y-4">
-      <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-        Sign in once. Azure directories and Log Analytics workspaces are discovered from account
-        access.
-      </p>
-      <ol aria-label="Temporary Log Analytics setup" class="space-y-4">
-        <li class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2">
-          <span
-            aria-hidden="true"
-            class="grid size-6 place-items-center rounded-full bg-brand-blue-50 text-xs font-semibold text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300"
-          >
-            1
-          </span>
-          <div class="min-w-0 space-y-2">
-            <div>
-              <p class="text-xs font-semibold">Connect Azure account</p>
-              <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                Work or school account determines available directories. Session stays in browser
-                memory.
-              </p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <UButton
-                class="touch-control"
-                color="primary"
-                variant="solid"
-                icon="i-lucide-log-in"
-                label="Connect to Azure"
-                :loading="temporaryAuthStatus === 'connecting'"
-                :disabled="
-                  temporaryAuthStatus === 'connecting' || temporaryAuthStatus === 'connected'
-                "
-                @click="emit('connectAzure')"
-              />
-              <UButton
-                class="touch-control"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-unplug"
-                label="Disconnect"
-                :disabled="temporaryAuthStatus !== 'connected'"
-                @click="emit('disconnectAzure')"
-              />
-            </div>
-            <p
-              v-if="temporaryAuthStatus === 'connected'"
-              role="status"
-              class="text-xs text-green-700 dark:text-green-300"
-            >
-              Connected{{ temporaryAzureUsername ? ` as ${temporaryAzureUsername}` : '' }}.
-            </p>
-          </div>
-        </li>
-        <li
-          v-if="temporaryAuthStatus === 'connected'"
-          class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2"
-        >
-          <span
-            aria-hidden="true"
-            class="grid size-6 place-items-center rounded-full text-xs font-semibold"
-            :class="
-              temporaryLogAnalyticsAuthorized
-                ? 'bg-brand-blue-50 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300'
-                : 'bg-brand-gray-100 text-brand-gray-700 dark:bg-brand-gray-800 dark:text-brand-gray-200'
-            "
-          >
-            2
-          </span>
-          <div class="min-w-0 space-y-3">
-            <div>
-              <p class="text-xs font-semibold">Choose Azure directory and grant consent</p>
-              <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                Select target directory. Tenant admin must approve Log Analytics access before
-                workspace selection.
-              </p>
-            </div>
-            <UFormField label="Directory" name="tenantId">
-              <USelectMenu
-                :model-value="tenantId"
-                :items="tenantItems"
-                value-key="tenantId"
-                label-key="label"
-                class="w-full"
-                :loading="temporaryAccessStatus === 'loading'"
-                :disabled="temporaryAccessStatus === 'loading' || tenantItems.length === 0"
-                placeholder="No Azure directory discovered"
-                @update:model-value="changeTenant"
-              />
-            </UFormField>
-            <p v-if="tenantValid" class="font-mono text-[0.6875rem] break-all text-brand-gray-500">
-              {{ tenantId }}
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <UButton
-                class="touch-control"
-                :to="adminConsentUrl ?? undefined"
-                target="_blank"
-                rel="noopener noreferrer"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-shield-check"
-                label="Grant tenant consent"
-                :disabled="adminConsentUrl === null"
-              />
-              <UButton
-                class="touch-control"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-refresh-cw"
-                label="Refresh consent"
-                :loading="temporaryLogAnalyticsAuthorizing"
-                :disabled="!tenantValid || temporaryLogAnalyticsAuthorizing"
-                @click="emit('authorizeLogAnalytics')"
-              />
-            </div>
-            <p
-              v-if="temporaryLogAnalyticsAuthorized"
-              role="status"
-              class="text-xs text-green-700 dark:text-green-300"
-            >
-              Log Analytics access available for selected directory.
-            </p>
-          </div>
-        </li>
-        <li
-          v-if="temporaryAuthStatus === 'connected'"
-          class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2"
-        >
-          <span
-            aria-hidden="true"
-            class="grid size-6 place-items-center rounded-full text-xs font-semibold"
-            :class="
-              workspaceValid
-                ? 'bg-brand-blue-50 text-brand-blue-700 dark:bg-brand-blue-950 dark:text-brand-blue-300'
-                : 'bg-brand-gray-100 text-brand-gray-700 dark:bg-brand-gray-800 dark:text-brand-gray-200'
-            "
-          >
-            3
-          </span>
-          <div class="min-w-0 space-y-3">
-            <div>
-              <p class="text-xs font-semibold">Select accessible workspace</p>
-              <p class="text-xs text-brand-gray-600 dark:text-brand-gray-300">
-                Workspaces are resolved through Azure Resource Manager. Missing workspace requires
-                Log Analytics Data Reader at workspace scope.
-              </p>
-            </div>
-            <UFormField label="Workspace" name="workspaceId">
-              <USelectMenu
-                :model-value="workspaceId"
-                :items="workspaceItems"
-                value-key="workspaceId"
-                label-key="label"
-                class="w-full"
-                :loading="temporaryAccessStatus === 'loading'"
-                :disabled="
-                  !temporaryLogAnalyticsAuthorized ||
-                  temporaryAccessStatus === 'loading' ||
-                  workspaceItems.length === 0
-                "
-                :placeholder="
-                  !temporaryLogAnalyticsAuthorized
-                    ? 'Grant tenant consent first'
-                    : workspaceItems.length > 0
-                      ? 'Select a workspace'
-                      : 'No accessible workspace discovered'
-                "
-                @update:model-value="changeWorkspace"
-              />
-            </UFormField>
-            <p
-              v-if="workspaceValid"
-              class="font-mono text-[0.6875rem] break-all text-brand-gray-500"
-            >
-              {{ workspaceId }}
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <UButton
-                class="touch-control"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-refresh-cw"
-                label="Refresh"
-                :loading="temporaryAccessStatus === 'loading'"
-                :disabled="
-                  !tenantValid ||
-                  !temporaryLogAnalyticsAuthorized ||
-                  temporaryAccessStatus === 'loading'
-                "
-                @click="emit('refreshAzureAccess')"
-              />
-              <UButton
-                class="touch-control"
-                :to="tenantValid ? LOG_ANALYTICS_WORKSPACES_URL : undefined"
-                target="_blank"
-                rel="noopener noreferrer"
-                color="neutral"
-                variant="outline"
-                icon="i-lucide-external-link"
-                label="Permissions"
-                :disabled="!tenantValid || !temporaryLogAnalyticsAuthorized"
-              />
-            </div>
-            <p
-              v-if="
-                temporaryLogAnalyticsAuthorized &&
-                temporaryAccessStatus === 'success' &&
-                workspaceItems.length === 0
-              "
-              role="status"
-              class="text-xs text-amber-700 dark:text-amber-300"
-            >
-              No accessible Log Analytics workspace found in selected directory.
-            </p>
-            <p
-              v-else-if="!temporaryLogAnalyticsAuthorized"
-              role="status"
-              class="text-xs text-amber-700 dark:text-amber-300"
-            >
-              Grant tenant consent before selecting a workspace.
-            </p>
-          </div>
-        </li>
-      </ol>
-      <p v-if="temporaryAuthError" role="alert" class="text-xs text-red-600 dark:text-red-400">
-        {{ temporaryAuthError }}
-      </p>
-      <p v-if="temporaryAccessError" role="alert" class="text-xs text-red-600 dark:text-red-400">
-        {{ temporaryAccessError }}
-      </p>
-    </div>
 
     <section
       v-if="!temporary || workspaceValid"
+      class="settings-section-divider settings-readiness"
       aria-labelledby="dns-readiness-heading"
-      class="space-y-3 border-t border-brand-gray-200 pt-3 dark:border-brand-gray-800"
     >
-      <div>
-        <h3 id="dns-readiness-heading" class="text-xs font-semibold">Source readiness</h3>
-        <p
-          v-if="dnsReadinessStatus === 'success'"
-          class="text-xs text-brand-gray-600 dark:text-brand-gray-300"
-        >
-          Dedicated tables {{ resourceSpecificReadyCount }}/{{ readinessSourceCount }} available ·
-          AzureDiagnostics {{ azureDiagnosticsReadyCount }}/{{ readinessSourceCount }} with data.
-        </p>
-        <p
-          v-else-if="dnsReadinessStatus === 'loading'"
-          role="status"
-          class="text-xs text-brand-blue-700 dark:text-brand-blue-300"
-        >
-          Checking selected workspace…
-        </p>
-        <p
-          v-else-if="dnsReadinessStatus === 'error'"
-          role="alert"
-          class="text-xs text-red-700 dark:text-red-300"
-        >
-          Source readiness check failed.
-        </p>
-        <p v-else class="text-xs text-brand-gray-500 dark:text-brand-gray-400">
-          Waiting for workspace check.
-        </p>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <label for="query-storage" class="shrink-0 text-xs font-semibold">Query source</label>
+      <h4 id="dns-readiness-heading" class="settings-step-title">Source readiness</h4>
+      <UButton
+        color="neutral"
+        variant="outline"
+        :icon="dnsReadinessStatus === 'loading' ? 'i-lucide-loader-circle' : 'i-lucide-refresh-cw'"
+        label="Check again"
+        :aria-busy="dnsReadinessStatus === 'loading'"
+        :aria-disabled="dnsReadinessStatus === 'loading'"
+        @click="checkReadiness"
+      />
+      <AppStatusLabel
+        v-if="dnsReadinessStatus === 'success'"
+        role="status"
+        :tone="readinessSummary.tone"
+        :label="readinessSummary.label"
+      />
+      <AppStatusLabel
+        v-else-if="dnsReadinessStatus === 'loading'"
+        role="status"
+        tone="primary"
+        icon="i-lucide-loader-circle"
+        label="Checking selected workspace…"
+      />
+      <AppNotice
+        v-else-if="dnsReadinessStatus === 'error'"
+        tone="error"
+        title="Source readiness check failed"
+        description="Check the workspace permissions and try again."
+      />
+      <p v-else class="settings-description">Waiting for workspace check.</p>
+      <UFormField label="Query source" name="queryStorage">
         <USelect
           id="query-storage"
           v-model="queryStorage"
           :items="queryStorageItems"
           :disabled="!queryStorageSelectionEnabled"
-          aria-label="Query source"
-          size="sm"
-          class="min-w-0 flex-1"
+          class="w-full"
         />
-      </div>
-
-      <table class="w-full table-fixed text-xs">
-        <caption class="sr-only">
-          Source availability in dedicated tables and AzureDiagnostics
-        </caption>
-        <colgroup>
-          <col />
-          <col class="w-14" />
-          <col class="w-26" />
-        </colgroup>
-        <thead>
-          <tr class="text-brand-gray-500 dark:text-brand-gray-400">
-            <th scope="col" class="pb-1 text-left text-xs font-medium">Source</th>
-            <th scope="col" class="pb-1 text-center text-xs font-medium">Table</th>
-            <th scope="col" class="pb-1 text-center text-xs font-medium">AzureDiagnostics</th>
-          </tr>
-        </thead>
-        <tbody v-for="group in readinessGroups" :key="group.label">
-          <tr>
-            <th
-              scope="rowgroup"
-              colspan="3"
-              class="pt-2 pb-1 text-xs font-semibold text-brand-gray-600 dark:text-brand-gray-300"
-            >
-              <span class="flex items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  class="h-px flex-1 bg-brand-gray-200 dark:bg-brand-gray-800"
-                />
-                <span>{{ group.label }}</span>
-                <span
-                  aria-hidden="true"
-                  class="h-px flex-1 bg-brand-gray-200 dark:bg-brand-gray-800"
-                />
-              </span>
-            </th>
-          </tr>
-          <tr v-for="item in group.items" :key="item.label">
-            <th scope="row" class="py-1.5 pr-2 text-left align-top font-medium">
-              <span class="block leading-4">{{ item.label }}</span>
-              <span
-                class="block font-mono text-[0.6875rem] leading-4 font-normal break-words text-brand-gray-500 dark:text-brand-gray-400"
-              >
-                {{ item.mapping }}
-              </span>
-            </th>
-            <td
-              v-for="indicator in item.indicators"
-              :key="indicator.label"
-              class="py-1.5 text-center align-top"
-            >
-              <span
-                role="img"
-                :aria-label="`${indicator.label}: ${indicator.statusLabel}`"
-                :title="`${indicator.label}: ${indicator.statusLabel}`"
-                class="inline-flex size-5 items-center justify-center"
-                :class="[readinessIndicatorStyle[indicator.state].text]"
-              >
-                <UIcon
-                  :name="readinessIndicatorStyle[indicator.state].icon"
-                  aria-hidden="true"
-                  class="size-3.5"
-                  :class="[readinessIndicatorStyle[indicator.state].iconClass]"
-                />
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      </UFormField>
+      <LogsSourceReadinessTable :readiness="dnsReadiness" :status="dnsReadinessStatus" />
     </section>
-  </div>
+  </LogsSettingsSection>
 </template>
