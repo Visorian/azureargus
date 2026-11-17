@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [0.6.0](https://github.com/Visorian/azureargus/compare/v0.5.0...v0.6.0) (2026-11-17)
+
+
+### Features
+
+* **frontend:** add firewall simulator and shared standards ([#110](https://github.com/Visorian/azureargus/issues/110)) ([cbc049d](https://github.com/Visorian/azureargus/commit/cbc049d4531444cb099656e7d745bdbeebedd929))
+* **frontend:** align application design and shared controls ([#112](https://github.com/Visorian/azureargus/issues/112)) ([d726cde](https://github.com/Visorian/azureargus/commit/d726cdef992b27dda14e17ea48dae840fa802e79))
+* **frontend:** improve mobile log navigation and filtering ([#108](https://github.com/Visorian/azureargus/issues/108)) ([47a736f](https://github.com/Visorian/azureargus/commit/47a736f024e64ba0fc9b20402b6258a8b6a220c3))
+
+
+### Bug Fixes
+
+* **frontend:** sort source and destination ports numerically ([#115](https://github.com/Visorian/azureargus/issues/115)) ([f6ad06e](https://github.com/Visorian/azureargus/commit/f6ad06efae6f370e25ea91940b584626aef57fe1)), closes [#111](https://github.com/Visorian/azureargus/issues/111)
+* **release:** refresh the expired country database pin ([#116](https://github.com/Visorian/azureargus/issues/116)) ([04d77a3](https://github.com/Visorian/azureargus/commit/04d77a34e1ab4a14371b4dc431e017a244c7ddbe))
+
 ## [0.5.0](https://github.com/Visorian/azureargus/compare/v0.4.6...v0.5.0) (2026-09-23)
 
 
