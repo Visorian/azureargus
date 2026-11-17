@@ -1,4 +1,6 @@
-FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS bun
+ARG BUN_VERSION=1.4.4
+
+FROM oven/bun:${BUN_VERSION} AS bun
 
 FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS build
 
