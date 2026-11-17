@@ -426,8 +426,9 @@ published image:
    not capture request bodies in access logs, APM, or traces.
 
 Application remains usable without database, but destination flags stay disabled. Keep last valid
-database when update fails. Refresh pin monthly by updating both `release` and `archiveSha256` from
-exact DB-IP archive before rebuilding.
+database when update fails. DB-IP serves only current and previous monthly release, so
+[Refresh country database](./.github/workflows/refresh-country-database.yml) opens pull request with
+new `release` and `archiveSha256` early each month. Merge it before old release disappears.
 
 ## Development and contributing
 

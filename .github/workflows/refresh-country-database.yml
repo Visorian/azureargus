@@ -1,0 +1,147 @@
+name: Refresh country database
+
+on:
+  # DB-IP serves only the current and previous monthly release. Moving the pin early in the
+  # month leaves about a month to merge the pull request before the old release disappears.
+  schedule:
+    - cron: '23 5 2,9 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-country-database
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve current main
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          printf 'sha=%s\n' "$sha" >>"$GITHUB_OUTPUT"
+
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.main.outputs.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Pin latest release
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pin=scripts/dbip-country-lite.pin.json
+          pinned="$(jq -r .release "$pin")"
+          current_month="$(date -u +%Y-%m)"
+          previous_month="$(date -u -d "${current_month}-01 -1 month" +%Y-%m)"
+          release=''
+          for candidate in "$current_month" "$previous_month"; do
+            if curl --fail --silent --location --head --output /dev/null \
+              "https://download.db-ip.com/free/dbip-country-lite-${candidate}.mmdb.gz"; then
+              release="$candidate"
+              break
+            fi
+          done
+          [ -n "$release" ] || {
+            echo 'No DB-IP Country Lite release is downloadable' >&2
+            exit 1
+          }
+          if [[ ! "$release" > "$pinned" ]]; then
+            echo 'current=true' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          archive="$RUNNER_TEMP/dbip-country-lite.mmdb.gz"
+          curl --fail --silent --show-error --location --output "$archive" \
+            "https://download.db-ip.com/free/dbip-country-lite-${release}.mmdb.gz"
+          sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          jq -n --arg release "$release" --arg sha "$sha" \
+            '{release: $release, archiveSha256: $sha}' >"$pin"
+          NUXT_IP_COUNTRY_DATABASE_PATH="$RUNNER_TEMP/dbip-country-lite.mmdb" bun run geoip:update
+          printf 'current=false\nrelease=%s\n' "$release" >>"$GITHUB_OUTPUT"
+
+      - name: Mint release automation token
+        if: steps.pin.outputs.current != 'true'
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.AZURE_ARGUS_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-metadata: read
+          permission-pull-requests: write
+
+      - name: Open pin update pull request
+        if: steps.pin.outputs.current != 'true'
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          MAIN_SHA: ${{ steps.main.outputs.sha }}
+          RELEASE: ${{ steps.pin.outputs.release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          branch="chore/dbip-country-lite-${RELEASE}"
+          title="chore(deps): update DB-IP Country Lite to ${RELEASE}"
+          existing="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            printf 'Pin update is already open: %s\n' "$existing"
+            exit 0
+          fi
+
+          # A branch without an open pull request is left over from an interrupted run.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" \
+              -f sha="$MAIN_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/heads/${branch}" -f sha="$MAIN_SHA" >/dev/null
+          fi
+
+          # createCommitOnBranch commits as the app, so GitHub signs the commit.
+          request="$(jq -n \
+            --rawfile pin scripts/dbip-country-lite.pin.json \
+            --arg branch "$branch" --arg head "$MAIN_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            --arg title "$title" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+              variables: {input: {
+                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                expectedHeadOid: $head,
+                message: {headline: $title},
+                fileChanges: {additions: [
+                  {path: "scripts/dbip-country-lite.pin.json", contents: ($pin | @base64)}
+                ]}
+              }}
+            }')"
+          commit="$(gh api graphql --input - <<<"$request" --jq .data.createCommitOnBranch.commit.oid)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || exit 1
+
+          gh pr create --base main --head "$branch" --title "$title" --body "$(
+            printf '%s\n\n%s\n' \
+              "Moves the DB-IP Country Lite pin to ${RELEASE}. The workflow downloaded the archive, recorded its SHA-256 and validated the database with \`bun run geoip:update\`." \
+              'DB-IP only serves the current and previous month, so the image build fails once the old pin ages out.'
+          )"
