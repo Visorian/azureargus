@@ -1,3 +1,5 @@
+import { isJsonObject } from '../../shared/utils/json'
+import type { JsonObject } from '../../shared/utils/json'
 import { LogAnalyticsConfigurationError } from './logAnalyticsConfigurationError'
 
 // `export *` keeps Nitro's auto-import pointing at the defining module (a named re-export would register a duplicate).
@@ -41,11 +43,12 @@ export class LogAnalyticsTokenError extends Error {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+export type LogAnalyticsAccessTokenProvider = (
+  config: LogAnalyticsRuntimeConfig,
+  signal?: AbortSignal,
+) => Promise<string>
 
-function readRequiredConfigValue(source: Record<string, unknown>, key: string) {
+function readRequiredConfigValue(source: JsonObject, key: string) {
   const value = source[key]
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new LogAnalyticsConfigurationError()
@@ -76,7 +79,7 @@ function tokenErrorForStatus(response: Response) {
 }
 
 export function parseLogAnalyticsRuntimeConfig(value: unknown): LogAnalyticsRuntimeConfig {
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     throw new LogAnalyticsConfigurationError()
   }
 
@@ -115,7 +118,7 @@ export function createLogAnalyticsTokenProvider(
   fetchImplementation: typeof fetch = globalThis.fetch,
   now: () => number = Date.now,
   timeoutMs = DEFAULT_TOKEN_TIMEOUT_MS,
-) {
+): LogAnalyticsAccessTokenProvider {
   let cached: CachedAccessToken | undefined
   let pending: PendingAccessToken | undefined
 
@@ -168,7 +171,7 @@ export function createLogAnalyticsTokenProvider(
       throw new LogAnalyticsTokenError('upstream')
     }
 
-    if (!isRecord(payload) || typeof payload['access_token'] !== 'string') {
+    if (!isJsonObject(payload) || typeof payload['access_token'] !== 'string') {
       throw new LogAnalyticsTokenError('upstream')
     }
 
@@ -197,7 +200,10 @@ export function createLogAnalyticsTokenProvider(
     }
   }
 
-  return async function getAccessToken(config: LogAnalyticsRuntimeConfig, signal?: AbortSignal) {
+  return async function getAccessToken(
+    config: LogAnalyticsRuntimeConfig,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const currentTime = now()
     if (
       cached &&

@@ -2,7 +2,7 @@ import { createError, getRequestURL } from 'h3'
 
 import { parseDeploymentCapabilities } from '../utils/deploymentCapabilities'
 
-const APP_LOGIN_PATH = /^\/auth\/entra\/(?:login|callback)\/?$/
+const APP_LOGIN_PATH = /^\/auth\/entra\/(?:login|callback)\/?$/u
 
 export default defineEventHandler((event) => {
   const pathname = getRequestURL(event).pathname

@@ -3,31 +3,26 @@ import { Socket } from 'node:net'
 
 import { createEvent } from 'h3'
 import type { H3Event } from 'h3'
-import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
-import { getLogAnalyticsAccessToken } from '../../server/utils/logAnalyticsAuth'
-import type * as LogAnalyticsAuthModule from '../../server/utils/logAnalyticsAuth'
-import type { DnsDetailQueryRequest, DnsListQueryRequest } from '../../shared/types/dns'
+import type { LogAnalyticsAccessTokenProvider } from '../../server/utils/logAnalyticsAuth'
 import {
-  executeDnsDetailQuery,
-  executeDnsListQuery,
-  executeDnsReadinessQuery,
-} from '../../shared/utils/dnsLogAnalyticsQuery'
-import type * as DnsLogAnalyticsQueryModule from '../../shared/utils/dnsLogAnalyticsQuery'
+  createDnsDetailHandler,
+  createDnsListHandler,
+  createDnsReadinessHandler,
+} from '../../server/utils/managedLogAnalyticsHandlers'
+import type {
+  DnsDetailRouteDependencies,
+  DnsListRouteDependencies,
+  DnsReadinessRouteDependencies,
+  ManagedLogAnalyticsRuntimeConfig,
+} from '../../server/utils/managedLogAnalyticsHandlers'
+import type { DnsDetailQueryRequest, DnsListQueryRequest } from '../../shared/types/dns'
 
-vi.mock('nuxt-oidc-auth/runtime/server/utils/session.js', () => ({
-  requireUserSession: vi.fn<typeof requireUserSession>(),
-}))
-vi.mock('../../server/utils/logAnalyticsAuth', async (importOriginal) => ({
-  ...(await importOriginal<typeof LogAnalyticsAuthModule>()),
-  getLogAnalyticsAccessToken: vi.fn<typeof getLogAnalyticsAccessToken>(),
-}))
-vi.mock('../../shared/utils/dnsLogAnalyticsQuery', async (importOriginal) => ({
-  ...(await importOriginal<typeof DnsLogAnalyticsQueryModule>()),
-  executeDnsDetailQuery: vi.fn<typeof executeDnsDetailQuery>(),
-  executeDnsListQuery: vi.fn<typeof executeDnsListQuery>(),
-  executeDnsReadinessQuery: vi.fn<typeof executeDnsReadinessQuery>(),
-}))
+const requireSession = vi.fn<(event: H3Event) => Promise<unknown>>()
+const getAccessToken = vi.fn<LogAnalyticsAccessTokenProvider>()
+const executeDnsDetailQuery = vi.fn<NonNullable<DnsDetailRouteDependencies['executeQuery']>>()
+const executeDnsListQuery = vi.fn<NonNullable<DnsListRouteDependencies['executeQuery']>>()
+const executeDnsReadinessQuery = vi.fn<NonNullable<DnsReadinessRouteDependencies['executeQuery']>>()
 
 const managedConfig = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -49,24 +44,27 @@ const oidc = {
 const resourceId =
   '/subscriptions/77777777-7777-4777-8777-777777777777/resourceGroups/network/providers/Microsoft.Network/azureFirewalls/hub'
 
-let runtimeConfig: Record<string, unknown>
-let managedDetailHandler: (event: H3Event) => Promise<unknown>
-let managedListHandler: (event: H3Event) => Promise<unknown>
-let managedReadinessHandler: (event: H3Event) => Promise<unknown>
+const anonymousLogAnalytics = { tenantId: '', clientId: '', clientSecret: '', workspaceId: '' }
+let runtimeConfig: ManagedLogAnalyticsRuntimeConfig & { oidc?: typeof oidc }
+const routeDependencies = {
+  getAccessToken,
+  getRuntimeConfig: () => runtimeConfig,
+  requireSession,
+}
+const managedDetailHandler = createDnsDetailHandler({
+  ...routeDependencies,
+  executeQuery: executeDnsDetailQuery,
+})
+const managedListHandler = createDnsListHandler({
+  ...routeDependencies,
+  executeQuery: executeDnsListQuery,
+})
+const managedReadinessHandler = createDnsReadinessHandler({
+  ...routeDependencies,
+  executeQuery: executeDnsReadinessQuery,
+})
 
 const anyAbortSignal: unknown = expect.any(AbortSignal)
-
-function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
-  return typeof value === 'function'
-}
-
-async function importEventHandler(routeModule: Promise<{ default: unknown }>) {
-  const { default: handler } = await routeModule
-  if (!isEventHandler(handler)) {
-    throw new TypeError('Route module has no default event handler.')
-  }
-  return handler
-}
 
 function createListRequest(): DnsListQueryRequest {
   return {
@@ -113,43 +111,30 @@ function createTestEvent(body?: unknown) {
   return createEvent(request, response)
 }
 
-beforeAll(async () => {
+beforeAll(() => {
   vi.stubEnv('NUXT_OIDC_AUTH_SESSION_SECRET', 's'.repeat(32))
   vi.stubEnv('NUXT_OIDC_SESSION_SECRET', 's'.repeat(48))
   vi.stubEnv('NUXT_OIDC_TOKEN_KEY', Buffer.alloc(32).toString('base64'))
-  vi.stubGlobal('defineEventHandler', <T>(handler: T) => handler)
-  vi.stubGlobal('useRuntimeConfig', () => runtimeConfig)
-  managedDetailHandler = await importEventHandler(
-    import('../../server/api/log-analytics/dns/detail.post'),
-  )
-  managedListHandler = await importEventHandler(
-    import('../../server/api/log-analytics/dns/list.post'),
-  )
-  managedReadinessHandler = await importEventHandler(
-    import('../../server/api/log-analytics/dns/readiness.get'),
-  )
 })
 
 beforeEach(() => {
   runtimeConfig = { logAnalytics: managedConfig, oidc }
-  vi.mocked(requireUserSession)
-    .mockReset()
-    .mockResolvedValue({
-      provider: 'entra',
-      canRefresh: false,
-      expireAt: 1_800_000_000,
-      claims: { sub: 'user' },
-    })
-  vi.mocked(getLogAnalyticsAccessToken).mockReset().mockResolvedValue('managed-token')
-  vi.mocked(executeDnsListQuery).mockReset().mockResolvedValue({
+  requireSession.mockReset().mockResolvedValue({
+    provider: 'entra',
+    canRefresh: false,
+    expireAt: 1_800_000_000,
+    claims: { sub: 'user' },
+  })
+  getAccessToken.mockReset().mockResolvedValue('managed-token')
+  executeDnsListQuery.mockReset().mockResolvedValue({
     queriedEntries: [],
     transportObservations: [],
     queriedEntriesTruncated: false,
     transportObservationsTruncated: false,
     sources: [],
   })
-  vi.mocked(executeDnsReadinessQuery).mockReset().mockResolvedValue({ readiness: [] })
-  vi.mocked(executeDnsDetailQuery).mockReset().mockResolvedValue({
+  executeDnsReadinessQuery.mockReset().mockResolvedValue({ readiness: [] })
+  executeDnsDetailQuery.mockReset().mockResolvedValue({
     observations: [],
     detailTruncated: false,
     completeness: 'partial',
@@ -159,14 +144,15 @@ beforeEach(() => {
 
 afterAll(() => {
   vi.unstubAllEnvs()
-  vi.unstubAllGlobals()
 })
 
 describe('managed DNS readiness route', () => {
   it('queries configured workspace immediately without caller input', async () => {
-    await expect(managedReadinessHandler(createTestEvent())).resolves.toEqual({ readiness: [] })
+    await expect(managedReadinessHandler(createTestEvent())).resolves.toStrictEqual({
+      readiness: [],
+    })
 
-    expect(getLogAnalyticsAccessToken).toHaveBeenCalledWith(managedConfig, expect.any(AbortSignal))
+    expect(getAccessToken).toHaveBeenCalledWith(managedConfig, expect.any(AbortSignal))
     expect(executeDnsReadinessQuery).toHaveBeenCalledWith(
       managedConfig,
       'managed-token',
@@ -178,42 +164,40 @@ describe('managed DNS readiness route', () => {
 describe('managed DNS list route', () => {
   it('requires login before reading managed configuration', async () => {
     runtimeConfig = { logAnalytics: { ...managedConfig, clientSecret: '' }, oidc }
-    vi.mocked(requireUserSession).mockRejectedValueOnce({ statusCode: 401 })
+    requireSession.mockRejectedValueOnce({ statusCode: 401 })
 
     await expect(managedListHandler(createTestEvent())).rejects.toMatchObject({
       statusCode: 401,
     })
-    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled()
+    expect(getAccessToken).not.toHaveBeenCalled()
     expect(executeDnsListQuery).not.toHaveBeenCalled()
   })
 
   it('uses fixed workspace credentials and propagates request cancellation', async () => {
     let querySignal: AbortSignal | undefined
-    vi.mocked(executeDnsListQuery).mockImplementationOnce(
-      async (_target, _request, _token, options) => {
-        if (!options?.signal) {
-          throw new Error('Expected incoming request signal')
-        }
-        const signal = options.signal
-        querySignal = signal
-        await new Promise<void>((resolve) => {
-          signal.addEventListener(
-            'abort',
-            () => {
-              resolve()
-            },
-            { once: true },
-          )
-        })
-        return {
-          queriedEntries: [],
-          transportObservations: [],
-          queriedEntriesTruncated: false,
-          transportObservationsTruncated: false,
-          sources: [],
-        }
-      },
-    )
+    executeDnsListQuery.mockImplementationOnce(async (_target, _request, _token, options) => {
+      if (!options?.signal) {
+        throw new Error('Expected incoming request signal')
+      }
+      const signal = options.signal
+      querySignal = signal
+      await new Promise<void>((resolve) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            resolve()
+          },
+          { once: true },
+        )
+      })
+      return {
+        queriedEntries: [],
+        transportObservations: [],
+        queriedEntriesTruncated: false,
+        transportObservationsTruncated: false,
+        sources: [],
+      }
+    })
     const request = createListRequest()
     const event = createTestEvent(request)
     const response = managedListHandler(event)
@@ -225,7 +209,7 @@ describe('managed DNS list route', () => {
     await expect(response).resolves.toMatchObject({ queriedEntries: [] })
 
     expect(querySignal?.aborted).toBe(true)
-    expect(getLogAnalyticsAccessToken).toHaveBeenCalledWith(managedConfig, expect.any(AbortSignal))
+    expect(getAccessToken).toHaveBeenCalledWith(managedConfig, expect.any(AbortSignal))
     expect(executeDnsListQuery).toHaveBeenCalledWith(
       managedConfig,
       request,
@@ -235,7 +219,7 @@ describe('managed DNS list route', () => {
   })
 
   it('rejects unavailable capability and caller-controlled workspace', async () => {
-    runtimeConfig = {}
+    runtimeConfig = { logAnalytics: anonymousLogAnalytics }
     await expect(managedListHandler(createTestEvent(createListRequest()))).rejects.toMatchObject({
       statusCode: 403,
     })
@@ -261,7 +245,7 @@ describe('managed DNS detail route', () => {
       observations: [],
     })
 
-    expect(getLogAnalyticsAccessToken).toHaveBeenCalledWith(managedConfig, expect.any(AbortSignal))
+    expect(getAccessToken).toHaveBeenCalledWith(managedConfig, expect.any(AbortSignal))
     expect(executeDnsDetailQuery).toHaveBeenCalledWith(
       managedConfig,
       request,

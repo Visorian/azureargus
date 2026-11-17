@@ -4,6 +4,8 @@ import type {
   DeploymentConfigurationErrorCode,
   DeploymentMode,
 } from '../../shared/types/deploymentCapabilities'
+import { isJsonObject } from '../../shared/utils/json'
+import type { JsonObject } from '../../shared/utils/json'
 
 interface DeploymentEnvironment {
   [key: string]: string | undefined
@@ -12,20 +14,16 @@ interface DeploymentEnvironment {
   NUXT_OIDC_TOKEN_KEY?: string
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function readRecord(value: unknown, key: string): Record<string, unknown> {
-  if (!isRecord(value)) {
+function readRecord(value: unknown, key: string): JsonObject {
+  if (!isJsonObject(value)) {
     return {}
   }
 
   const nested = value[key]
-  return isRecord(nested) ? nested : {}
+  return isJsonObject(nested) ? nested : {}
 }
 
-function readValue(source: Record<string, unknown>, key: string) {
+function readValue(source: JsonObject, key: string) {
   const value = source[key]
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -66,7 +64,12 @@ function parseConnectionString(connectionString: string) {
 function isValidEventHubConnection(connectionString: string, eventHubName: string) {
   const values = parseConnectionString(connectionString)
   const endpoint = values.get('endpoint')
-  if (!endpoint || !values.has('sharedaccesskeyname') || !values.has('sharedaccesskey')) {
+  // Only non-empty values are stored, so a present endpoint is never blank.
+  if (
+    endpoint === undefined ||
+    !values.has('sharedaccesskeyname') ||
+    !values.has('sharedaccesskey')
+  ) {
     return false
   }
 
@@ -78,7 +81,7 @@ function isValidEventHubConnection(connectionString: string, eventHubName: strin
     return false
   }
 
-  return Boolean(values.get('entitypath') || eventHubName)
+  return values.has('entitypath') || eventHubName.length > 0
 }
 
 function isValidUrl(value: string) {
@@ -93,7 +96,7 @@ function isValidUrl(value: string) {
   }
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu
 
 function isUuid(value: string) {
   return UUID_PATTERN.test(value)
@@ -111,7 +114,7 @@ export function parseDeploymentCapabilities(
   runtimeConfig: unknown,
   environment: DeploymentEnvironment = process.env,
 ): DeploymentCapabilities {
-  const root = isRecord(runtimeConfig) ? runtimeConfig : {}
+  const root = isJsonObject(runtimeConfig) ? runtimeConfig : {}
   const eventHub = readRecord(root, 'eventHub')
   const logAnalytics = readRecord(root, 'logAnalytics')
   const oidc = readRecord(root, 'oidc')

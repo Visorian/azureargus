@@ -1,41 +1,9 @@
-import { createError } from 'h3'
-import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
+import { createDnsReadinessHandler } from '../../../utils/managedLogAnalyticsHandlers'
+import { requireOidcSession } from '../../../utils/oidcRouteSession'
 
-import { executeDnsReadinessQuery } from '../../../../shared/utils/dnsLogAnalyticsQuery'
-import { parseDeploymentCapabilities } from '../../../utils/deploymentCapabilities'
-import {
-  getLogAnalyticsAccessToken,
-  parseLogAnalyticsRuntimeConfig,
-} from '../../../utils/logAnalyticsAuth'
-import {
-  createIncomingRequestSignal,
-  createLogAnalyticsUpstreamError,
-} from '../../../utils/logAnalyticsRoute'
-
-export default defineEventHandler(async (event) => {
-  await requireUserSession(event, { errorBehavior: 'throw' })
-  const runtimeConfig = useRuntimeConfig(event)
-  const capabilities = parseDeploymentCapabilities(runtimeConfig, process.env)
-  if (capabilities.mode !== 'managed' || !capabilities.predefinedLogAnalyticsAvailable) {
-    throw createError({
-      statusCode: capabilities.mode === 'invalid' ? 503 : 403,
-      message: 'Managed Log Analytics is unavailable',
-    })
-  }
-
-  let config
-  try {
-    config = parseLogAnalyticsRuntimeConfig(runtimeConfig.logAnalytics)
-  } catch (error) {
-    throw createLogAnalyticsUpstreamError(event, error)
-  }
-  const incoming = createIncomingRequestSignal(event)
-  try {
-    const token = await getLogAnalyticsAccessToken(config, incoming.signal)
-    return await executeDnsReadinessQuery(config, token, { signal: incoming.signal })
-  } catch (error) {
-    throw createLogAnalyticsUpstreamError(event, error)
-  } finally {
-    incoming.cleanup()
-  }
-})
+export default defineEventHandler(
+  createDnsReadinessHandler({
+    getRuntimeConfig: useRuntimeConfig,
+    requireSession: requireOidcSession,
+  }),
+)

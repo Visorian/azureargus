@@ -8,39 +8,55 @@ import type {
   ManagedEventHubStreamRequest,
 } from '../../shared/types/managedEventHub'
 
-type ManagedEventHubReceivedEvent = Pick<
+export type ManagedEventHubReceivedEvent = Pick<
   ReceivedEventData,
   'body' | 'enqueuedTimeUtc' | 'sequenceNumber' | 'properties'
 > &
   Partial<Pick<ReceivedEventData, 'offset'>>
 
-export interface ManagedEventHubClient {
-  close(): Promise<void>
-  subscribe(
-    handlers: {
-      processEvents(
-        events: readonly ManagedEventHubReceivedEvent[],
-        context: {
-          partitionId: string
-          updateCheckpoint(event: ManagedEventHubReceivedEvent): Promise<void>
-        },
-      ): Promise<void>
-      processError(error: unknown): Promise<void>
-    },
+// Generic over the event type so checkpoints accept exactly the events the client delivered.
+export interface ManagedEventHubPartitionContext<
+  TEvent extends ManagedEventHubReceivedEvent = ManagedEventHubReceivedEvent,
+> {
+  partitionId: string
+  updateCheckpoint: (event: TEvent) => Promise<void>
+}
+
+export interface ManagedEventHubSubscriptionHandlers<
+  TEvent extends ManagedEventHubReceivedEvent = ManagedEventHubReceivedEvent,
+> {
+  processEvents: (
+    events: readonly TEvent[],
+    context: ManagedEventHubPartitionContext<TEvent>,
+  ) => Promise<void>
+  processError: (error: unknown) => Promise<void>
+}
+
+export interface ManagedEventHubClient<
+  TEvent extends ManagedEventHubReceivedEvent = ManagedEventHubReceivedEvent,
+> {
+  close: () => Promise<void>
+  subscribe: (
+    handlers: ManagedEventHubSubscriptionHandlers<TEvent>,
     options: {
       maxBatchSize: number
       maxWaitTimeInSeconds: number
       startPosition: EventPosition | Record<string, EventPosition>
     },
-  ): ManagedEventHubSubscription
+  ) => ManagedEventHubSubscription
 }
 
 export interface ManagedEventHubSubscription {
-  close(): Promise<void>
+  close: () => Promise<void>
 }
 
-interface ManagedEventHubStreamOptions {
-  client: ManagedEventHubClient
+export interface ManagedEventHubStream {
+  cleanup: () => Promise<void>
+  stream: ReadableStream<Uint8Array>
+}
+
+export interface ManagedEventHubStreamOptions<TEvent extends ManagedEventHubReceivedEvent> {
+  client: ManagedEventHubClient<TEvent>
   expectedPartitionIds: readonly string[]
   request: ManagedEventHubStreamRequest
   sessionExpiresAt: number
@@ -53,7 +69,7 @@ interface ManagedEventHubStreamOptions {
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
-const partitionIdPattern = /^(0|[1-9]\d*)$/
+const partitionIdPattern = /^(0|[1-9]\d*)$/u
 const STREAM_BUFFER_HIGH_WATER_MARK = 256 * 1024
 const EVENT_HUB_MAX_BATCH_SIZE = 50
 const EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2
@@ -110,23 +126,21 @@ async function waitForResponseDrain(response: ServerResponse) {
 export async function pipeManagedEventHubStream(
   response: ServerResponse,
   stream: ReadableStream<Uint8Array>,
-) {
-  const reader = stream.getReader()
-  try {
-    while (!response.destroyed && !response.writableEnded) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
+): Promise<void> {
+  const isResponseOpen = () => !response.destroyed && !response.writableEnded
+  if (isResponseOpen()) {
+    // preventCancel: leaving the loop releases the reader lock without cancelling the stream.
+    for await (const value of stream.values({ preventCancel: true })) {
       if (!response.write(value)) {
         await waitForResponseDrain(response)
       }
+      if (!isResponseOpen()) {
+        break
+      }
     }
-  } finally {
-    reader.releaseLock()
   }
 
-  if (!response.destroyed && !response.writableEnded) {
+  if (isResponseOpen()) {
     response.end()
   }
 }
@@ -202,11 +216,11 @@ function createStartPosition(
   )
 }
 
-export function encodeManagedEventHubEnvelope(envelope: ManagedEventHubStreamEnvelope) {
+export function encodeManagedEventHubEnvelope(envelope: ManagedEventHubStreamEnvelope): Uint8Array {
   return textEncoder.encode(`${JSON.stringify(envelope)}\n`)
 }
 
-export function createManagedEventHubStream({
+export function createManagedEventHubStream<TEvent extends ManagedEventHubReceivedEvent>({
   client,
   expectedPartitionIds,
   request,
@@ -216,7 +230,7 @@ export function createManagedEventHubStream({
   heartbeatIntervalMs = 15_000,
   sessionCheckIntervalMs = 30_000,
   now = Date.now,
-}: ManagedEventHubStreamOptions) {
+}: ManagedEventHubStreamOptions<TEvent>): ManagedEventHubStream {
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null
   let subscription: ManagedEventHubSubscription | null = null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -246,10 +260,12 @@ export function createManagedEventHubStream({
     })
   }
 
-  const waitForDemand = async () => {
-    while (lacksDemand()) {
-      await nextDemand()
+  const waitForDemand = async (): Promise<void> => {
+    if (!lacksDemand()) {
+      return
     }
+    await nextDemand()
+    await waitForDemand()
   }
 
   const cleanup = async () => {
@@ -359,7 +375,7 @@ export function createManagedEventHubStream({
     {
       start(streamController) {
         controller = streamController
-        if (signal?.aborted) {
+        if (signal?.aborted === true) {
           void cleanup()
           return
         }

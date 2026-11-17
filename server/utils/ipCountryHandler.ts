@@ -1,0 +1,79 @@
+import { createError, getHeader } from 'h3'
+import type { H3Event } from 'h3'
+
+import {
+  isIpCountryLookupRequest,
+  MAX_IP_COUNTRY_REQUEST_BYTES,
+} from '../../shared/types/ipCountry'
+import type { IpCountryLookupRequest, IpCountryLookupResponse } from '../../shared/types/ipCountry'
+import { ipCountryLookup, IpCountryLookupUnavailableError } from './ipCountryLookup'
+import type { IpCountryLookup } from './ipCountryLookup'
+
+export interface IpCountryRuntimeConfig {
+  ipCountry: {
+    databasePath: string
+  }
+}
+
+export interface IpCountryRouteDependencies {
+  getRuntimeConfig: (event: H3Event) => IpCountryRuntimeConfig
+  lookup?: IpCountryLookup
+}
+
+async function readRequest(event: H3Event): Promise<IpCountryLookupRequest> {
+  const contentLength = Number(getHeader(event, 'content-length'))
+  if (Number.isFinite(contentLength) && contentLength > MAX_IP_COUNTRY_REQUEST_BYTES) {
+    throw createError({ statusCode: 413, message: 'Request body is too large' })
+  }
+
+  const chunks: Buffer[] = []
+  let size = 0
+  // Node yields Buffers, or strings once an encoding is set on the request.
+  const requestChunks: AsyncIterable<Buffer | string> = event.node.req
+  for await (const chunk of requestChunks) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buffer.byteLength
+    if (size > MAX_IP_COUNTRY_REQUEST_BYTES) {
+      throw createError({ statusCode: 413, message: 'Request body is too large' })
+    }
+    chunks.push(buffer)
+  }
+
+  let body: unknown
+  try {
+    body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    throw createError({ statusCode: 400, message: 'Invalid request body' })
+  }
+  if (!isIpCountryLookupRequest(body)) {
+    throw createError({ statusCode: 400, message: 'Invalid request body' })
+  }
+  return body
+}
+
+export function createIpCountryHandler({
+  getRuntimeConfig,
+  lookup = ipCountryLookup,
+}: IpCountryRouteDependencies): (event: H3Event) => Promise<IpCountryLookupResponse> {
+  return async (event) => {
+    const body = await readRequest(event)
+    const databasePath = getRuntimeConfig(event).ipCountry.databasePath
+    const ips = [...new Set(body.ips)]
+
+    try {
+      return {
+        results: await Promise.all(
+          ips.map(async (ip) => ({
+            ip,
+            countryCode: await lookup.lookup(ip, databasePath),
+          })),
+        ),
+      }
+    } catch (error) {
+      if (error instanceof IpCountryLookupUnavailableError) {
+        throw createError({ statusCode: 503, message: 'IP country lookup is unavailable' })
+      }
+      throw error
+    }
+  }
+}

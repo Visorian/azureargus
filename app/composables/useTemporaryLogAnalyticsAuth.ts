@@ -1,8 +1,13 @@
 import type {
   AccountInfo,
-  IPublicClientApplication,
-  PublicClientApplication,
+  AuthenticationResult,
+  ClearCacheRequest,
+  Configuration,
+  EventType,
+  PopupRequest,
+  SilentRequest,
 } from '@azure/msal-browser'
+import type { Ref } from 'vue'
 
 import { isEntraId } from '~/utils/logAnalyticsOnboarding'
 import {
@@ -16,7 +21,57 @@ const ORGANIZATIONS_AUTHORITY = 'https://login.microsoftonline.com/organizations
 const REDIRECT_PATH = '/log-analytics-redirect.html'
 const POPUP_CLOSE_POLL_INTERVAL_MS = 500
 
-let clientPromise: Promise<IPublicClientApplication> | null = null
+type TemporaryAuthResult = Pick<AuthenticationResult, 'accessToken' | 'account' | 'tenantId'>
+
+/** The part of MSAL's PublicClientApplication that temporary authentication relies on. */
+export interface TemporaryAuthClient {
+  acquireTokenPopup: (request: PopupRequest) => Promise<TemporaryAuthResult>
+  acquireTokenSilent: (request: SilentRequest) => Promise<TemporaryAuthResult>
+  addEventCallback: (
+    callback: (message: { readonly payload: unknown }) => void,
+    eventTypes?: EventType[],
+  ) => string | null
+  clearCache: (request?: ClearCacheRequest) => Promise<void>
+  initialize: () => Promise<void>
+  loginPopup: (request: PopupRequest) => Promise<TemporaryAuthResult>
+  removeEventCallback: (callbackId: string) => void
+}
+
+export type CreateTemporaryAuthClient = (
+  configuration: Configuration,
+) => Promise<TemporaryAuthClient>
+
+export interface TemporaryLogAnalyticsAuthOptions {
+  createClient?: CreateTemporaryAuthClient
+}
+
+export interface TemporaryAuthConnection {
+  accessToken: string
+  tenantId: string
+  username: string
+}
+
+export type TemporaryAuthStatus = 'idle' | 'connecting' | 'connected' | 'error'
+
+export interface TemporaryLogAnalyticsAuth {
+  authorized: Ref<boolean>
+  checkAuthorization: (tenantId: string) => Promise<boolean>
+  connect: () => Promise<TemporaryAuthConnection | null>
+  connected: Ref<boolean>
+  disconnect: () => Promise<void>
+  getAccessToken: (tenantId: string, allowInteractive?: boolean) => Promise<string>
+  getManagementAccessToken: (tenantId: string, allowInteractive?: boolean) => Promise<string>
+  invalidateAuthorization: () => void
+  lastError: Ref<string | null>
+  status: Ref<TemporaryAuthStatus>
+}
+
+async function createMsalClient(configuration: Configuration): Promise<TemporaryAuthClient> {
+  const { PublicClientApplication } = await import('@azure/msal-browser')
+  return new PublicClientApplication(configuration)
+}
+
+let clientPromise: Promise<TemporaryAuthClient> | null = null
 let activeAccount: AccountInfo | null = null
 let activeTenantId: string | null = null
 let operationGeneration = 0
@@ -41,13 +96,12 @@ function getPopupWindowState(payload: unknown): { readonly closed: boolean } | n
   return hasPopupClosedState(popupWindow) ? popupWindow : null
 }
 
-export function useTemporaryLogAnalyticsAuth() {
+export function useTemporaryLogAnalyticsAuth({
+  createClient = createMsalClient,
+}: TemporaryLogAnalyticsAuthOptions = {}): TemporaryLogAnalyticsAuth {
   const runtimeConfig = useRuntimeConfig()
   const connected = useState('temporary-log-analytics-connected', () => false)
-  const status = useState<'idle' | 'connecting' | 'connected' | 'error'>(
-    'temporary-log-analytics-status',
-    () => 'idle',
-  )
+  const status = useState<TemporaryAuthStatus>('temporary-log-analytics-status', () => 'idle')
   const authorized = useState('temporary-log-analytics-authorized', () => false)
   const lastError = useState<string | null>('temporary-log-analytics-error', () => null)
 
@@ -62,12 +116,11 @@ export function useTemporaryLogAnalyticsAuth() {
       return await clientPromise
     }
 
-    const { BrowserCacheLocation, PublicClientApplication: MsalClient } =
-      await import('@azure/msal-browser')
+    const { BrowserCacheLocation } = await import('@azure/msal-browser')
     const clientId = runtimeConfig.public.logAnalyticsDelegated.clientId
     const redirectUri = `${globalThis.location.origin}${REDIRECT_PATH}`
     const initializingClient = (async () => {
-      const client: PublicClientApplication = new MsalClient({
+      const client = await createClient({
         auth: {
           authority: ORGANIZATIONS_AUTHORITY,
           clientId,

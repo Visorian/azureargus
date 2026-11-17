@@ -3,28 +3,17 @@ import { Socket } from 'node:net'
 
 import { createEvent } from 'h3'
 import type { H3Event } from 'h3'
-import { requireUserSession } from 'nuxt-oidc-auth/runtime/server/utils/session.js'
 
-import { getLogAnalyticsAccessToken } from '../../server/utils/logAnalyticsAuth'
-import type * as LogAnalyticsAuthModule from '../../server/utils/logAnalyticsAuth'
+import type { LogAnalyticsAccessTokenProvider } from '../../server/utils/logAnalyticsAuth'
+import { createLogAnalyticsQueryHandler } from '../../server/utils/managedLogAnalyticsHandlers'
+import type {
+  LogAnalyticsQueryRouteDependencies,
+  ManagedLogAnalyticsRuntimeConfig,
+} from '../../server/utils/managedLogAnalyticsHandlers'
 import type { LogAnalyticsQueryRequest } from '../../shared/types/logAnalytics'
-import {
-  executeLogAnalyticsQuery,
-  LogAnalyticsQueryError,
-} from '../../shared/utils/logAnalyticsQuery'
-import type * as LogAnalyticsQueryModule from '../../shared/utils/logAnalyticsQuery'
+import { LogAnalyticsQueryError } from '../../shared/utils/logAnalyticsQuery'
 
-vi.mock('nuxt-oidc-auth/runtime/server/utils/session.js', () => ({
-  requireUserSession: vi.fn(),
-}))
-vi.mock('../../server/utils/logAnalyticsAuth', async (importOriginal) => ({
-  ...(await importOriginal<typeof LogAnalyticsAuthModule>()),
-  getLogAnalyticsAccessToken: vi.fn(),
-}))
-vi.mock('../../shared/utils/logAnalyticsQuery', async (importOriginal) => ({
-  ...(await importOriginal<typeof LogAnalyticsQueryModule>()),
-  executeLogAnalyticsQuery: vi.fn(),
-}))
+type ExecuteQuery = NonNullable<LogAnalyticsQueryRouteDependencies['executeQuery']>
 
 const config = {
   tenantId: '11111111-1111-1111-1111-111111111111',
@@ -43,8 +32,17 @@ const oidc = {
     },
   },
 }
-let runtimeConfig: Record<string, unknown>
-let handler: (event: H3Event) => unknown
+const anonymousLogAnalytics = { tenantId: '', clientId: '', clientSecret: '', workspaceId: '' }
+let runtimeConfig: ManagedLogAnalyticsRuntimeConfig & { oidc?: typeof oidc }
+const requireSession = vi.fn<(event: H3Event) => Promise<unknown>>()
+const getAccessToken = vi.fn<LogAnalyticsAccessTokenProvider>()
+const executeLogAnalyticsQuery = vi.fn<ExecuteQuery>()
+const handler = createLogAnalyticsQueryHandler({
+  executeQuery: executeLogAnalyticsQuery,
+  getAccessToken,
+  getRuntimeConfig: () => runtimeConfig,
+  requireSession,
+})
 const anyAbortSignal: unknown = expect.any(AbortSignal)
 
 function createRequest(): LogAnalyticsQueryRequest {
@@ -67,10 +65,6 @@ function createRequest(): LogAnalyticsQueryRequest {
   }
 }
 
-function isEventHandler(value: unknown): value is (event: H3Event) => unknown {
-  return typeof value === 'function'
-}
-
 function createTestEvent(body?: unknown) {
   const request = new IncomingMessage(new Socket())
   const response = new ServerResponse(request)
@@ -85,33 +79,22 @@ function createTestEvent(body?: unknown) {
   return createEvent(request, response)
 }
 
-beforeAll(async () => {
+beforeAll(() => {
   vi.stubEnv('NUXT_OIDC_AUTH_SESSION_SECRET', 's'.repeat(32))
   vi.stubEnv('NUXT_OIDC_SESSION_SECRET', 's'.repeat(48))
   vi.stubEnv('NUXT_OIDC_TOKEN_KEY', Buffer.alloc(32).toString('base64'))
-  runtimeConfig = { logAnalytics: config, oidc }
-  vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
-  vi.stubGlobal('useRuntimeConfig', () => runtimeConfig)
-  const routeModule: { default: unknown } =
-    await import('../../server/api/log-analytics/query.post')
-  if (!isEventHandler(routeModule.default)) {
-    throw new TypeError('Log Analytics query route has no default event handler.')
-  }
-  handler = routeModule.default
 })
 
 beforeEach(() => {
   runtimeConfig = { logAnalytics: config, oidc }
-  vi.mocked(requireUserSession)
-    .mockReset()
-    .mockResolvedValue({
-      provider: 'entra',
-      canRefresh: false,
-      expireAt: 1_800_000_000,
-      claims: { tid: 'independent-login-tenant', roles: ['Unrelated.Login.Role'] },
-    })
-  vi.mocked(getLogAnalyticsAccessToken).mockReset().mockResolvedValue('access-token')
-  vi.mocked(executeLogAnalyticsQuery).mockReset().mockResolvedValue({
+  requireSession.mockReset().mockResolvedValue({
+    provider: 'entra',
+    canRefresh: false,
+    expireAt: 1_800_000_000,
+    claims: { tid: 'independent-login-tenant', roles: ['Unrelated.Login.Role'] },
+  })
+  getAccessToken.mockReset().mockResolvedValue('access-token')
+  executeLogAnalyticsQuery.mockReset().mockResolvedValue({
     limit: 1_000,
     records: [],
     truncated: false,
@@ -120,16 +103,15 @@ beforeEach(() => {
 
 afterAll(() => {
   vi.unstubAllEnvs()
-  vi.unstubAllGlobals()
 })
 
 describe('Log Analytics query route authentication', () => {
   it('requires a login session before reading private configuration', async () => {
     runtimeConfig = { logAnalytics: { ...config, clientSecret: '' }, oidc }
-    vi.mocked(requireUserSession).mockRejectedValue({ statusCode: 401 })
+    requireSession.mockRejectedValue({ statusCode: 401 })
 
     await expect(handler(createTestEvent())).rejects.toMatchObject({ statusCode: 401 })
-    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled()
+    expect(getAccessToken).not.toHaveBeenCalled()
   })
 
   it('returns 503 when independent service-principal configuration is incomplete', async () => {
@@ -141,12 +123,12 @@ describe('Log Analytics query route authentication', () => {
   it('uses service-principal configuration without comparing login claims', async () => {
     const request = createRequest()
 
-    await expect(handler(createTestEvent(request))).resolves.toEqual({
+    await expect(handler(createTestEvent(request))).resolves.toStrictEqual({
       limit: 1_000,
       records: [],
       truncated: false,
     })
-    expect(getLogAnalyticsAccessToken).toHaveBeenCalledOnce()
+    expect(getAccessToken).toHaveBeenCalledOnce()
     expect(executeLogAnalyticsQuery).toHaveBeenCalledWith(
       config,
       request,
@@ -156,12 +138,12 @@ describe('Log Analytics query route authentication', () => {
   })
 
   it('rejects the managed route in anonymous deployments', async () => {
-    runtimeConfig = {}
+    runtimeConfig = { logAnalytics: anonymousLogAnalytics }
 
     await expect(handler(createTestEvent(createRequest()))).rejects.toMatchObject({
       statusCode: 403,
     })
-    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled()
+    expect(getAccessToken).not.toHaveBeenCalled()
     expect(executeLogAnalyticsQuery).not.toHaveBeenCalled()
   })
 
@@ -169,7 +151,7 @@ describe('Log Analytics query route authentication', () => {
     await expect(
       handler(createTestEvent({ ...createRequest(), workspaceId: 'caller-controlled' })),
     ).rejects.toMatchObject({ statusCode: 400 })
-    expect(getLogAnalyticsAccessToken).not.toHaveBeenCalled()
+    expect(getAccessToken).not.toHaveBeenCalled()
     expect(executeLogAnalyticsQuery).not.toHaveBeenCalled()
   })
 
@@ -178,7 +160,7 @@ describe('Log Analytics query route authentication', () => {
     [new LogAnalyticsQueryError('timeout'), 504],
     [new LogAnalyticsQueryError('upstream'), 502],
   ])('maps Azure query failures to the expected HTTP status', async (error, statusCode) => {
-    vi.mocked(executeLogAnalyticsQuery).mockRejectedValueOnce(error)
+    executeLogAnalyticsQuery.mockRejectedValueOnce(error)
     const event = createTestEvent(createRequest())
 
     await expect(handler(event)).rejects.toMatchObject({ statusCode })
