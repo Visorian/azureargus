@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const port = process.env.PLAYWRIGHT_PORT || '3000'
+const configuredPort = process.env.PLAYWRIGHT_PORT
+const port = configuredPort === undefined || configuredPort === '' ? '3000' : configuredPort
 const baseURL = `http://127.0.0.1:${port}`
 const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === 'true'
@@ -12,7 +13,8 @@ export default defineConfig({
   testDir: './tests/e2e',
   use: {
     baseURL,
-    launchOptions: executablePath ? { executablePath } : undefined,
+    launchOptions:
+      executablePath !== undefined && executablePath !== '' ? { executablePath } : undefined,
     trace: 'on-first-retry',
   },
   webServer: {

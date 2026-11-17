@@ -9,30 +9,31 @@ const alias = {
   '~': fileURLToPath(new URL('app', import.meta.url)),
 }
 const browserExecutablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH
-const browserProjects = browserExecutablePath
-  ? [
-      {
-        resolve: {
-          alias,
-        },
-        test: {
-          attachmentsDir: '.playwright-cli',
-          browser: {
-            enabled: true,
-            headless: true,
-            screenshotDirectory: '.playwright-cli',
-            instances: [{ browser: 'chromium' as const }],
-            provider: playwright({
-              launchOptions: { executablePath: browserExecutablePath },
-            }),
+const browserProjects =
+  browserExecutablePath !== undefined && browserExecutablePath !== ''
+    ? [
+        {
+          resolve: {
+            alias,
           },
-          globals: true,
-          include: ['tests/browser/**/*.test.ts'],
-          name: 'browser',
+          test: {
+            attachmentsDir: '.playwright-cli',
+            browser: {
+              enabled: true,
+              headless: true,
+              screenshotDirectory: '.playwright-cli',
+              instances: [{ browser: 'chromium' as const }],
+              provider: playwright({
+                launchOptions: { executablePath: browserExecutablePath },
+              }),
+            },
+            globals: true,
+            include: ['tests/browser/**/*.test.ts'],
+            name: 'browser',
+          },
         },
-      },
-    ]
-  : []
+      ]
+    : []
 
 export default defineConfig({
   resolve: {
