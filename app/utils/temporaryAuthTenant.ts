@@ -6,7 +6,10 @@ export function assertAuthenticationTenant(
   result: { account?: AccountInfo | null; tenantId?: string },
   tenantId: string,
 ): void {
-  const resultTenantId = result.tenantId || result.account?.tenantId
+  const resultTenantId =
+    result.tenantId !== undefined && result.tenantId !== ''
+      ? result.tenantId
+      : result.account?.tenantId
   if (resultTenantId !== tenantId) {
     throw new UnexpectedTemporaryAuthTenant()
   }

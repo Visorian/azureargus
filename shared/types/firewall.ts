@@ -1,3 +1,4 @@
+import type { JsonObject } from '../utils/json'
 import type { DnsObservation } from './dns'
 
 export interface FirewallLogRecord {
@@ -22,7 +23,7 @@ export interface FirewallLogRecord {
   offset?: string
   eventRecordIndex?: number
   enqueuedTimeUtc?: string
-  applicationProperties?: Record<string, unknown>
+  applicationProperties?: JsonObject
   dns?: DnsObservation
   searchableText: string
 }

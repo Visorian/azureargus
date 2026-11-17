@@ -1,9 +1,23 @@
+import type { ComputedRef, Ref, WritableComputedRef } from 'vue'
+
 export type LogTimeFormat = '12-hour' | '24-hour'
 export type LogHourCycle = 'h12' | 'h23'
 export type LogTimeZoneMode = 'local' | 'utc'
 
 export const LOG_TIME_FORMAT_STORAGE_KEY = 'azure-argus:log-time-format'
 export const LOG_TIME_ZONE_STORAGE_KEY = 'azure-argus:log-time-zone'
+
+export interface UseLogTimeFormatReturn {
+  browserTimeZone: Ref<string>
+  format: Ref<LogTimeFormat>
+  formatTimestamp: (timestamp: string) => string
+  hourCycle: ComputedRef<LogHourCycle>
+  lastError: Ref<string | null>
+  timeZone: ComputedRef<string>
+  timeZoneMode: Ref<LogTimeZoneMode>
+  use12Hour: WritableComputedRef<boolean>
+  useLocalTime: WritableComputedRef<boolean>
+}
 
 function isLogTimeFormat(value: string | null): value is LogTimeFormat {
   return value === '12-hour' || value === '24-hour'
@@ -13,7 +27,7 @@ function isLogTimeZoneMode(value: string | null): value is LogTimeZoneMode {
   return value === 'local' || value === 'utc'
 }
 
-export function useLogTimeFormat() {
+export function useLogTimeFormat(): UseLogTimeFormatReturn {
   const format = useState<LogTimeFormat>('log-time-format', () => '24-hour')
   const timeZoneMode = useState<LogTimeZoneMode>('log-time-zone', () => 'utc')
   const browserTimeZone = useState('log-browser-time-zone', () => 'UTC')

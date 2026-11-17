@@ -1,6 +1,34 @@
+import type { ComputedRef, Ref } from 'vue'
+
 import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
+import type { TemporaryLogAnalyticsAuth } from '~/composables/useTemporaryLogAnalyticsAuth'
 import { createLogAnalyticsAdminConsentUrl, isEntraId } from '~/utils/logAnalyticsOnboarding'
 import { createTemporaryLogAnalyticsClient } from '~/utils/temporaryLogAnalyticsClient.client'
+import type { TemporaryLogAnalyticsClient } from '~/utils/temporaryLogAnalyticsClient.client'
+
+export type TemporaryAccessStatus = 'idle' | 'loading' | 'success' | 'error'
+
+export interface UseTemporaryLogAnalyticsWorkspaceReturn {
+  temporaryLogAnalyticsAuth: TemporaryLogAnalyticsAuth
+  temporaryLogAnalyticsClient: TemporaryLogAnalyticsClient
+  temporaryTenantId: Ref<string>
+  temporaryWorkspaceId: Ref<string>
+  temporaryTenants: Ref<AzureAccessibleTenant[]>
+  temporaryWorkspaces: Ref<AzureAccessibleWorkspace[]>
+  temporaryAzureUsername: Ref<string>
+  temporaryLogAnalyticsAuthorizing: Ref<boolean>
+  temporaryAccessStatus: Ref<TemporaryAccessStatus>
+  temporaryAccessError: Ref<string | null>
+  temporaryTenantValid: ComputedRef<boolean>
+  temporaryWorkspaceValid: ComputedRef<boolean>
+  temporaryAdminConsentUrl: ComputedRef<string | null>
+  disconnectTemporaryLogAnalytics: () => Promise<void>
+  authorizeTemporaryLogAnalytics: () => Promise<void>
+  connectTemporaryLogAnalytics: () => Promise<void>
+  changeTemporaryTenant: (tenantId: string) => void
+  changeTemporaryWorkspace: (workspaceId: string) => void
+  refreshTemporaryAzureAccess: () => void
+}
 
 function mergeCurrentTenant(tenants: AzureAccessibleTenant[], tenantId: string) {
   if (tenants.some((tenant) => tenant.tenantId === tenantId)) {
@@ -9,7 +37,9 @@ function mergeCurrentTenant(tenants: AzureAccessibleTenant[], tenantId: string) 
   return [...tenants, { defaultDomain: null, displayName: tenantId, tenantId }]
 }
 
-export function useTemporaryLogAnalyticsWorkspace(options: { onWorkspaceChange: () => void }) {
+export function useTemporaryLogAnalyticsWorkspace(options: {
+  onWorkspaceChange: () => void
+}): UseTemporaryLogAnalyticsWorkspaceReturn {
   const runtimeConfig = useRuntimeConfig()
   const temporaryLogAnalyticsAuth = useTemporaryLogAnalyticsAuth()
   const temporaryLogAnalyticsClient = createTemporaryLogAnalyticsClient({
@@ -22,7 +52,7 @@ export function useTemporaryLogAnalyticsWorkspace(options: { onWorkspaceChange: 
   const temporaryWorkspaces = ref<AzureAccessibleWorkspace[]>([])
   const temporaryAzureUsername = ref('')
   const temporaryLogAnalyticsAuthorizing = ref(false)
-  const temporaryAccessStatus = ref<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const temporaryAccessStatus = ref<TemporaryAccessStatus>('idle')
   const temporaryAccessError = ref<string | null>(null)
   let temporaryAccessGeneration = 0
   let temporaryAuthorizationGeneration = 0

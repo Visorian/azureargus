@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref, ShallowRef, WritableComputedRef } from 'vue'
 
 import type {
   DnsDetailQueryRequest,
@@ -11,6 +11,7 @@ import type {
   DnsListQueryResponse,
   DnsObservation,
   DnsSort,
+  DnsSourceStatus,
 } from '#shared/types/dns'
 import type { LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
 import {
@@ -37,7 +38,7 @@ type DetailRequest = (
 ) => Promise<DnsDetailQueryResponse>
 
 interface DnsReceiverSource {
-  addNormalizedBatchSink(sink: NormalizedLogBatchSink): () => boolean
+  addNormalizedBatchSink: (sink: NormalizedLogBatchSink) => () => boolean
 }
 
 interface UseDnsTroubleshootingOptions {
@@ -50,6 +51,39 @@ interface UseDnsTroubleshootingOptions {
   requestDetail: DetailRequest
   requestList: ListRequest
   storage: Readonly<Ref<LogAnalyticsStorageKind>>
+}
+
+export interface UseDnsTroubleshootingReturn {
+  abort: () => void
+  appliedFilters: Ref<DnsFilters | null>
+  appliedRange: Ref<{ from: string; to: string } | null>
+  clearActiveDataset: () => void
+  closeDetail: () => void
+  detail: ShallowRef<DnsDetailQueryResponse | null>
+  detailError: Ref<string | null>
+  detailStatus: Ref<DnsRequestStatus>
+  entries: ComputedRef<DnsEntry[]>
+  entriesTruncated: ComputedRef<boolean>
+  filterOptions: ComputedRef<DnsFilterOptions>
+  filtersDirty: ComputedRef<boolean>
+  filters: ComputedRef<DnsFilters>
+  queriedEntryCount: ComputedRef<number>
+  lastError: ComputedRef<string | null>
+  rangeDirty: ComputedRef<boolean>
+  rangeError: Ref<string | null>
+  resetFilters: () => void
+  resetRealtimeFilters: () => void
+  run: () => Promise<boolean>
+  selectEntry: (entry: DnsEntry) => Promise<boolean>
+  selectedEntry: Ref<DnsEntry | null>
+  showUnidentifiedTransports: WritableComputedRef<boolean>
+  sources: ComputedRef<DnsSourceStatus[]>
+  status: ComputedRef<DnsRequestStatus>
+  sort: ComputedRef<DnsSort>
+  transports: ComputedRef<DnsObservation[]>
+  unidentifiedTransportCount: ComputedRef<number>
+  transportsTruncated: ComputedRef<boolean>
+  truncated: ComputedRef<boolean>
 }
 
 function defaultFilters(): DnsFilters {
@@ -187,7 +221,9 @@ function sortedOptions<T extends string>(values: readonly (T | undefined)[]) {
     .toSorted((left, right) => optionCollator.compare(left, right))
 }
 
-export function useDnsTroubleshooting(options: UseDnsTroubleshootingOptions) {
+export function useDnsTroubleshooting(
+  options: UseDnsTroubleshootingOptions,
+): UseDnsTroubleshootingReturn {
   const realtimeFilters = reactive(defaultFilters())
   const logFilters = reactive(defaultFilters())
   const realtimeSort = reactive(defaultSort())

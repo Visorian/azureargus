@@ -6,14 +6,17 @@ import type {
   LogAnalyticsStorageKind,
 } from '../types/logAnalytics'
 import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from './azureDiagnosticsLogAnalytics'
+import type { JsonObject } from './json'
+import { isJsonObject } from './json'
 import { isLogAnalyticsQueryLimit } from './logAnalytics'
 
 const MAX_RANGE_MS = 24 * 60 * 60 * 1000
 const MAX_FILTER_LENGTH = 256
 const MAX_CATEGORY_FILTERS = 32
 const DEFAULT_TIMEOUT_MS = 15_000
-const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
-const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
+const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
 const TEXT_FILTER_KEYS = [
   'search',
   'action',
@@ -137,11 +140,7 @@ export class LogAnalyticsQueryError extends Error {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function hasExactKeys(value: Record<string, unknown>, expectedKeys: readonly string[]) {
+function hasExactKeys(value: JsonObject, expectedKeys: readonly string[]) {
   const actualKeys = Object.keys(value)
   return (
     actualKeys.length === expectedKeys.length &&
@@ -158,7 +157,7 @@ function isIsoTimestamp(value: unknown): value is string {
 }
 
 function isValidFilterObject(value: unknown) {
-  if (!isRecord(value) || !hasExactKeys(value, FILTER_KEYS)) {
+  if (!isJsonObject(value) || !hasExactKeys(value, FILTER_KEYS)) {
     return false
   }
 
@@ -180,7 +179,7 @@ function isValidFilterObject(value: unknown) {
 
 function isValidSortObject(value: unknown) {
   return (
-    isRecord(value) &&
+    isJsonObject(value) &&
     hasExactKeys(value, ['key', 'direction']) &&
     typeof value['key'] === 'string' &&
     Object.hasOwn(SORT_COLUMNS, value['key']) &&
@@ -260,7 +259,7 @@ function compareRecords(left: FirewallLogRecord, right: FirewallLogRecord, sort:
   return sort.direction === 'asc' ? result : -result
 }
 
-function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryId: string) {
+function mapTableRows(table: JsonObject, tableIndex: number, queryId: string) {
   if (!Array.isArray(table['columns']) || !Array.isArray(table['rows'])) {
     throw new LogAnalyticsQueryError('upstream')
   }
@@ -268,7 +267,7 @@ function mapTableRows(table: Record<string, unknown>, tableIndex: number, queryI
   const columnIndexes = new Map<string, number>()
   for (const [columnIndex, column] of table['columns'].entries()) {
     if (
-      !isRecord(column) ||
+      !isJsonObject(column) ||
       typeof column['name'] !== 'string' ||
       columnIndexes.has(column['name'])
     ) {
@@ -371,7 +370,7 @@ export function validateLogAnalyticsQueryRequest(
   value: unknown,
 ): value is LogAnalyticsQueryRequest {
   if (
-    !isRecord(value) ||
+    !isJsonObject(value) ||
     !hasExactKeys(value, ['from', 'to', 'filters', 'limit', 'storage', 'sort']) ||
     !isIsoTimestamp(value['from']) ||
     !isIsoTimestamp(value['to']) ||
@@ -388,15 +387,23 @@ export function validateLogAnalyticsQueryRequest(
   return from < to && to - from <= MAX_RANGE_MS
 }
 
-export function encodeKqlStringLiteral(value: string) {
+export function encodeKqlStringLiteral(value: string): string {
   return JSON.stringify(value)
 }
 
-export function getLogAnalyticsResultLimit(request: LogAnalyticsQueryRequest) {
+export function getLogAnalyticsResultLimit(request: LogAnalyticsQueryRequest): number {
   return request.limit
 }
 
-function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, baseQuery: string) {
+interface LogAnalyticsQueryText {
+  query: string
+  limit: number
+}
+
+function buildLogAnalyticsQueryForSource(
+  request: LogAnalyticsQueryRequest,
+  baseQuery: string,
+): LogAnalyticsQueryText {
   const clauses = [baseQuery, CANONICAL_QUERY_SUFFIX]
   const filters = {
     search: 'SearchableText',
@@ -446,11 +453,13 @@ function buildLogAnalyticsQueryForSource(request: LogAnalyticsQueryRequest, base
   return { query: clauses.join('\n'), limit }
 }
 
-export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
+export function buildLogAnalyticsQuery(request: LogAnalyticsQueryRequest): LogAnalyticsQueryText {
   return buildLogAnalyticsQueryForSource(request, RESOURCE_SPECIFIC_BASE_QUERY)
 }
 
-export function buildAzureDiagnosticsLogAnalyticsQuery(request: LogAnalyticsQueryRequest) {
+export function buildAzureDiagnosticsLogAnalyticsQuery(
+  request: LogAnalyticsQueryRequest,
+): LogAnalyticsQueryText {
   return buildLogAnalyticsQueryForSource(request, AZURE_DIAGNOSTICS_NETWORK_PROJECTION)
 }
 
@@ -460,13 +469,13 @@ export function mapLogAnalyticsResponse(
   queryId: string,
   limit: number,
 ): LogAnalyticsQueryResponse {
-  if (!isRecord(value) || value['error'] !== undefined || !Array.isArray(value['tables'])) {
+  if (!isJsonObject(value) || value['error'] !== undefined || !Array.isArray(value['tables'])) {
     throw new LogAnalyticsQueryError('upstream')
   }
 
   const records: FirewallLogRecord[] = []
   for (const [tableIndex, table] of value['tables'].entries()) {
-    if (!isRecord(table)) {
+    if (!isJsonObject(table)) {
       throw new LogAnalyticsQueryError('upstream')
     }
     records.push(...mapTableRows(table, tableIndex, queryId))
@@ -497,7 +506,7 @@ export async function executeLogAnalyticsRawQuery(
   timespan: string | undefined,
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
-) {
+): Promise<unknown> {
   if (!isLogAnalyticsWorkspaceId(target.workspaceId)) {
     throw new LogAnalyticsQueryError('upstream')
   }
@@ -508,7 +517,7 @@ export async function executeLogAnalyticsRawQuery(
   const handleIncomingAbort = () => {
     controller.abort(options.signal?.reason)
   }
-  if (options.signal?.aborted) {
+  if (options.signal?.aborted === true) {
     controller.abort()
   } else {
     options.signal?.addEventListener('abort', handleIncomingAbort, { once: true })
@@ -536,7 +545,7 @@ export async function executeLogAnalyticsRawQuery(
         },
       )
     } catch {
-      if (!timeoutState.timedOut && options.signal?.aborted) {
+      if (!timeoutState.timedOut && options.signal?.aborted === true) {
         throw options.signal.reason instanceof Error
           ? options.signal.reason
           : new DOMException('The operation was aborted', 'AbortError')
@@ -574,7 +583,7 @@ export async function executeLogAnalyticsQuery(
   request: LogAnalyticsQueryRequest,
   accessToken: string,
   options: ExecuteLogAnalyticsQueryOptions = {},
-) {
+): Promise<LogAnalyticsQueryResponse> {
   const selectedQuery =
     request.storage === 'azure-diagnostics'
       ? buildAzureDiagnosticsLogAnalyticsQuery(request)

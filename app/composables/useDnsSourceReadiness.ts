@@ -1,5 +1,5 @@
 import { onScopeDispose, ref, shallowRef, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { Ref, ShallowRef } from 'vue'
 
 import type { DnsReadinessResponse, DnsSourceReadiness } from '#shared/types/dns'
 
@@ -14,6 +14,14 @@ type ReadinessRequest = (
   signal: AbortSignal,
 ) => Promise<DnsReadinessResponse>
 
+export interface UseDnsSourceReadinessReturn {
+  abort: () => void
+  lastError: Ref<string | null>
+  readiness: ShallowRef<DnsSourceReadiness[]>
+  refresh: (target?: DnsReadinessTarget | null) => Promise<boolean>
+  status: Ref<DnsReadinessStatus>
+}
+
 interface UseDnsSourceReadinessOptions {
   request: ReadinessRequest
   target: Readonly<Ref<DnsReadinessTarget | null>>
@@ -23,7 +31,9 @@ function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-export function useDnsSourceReadiness(options: UseDnsSourceReadinessOptions) {
+export function useDnsSourceReadiness(
+  options: UseDnsSourceReadinessOptions,
+): UseDnsSourceReadinessReturn {
   const readiness = shallowRef<DnsSourceReadiness[]>([])
   const status = ref<DnsReadinessStatus>('idle')
   const lastError = ref<string | null>(null)

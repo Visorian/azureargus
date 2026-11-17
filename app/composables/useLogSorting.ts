@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 
 import type {
   FirewallLogRecord,
@@ -6,6 +6,14 @@ import type {
   FirewallLogSortKey,
   FirewallLogSortState,
 } from '#shared/types/firewall'
+
+export interface UseLogSortingReturn {
+  sort: FirewallLogSortState
+  sortedLogs: ComputedRef<FirewallLogRecord[]>
+  setSort: (key: FirewallLogSortKey) => void
+  getSortIcon: (key: FirewallLogSortKey) => string
+  getAriaSort: (key: FirewallLogSortKey) => 'none' | 'ascending' | 'descending'
+}
 
 export function createDefaultLogSort(): FirewallLogSortState {
   return {
@@ -61,12 +69,15 @@ export function compareFirewallLogs(
   left: FirewallLogRecord,
   right: FirewallLogRecord,
   key: FirewallLogSortKey,
-) {
+): number {
   const result = compareValues(normalizeSortValue(left, key), normalizeSortValue(right, key))
   return result === 0 ? left.id.localeCompare(right.id) : result
 }
 
-export function sortFirewallLogs(logs: FirewallLogRecord[], sort: FirewallLogSortState) {
+export function sortFirewallLogs(
+  logs: FirewallLogRecord[],
+  sort: FirewallLogSortState,
+): FirewallLogRecord[] {
   const direction = sort.direction === 'asc' ? 1 : -1
   const compare = (left: FirewallLogRecord, right: FirewallLogRecord) =>
     compareFirewallLogs(left, right, sort.key) * direction
@@ -96,7 +107,7 @@ export function getNextSortDirection(
 export function useLogSorting(
   logs: Readonly<Ref<FirewallLogRecord[]>>,
   providedSort?: FirewallLogSortState,
-) {
+): UseLogSortingReturn {
   const sort = providedSort ?? reactive(createDefaultLogSort())
   const sortedLogs = computed(() => sortFirewallLogs(logs.value, sort))
 

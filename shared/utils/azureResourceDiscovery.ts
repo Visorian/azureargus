@@ -3,13 +3,14 @@ import type {
   AzureAccessibleWorkspace,
   AzureLogAnalyticsAccess,
 } from '../types/azureAccess'
+import { isJsonObject } from './json'
 
 const MANAGEMENT_ORIGIN = 'https://management.azure.com'
 const SUBSCRIPTIONS_API_VERSION = '2022-12-01'
 const RESOURCE_GRAPH_API_VERSION = '2024-04-01'
 const WORKSPACE_QUERY =
   "Resources | where type =~ 'microsoft.operationalinsights/workspaces' | project name, location, subscriptionId, resourceGroup, workspaceId=tostring(properties.customerId)"
-const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu
 const collator = new Intl.Collator()
 
 interface AzurePage {
@@ -31,12 +32,17 @@ export class AzureResourceDiscoveryError extends Error {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+function readString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
 }
 
-function readString(value: unknown) {
-  return typeof value === 'string' ? value : null
+function isUuid(value: string | null): value is string {
+  return value !== null && UUID_PATTERN.test(value)
+}
+
+function readDisplayName(value: unknown, fallback: string): string {
+  const displayName = readString(value)?.trim()
+  return displayName === undefined || displayName === '' ? fallback : displayName
 }
 
 function validateManagementUrl(value: string) {
@@ -73,7 +79,7 @@ async function readPage(
   }
 
   const value: unknown = await response.json()
-  if (!isRecord(value) || !Array.isArray(value['value'])) {
+  if (!isJsonObject(value) || !Array.isArray(value['value'])) {
     throw new AzureResourceDiscoveryError(502)
   }
   const nextLink = readString(value['nextLink']) ?? undefined
@@ -85,33 +91,35 @@ async function readAllPages(
   accessToken: string,
   signal: AbortSignal,
   fetchImplementation: typeof fetch,
-) {
+): Promise<unknown[]> {
   const values: unknown[] = []
   const seenUrls = new Set<string>()
-  let url: string | undefined = initialUrl
-  while (url !== undefined) {
+  const readFrom = async (url: string): Promise<void> => {
     if (seenUrls.has(url)) {
       throw new AzureResourceDiscoveryError(502)
     }
     seenUrls.add(url)
     const page = await readPage(url, accessToken, signal, fetchImplementation)
     values.push(...page.value)
-    url = page.nextLink
+    if (page.nextLink !== undefined) {
+      await readFrom(page.nextLink)
+    }
   }
+  await readFrom(initialUrl)
   return values
 }
 
 function parseTenants(values: unknown[]) {
   const tenants = new Map<string, AzureAccessibleTenant>()
   for (const value of values) {
-    if (!isRecord(value)) {
+    if (!isJsonObject(value)) {
       continue
     }
     const tenantId = readString(value['tenantId'])
-    if (!tenantId || !UUID_PATTERN.test(tenantId)) {
+    if (!isUuid(tenantId)) {
       continue
     }
-    const displayName = readString(value['displayName'])?.trim() || tenantId
+    const displayName = readDisplayName(value['displayName'], tenantId)
     tenants.set(tenantId, {
       defaultDomain: readString(value['defaultDomain']),
       displayName,
@@ -126,15 +134,15 @@ function parseTenants(values: unknown[]) {
 function parseSubscriptions(values: unknown[]) {
   const subscriptions = new Map<string, AzureSubscription>()
   for (const value of values) {
-    if (!isRecord(value)) {
+    if (!isJsonObject(value)) {
       continue
     }
     const subscriptionId = readString(value['subscriptionId'])
-    if (!subscriptionId || !UUID_PATTERN.test(subscriptionId)) {
+    if (!isUuid(subscriptionId)) {
       continue
     }
     subscriptions.set(subscriptionId, {
-      displayName: readString(value['displayName'])?.trim() || subscriptionId,
+      displayName: readDisplayName(value['displayName'], subscriptionId),
       subscriptionId,
     })
   }
@@ -144,19 +152,13 @@ function parseSubscriptions(values: unknown[]) {
 function parseWorkspaces(values: unknown[], subscriptions: ReadonlyMap<string, AzureSubscription>) {
   const workspaces: AzureAccessibleWorkspace[] = []
   for (const value of values) {
-    if (!isRecord(value)) {
+    if (!isJsonObject(value)) {
       continue
     }
     const workspaceId = readString(value['workspaceId'])
     const name = readString(value['name'])
     const subscriptionId = readString(value['subscriptionId'])
-    if (
-      !workspaceId ||
-      !UUID_PATTERN.test(workspaceId) ||
-      !name ||
-      !subscriptionId ||
-      !UUID_PATTERN.test(subscriptionId)
-    ) {
+    if (!isUuid(workspaceId) || name === null || name === '' || !isUuid(subscriptionId)) {
       continue
     }
     const subscription = subscriptions.get(subscriptionId)
@@ -177,7 +179,7 @@ async function readWorkspaceGraph(
   accessToken: string,
   signal: AbortSignal,
   fetchImplementation: typeof fetch,
-) {
+): Promise<AzureAccessibleWorkspace[]> {
   if (subscriptions.length === 0) {
     return []
   }
@@ -187,13 +189,13 @@ async function readWorkspaceGraph(
   )
   const values: unknown[] = []
   const seenSkipTokens = new Set<string>()
-  let skipToken: string | undefined
-  do {
+  const readFrom = async (skipToken: string | undefined): Promise<void> => {
+    const hasSkipToken = skipToken !== undefined && skipToken !== ''
     const response = await fetchImplementation(
       `${MANAGEMENT_ORIGIN}/providers/Microsoft.ResourceGraph/resources?api-version=${RESOURCE_GRAPH_API_VERSION}`,
       {
         body: JSON.stringify({
-          options: skipToken ? { $skipToken: skipToken } : undefined,
+          options: hasSkipToken ? { $skipToken: skipToken } : undefined,
           query: WORKSPACE_QUERY,
           subscriptions: subscriptionIds,
         }),
@@ -211,19 +213,24 @@ async function readWorkspaceGraph(
       throw new AzureResourceDiscoveryError(response.status)
     }
     const value: unknown = await response.json()
-    if (!isRecord(value) || !Array.isArray(value['data'])) {
+    if (!isJsonObject(value) || !Array.isArray(value['data'])) {
       throw new AzureResourceDiscoveryError(502)
     }
     const data: unknown[] = value['data']
     values.push(...data)
-    skipToken = readString(value['$skipToken']) ?? undefined
-    if (skipToken && seenSkipTokens.has(skipToken)) {
-      throw new AzureResourceDiscoveryError(502)
+    const nextSkipToken = readString(value['$skipToken']) ?? undefined
+    if (nextSkipToken === undefined) {
+      return
     }
-    if (skipToken) {
-      seenSkipTokens.add(skipToken)
+    if (nextSkipToken !== '') {
+      if (seenSkipTokens.has(nextSkipToken)) {
+        throw new AzureResourceDiscoveryError(502)
+      }
+      seenSkipTokens.add(nextSkipToken)
     }
-  } while (skipToken !== undefined)
+    await readFrom(nextSkipToken)
+  }
+  await readFrom(undefined)
 
   return parseWorkspaces(values, subscriptionMap)
 }

@@ -20,6 +20,8 @@ import type { LogAnalyticsStorageKind } from '../types/logAnalytics'
 import { AZURE_DIAGNOSTICS_NETWORK_PROJECTION } from './azureDiagnosticsLogAnalytics'
 import { createDnsEntries, parseDnsObservation } from './dns'
 import { DNS_READINESS_SOURCE_DEFINITIONS } from './dnsReadiness'
+import type { JsonObject, JsonValue } from './json'
+import { isJsonObject } from './json'
 import { isLogAnalyticsQueryLimit } from './logAnalytics'
 import {
   encodeKqlStringLiteral,
@@ -33,10 +35,11 @@ const MAX_FILTER_LENGTH = 256
 const MAX_SELECTOR_TEXT_LENGTH = 2_048
 const DETAIL_LIMIT = 200
 const RELATED_DETAIL_LIMIT = 50
-const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
-const TRAILING_DOTS_PATTERN = /\.+$/
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
+const TRAILING_DOTS_PATTERN = /\.+$/u
 const FIREWALL_RESOURCE_ID_PATTERN =
-  /^\/subscriptions\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/resourceGroups\/[^/]{1,90}\/providers\/Microsoft\.Network\/azureFirewalls\/[^/]{1,260}$/i
+  /^\/subscriptions\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/resourceGroups\/[^/]{1,90}\/providers\/Microsoft\.Network\/azureFirewalls\/[^/]{1,260}$/iu
 const SOURCE_KINDS = [
   'proxy-structured',
   'dns-flow-trace',
@@ -86,15 +89,14 @@ function isOneOf<T>(values: readonly T[], value: unknown): value is T {
   return values.some((candidate) => candidate === value)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+/** A Log Analytics result row keyed by column name; a cell is undefined when the row is shorter than the columns. */
+type LogAnalyticsRow = Readonly<Record<string, JsonValue | undefined>>
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]) {
+function hasOnlyKeys(value: JsonObject, allowed: readonly string[]) {
   return Object.keys(value).every((key) => allowed.includes(key))
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]) {
+function hasExactKeys(value: JsonObject, expected: readonly string[]) {
   return Object.keys(value).length === expected.length && hasOnlyKeys(value, expected)
 }
 
@@ -108,7 +110,7 @@ function isIsoTimestamp(value: unknown): value is string {
 
 function isFilters(value: unknown): value is DnsFilters {
   return (
-    isRecord(value) &&
+    isJsonObject(value) &&
     hasExactKeys(value, FILTER_KEYS) &&
     FILTER_KEYS.every(
       (key) => typeof value[key] === 'string' && value[key].length <= MAX_FILTER_LENGTH,
@@ -124,7 +126,7 @@ function validRange(from: string, to: string) {
 
 export function validateDnsListQueryRequest(value: unknown): value is DnsListQueryRequest {
   return (
-    isRecord(value) &&
+    isJsonObject(value) &&
     hasExactKeys(value, ['from', 'to', 'filters', 'limit', 'storage']) &&
     isIsoTimestamp(value['from']) &&
     isIsoTimestamp(value['to']) &&
@@ -137,7 +139,7 @@ export function validateDnsListQueryRequest(value: unknown): value is DnsListQue
 
 function isDetailSelector(value: unknown): value is DnsDetailSelector {
   if (
-    !isRecord(value) ||
+    !isJsonObject(value) ||
     !isOneOf(SOURCE_KINDS, value['source']) ||
     typeof value['resourceId'] !== 'string' ||
     !FIREWALL_RESOURCE_ID_PATTERN.test(value['resourceId']) ||
@@ -233,7 +235,9 @@ function isDetailSelector(value: unknown): value is DnsDetailSelector {
 }
 
 export function validateDnsDetailQueryRequest(value: unknown): value is DnsDetailQueryRequest {
-  return isRecord(value) && hasExactKeys(value, ['selector']) && isDetailSelector(value['selector'])
+  return (
+    isJsonObject(value) && hasExactKeys(value, ['selector']) && isDetailSelector(value['selector'])
+  )
 }
 
 function filterClauses(
@@ -468,16 +472,20 @@ export function buildDnsReadinessProbes(): ReadinessProbe[] {
 }
 
 function tableRows(payload: unknown, maxRows: number) {
-  if (!isRecord(payload) || payload['error'] !== undefined || !Array.isArray(payload['tables'])) {
+  if (
+    !isJsonObject(payload) ||
+    payload['error'] !== undefined ||
+    !Array.isArray(payload['tables'])
+  ) {
     throw new LogAnalyticsQueryError('upstream')
   }
-  const rows: Record<string, unknown>[] = []
+  const rows: LogAnalyticsRow[] = []
   for (const table of payload['tables']) {
-    if (!isRecord(table) || !Array.isArray(table['columns']) || !Array.isArray(table['rows'])) {
+    if (!isJsonObject(table) || !Array.isArray(table['columns']) || !Array.isArray(table['rows'])) {
       throw new LogAnalyticsQueryError('upstream')
     }
     const names = table['columns'].map((column) =>
-      isRecord(column) && typeof column['name'] === 'string' ? column['name'] : '',
+      isJsonObject(column) && typeof column['name'] === 'string' ? column['name'] : '',
     )
     if (names.some((name) => !name)) {
       throw new LogAnalyticsQueryError('upstream')
@@ -500,7 +508,7 @@ function isReadinessSampleCount(value: unknown): value is 0 | 1 | 2 {
 }
 
 function throwIfAborted(signal: AbortSignal | undefined) {
-  if (!signal?.aborted) {
+  if (signal?.aborted !== true) {
     return
   }
   throw signal.reason instanceof Error
@@ -619,7 +627,7 @@ function canonicalValue(value: unknown): string {
   if (Array.isArray(value)) {
     return `array:[${value.map((item) => canonicalValue(item)).join(',')}]`
   }
-  if (isRecord(value)) {
+  if (isJsonObject(value)) {
     return `object:{${Object.keys(value)
       .toSorted()
       .map((key) => `${JSON.stringify(key)}:${canonicalValue(value[key])}`)
@@ -635,9 +643,9 @@ async function defaultIdentityDigest(value: string) {
 
 export async function assignStableLogAnalyticsRowIds(
   source: LogAnalyticsIdentitySource,
-  rows: readonly Record<string, unknown>[],
+  rows: readonly LogAnalyticsRow[],
   digest: (value: string) => string | Promise<string> = defaultIdentityDigest,
-) {
+): Promise<{ collision: boolean; id: string; row: LogAnalyticsRow }[]> {
   const prepared = await Promise.all(
     rows.map(async (row, index) => {
       const canonical = canonicalValue({ source, row })
@@ -648,7 +656,7 @@ export async function assignStableLogAnalyticsRowIds(
   const assigned: {
     collision: boolean
     id: string
-    row: Record<string, unknown>
+    row: LogAnalyticsRow
   }[] = []
 
   for (const [identityDigest, digestGroup] of byDigest) {
@@ -694,7 +702,7 @@ async function mapRows(
   const observations = (await assignStableLogAnalyticsRowIds(identitySource(source, storage), rows))
     .map(({ collision, id, row }) => {
       const timestamp = text(row['TimeGenerated'])
-      if (!timestamp || !Number.isFinite(Date.parse(timestamp))) {
+      if (timestamp === undefined || !Number.isFinite(Date.parse(timestamp))) {
         throw new LogAnalyticsQueryError('upstream')
       }
       const category = text(row['Category']) ?? 'Unknown'
@@ -832,6 +840,25 @@ export async function executeDnsListQuery(
   }
 }
 
+/** Treats an empty string like a missing value, as the optional selector and observation fields do. */
+function presentText(value: string | undefined): string | undefined {
+  return value === '' ? undefined : value
+}
+
+/** An empty or missing expected value matches any actual value. */
+function matchesOptional(expected: string | undefined, actual: string | undefined): boolean {
+  return expected === undefined || expected === '' || actual === expected
+}
+
+function matchesOptionalIgnoringCase(
+  expected: string | undefined,
+  actual: string | undefined,
+): boolean {
+  return (
+    expected === undefined || expected === '' || actual?.toLowerCase() === expected.toLowerCase()
+  )
+}
+
 function selectorClauses(selector: DnsDetailSelector, resourceField = '_ResourceId') {
   const timestamp = new Date(selector.timestamp)
   const nextMillisecond = new Date(timestamp.getTime() + 1).toISOString()
@@ -877,7 +904,7 @@ function selectorClauses(selector: DnsDetailSelector, resourceField = '_Resource
       ['ServerPort', selector.serverPort, false],
     ] as const
     for (const [field, value, caseInsensitive] of fields) {
-      if (!value) {
+      if (value === undefined || value === '') {
         continue
       }
       clauses.push(
@@ -896,7 +923,7 @@ function selectorClauses(selector: DnsDetailSelector, resourceField = '_Resource
       ['Rule', selector.rule, false],
     ] as const
     for (const [field, value, caseInsensitive] of fields) {
-      if (!value) {
+      if (value === undefined || value === '') {
         continue
       }
       clauses.push(
@@ -904,23 +931,27 @@ function selectorClauses(selector: DnsDetailSelector, resourceField = '_Resource
       )
     }
   } else {
-    if (selector.queryId) {
-      clauses.push(`| where tostring(QueryId) == ${encodeKqlStringLiteral(selector.queryId)}`)
+    const queryId = presentText(selector.queryId)
+    const queryName = presentText(selector.queryName)
+    const clientIp = presentText(selector.clientIp)
+    const clientPort = presentText(selector.clientPort)
+    if (queryId !== undefined) {
+      clauses.push(`| where tostring(QueryId) == ${encodeKqlStringLiteral(queryId)}`)
     }
-    if (selector.queryName) {
-      clauses.push(`| where QueryName =~ ${encodeKqlStringLiteral(selector.queryName)}`)
+    if (queryName !== undefined) {
+      clauses.push(`| where QueryName =~ ${encodeKqlStringLiteral(queryName)}`)
     }
-    if (selector.clientIp) {
-      clauses.push(`| where SourceIp == ${encodeKqlStringLiteral(selector.clientIp)}`)
+    if (clientIp !== undefined) {
+      clauses.push(`| where SourceIp == ${encodeKqlStringLiteral(clientIp)}`)
     }
-    if (selector.clientPort) {
-      clauses.push(`| where tostring(SourcePort) == ${encodeKqlStringLiteral(selector.clientPort)}`)
+    if (clientPort !== undefined) {
+      clauses.push(`| where tostring(SourcePort) == ${encodeKqlStringLiteral(clientPort)}`)
     }
   }
   return clauses
 }
 
-export function buildDnsDetailQuery(selector: DnsDetailSelector) {
+export function buildDnsDetailQuery(selector: DnsDetailSelector): string {
   if (selector.source === 'dns-proxy') {
     throw new TypeError('Event Hub DNS proxy entries do not use Log Analytics detail queries')
   }
@@ -971,37 +1002,32 @@ export function buildDnsDetailQuery(selector: DnsDetailSelector) {
 function matchesSelector(observation: DnsObservation, selector: DnsDetailSelector) {
   return (
     observation.source === selector.source &&
-    (!selector.logAnalyticsStorage ||
+    (selector.logAnalyticsStorage === undefined ||
       observation.logAnalyticsStorage === selector.logAnalyticsStorage) &&
     observation.resourceId?.toLowerCase() === selector.resourceId.toLowerCase() &&
     observation.timestamp === new Date(selector.timestamp).toISOString() &&
-    (!selector.queryId || observation.queryId === selector.queryId) &&
-    (!selector.queryName ||
-      observation.queryName?.toLowerCase() === selector.queryName.toLowerCase()) &&
-    (!selector.clientIp || observation.clientIp === selector.clientIp) &&
-    (!selector.clientPort || observation.clientPort === selector.clientPort) &&
-    (!selector.protocol || observation.protocol === selector.protocol) &&
-    (!selector.networkSourceIp || observation.networkSourceIp === selector.networkSourceIp) &&
-    (!selector.networkSourcePort || observation.networkSourcePort === selector.networkSourcePort) &&
-    (!selector.networkDestinationIp ||
-      observation.networkDestinationIp === selector.networkDestinationIp) &&
-    (!selector.networkDestinationPort ||
-      observation.networkDestinationPort === selector.networkDestinationPort) &&
-    (!selector.msgType || observation.msgType === selector.msgType) &&
-    (!selector.queryMessage || observation.queryMessage === selector.queryMessage) &&
-    (!selector.serverMessage || observation.serverMessage === selector.serverMessage) &&
-    (!selector.queryTime || observation.queryTime === selector.queryTime) &&
-    (!selector.responseTime || observation.responseTime === selector.responseTime) &&
-    (!selector.socketFamily ||
-      observation.socketFamily?.toLowerCase() === selector.socketFamily.toLowerCase()) &&
-    (!selector.serverIp || observation.serverIp === selector.serverIp) &&
-    (!selector.serverPort || observation.serverPort === selector.serverPort) &&
-    (!selector.errorMessage || observation.errorMessage === selector.errorMessage) &&
-    (!selector.policy || observation.policy === selector.policy) &&
-    (!selector.ruleCollectionGroup ||
-      observation.ruleCollectionGroup === selector.ruleCollectionGroup) &&
-    (!selector.ruleCollection || observation.ruleCollection === selector.ruleCollection) &&
-    (!selector.rule || observation.rule === selector.rule)
+    matchesOptional(selector.queryId, observation.queryId) &&
+    matchesOptionalIgnoringCase(selector.queryName, observation.queryName) &&
+    matchesOptional(selector.clientIp, observation.clientIp) &&
+    matchesOptional(selector.clientPort, observation.clientPort) &&
+    matchesOptional(selector.protocol, observation.protocol) &&
+    matchesOptional(selector.networkSourceIp, observation.networkSourceIp) &&
+    matchesOptional(selector.networkSourcePort, observation.networkSourcePort) &&
+    matchesOptional(selector.networkDestinationIp, observation.networkDestinationIp) &&
+    matchesOptional(selector.networkDestinationPort, observation.networkDestinationPort) &&
+    matchesOptional(selector.msgType, observation.msgType) &&
+    matchesOptional(selector.queryMessage, observation.queryMessage) &&
+    matchesOptional(selector.serverMessage, observation.serverMessage) &&
+    matchesOptional(selector.queryTime, observation.queryTime) &&
+    matchesOptional(selector.responseTime, observation.responseTime) &&
+    matchesOptionalIgnoringCase(selector.socketFamily, observation.socketFamily) &&
+    matchesOptional(selector.serverIp, observation.serverIp) &&
+    matchesOptional(selector.serverPort, observation.serverPort) &&
+    matchesOptional(selector.errorMessage, observation.errorMessage) &&
+    matchesOptional(selector.policy, observation.policy) &&
+    matchesOptional(selector.ruleCollectionGroup, observation.ruleCollectionGroup) &&
+    matchesOptional(selector.ruleCollection, observation.ruleCollection) &&
+    matchesOptional(selector.rule, observation.rule)
   )
 }
 
@@ -1013,13 +1039,17 @@ function relatedTimespan(timestamp: string, beforeMs: number, afterMs: number) {
 export function buildDnsRelatedEvidenceQueries(
   observation: DnsObservation,
 ): RelatedEvidenceQuery[] {
-  if (!observation.resourceId || observation.logAnalyticsStorage === 'azure-diagnostics') {
+  const resourceId = presentText(observation.resourceId)
+  if (resourceId === undefined || observation.logAnalyticsStorage === 'azure-diagnostics') {
     return []
   }
-  const resourceClause = `| where _ResourceId =~ ${encodeKqlStringLiteral(observation.resourceId)}`
+  const resourceClause = `| where _ResourceId =~ ${encodeKqlStringLiteral(resourceId)}`
   const queries: RelatedEvidenceQuery[] = []
-  const fqdn = observation.queryName?.replace(TRAILING_DOTS_PATTERN, '')
-  if (fqdn && observation.clientIp) {
+  const fqdn = presentText(observation.queryName?.replace(TRAILING_DOTS_PATTERN, ''))
+  const clientIp = presentText(observation.clientIp)
+  const clientPort = presentText(observation.clientPort)
+  const serverIp = presentText(observation.serverIp)
+  if (fqdn !== undefined && clientIp !== undefined) {
     queries.push({
       source: 'application-rule',
       timespan: relatedTimespan(observation.timestamp, 5_000, 60_000),
@@ -1027,7 +1057,7 @@ export function buildDnsRelatedEvidenceQueries(
       query: [
         'AZFWApplicationRule',
         resourceClause,
-        `| where SourceIp == ${encodeKqlStringLiteral(observation.clientIp)}`,
+        `| where SourceIp == ${encodeKqlStringLiteral(clientIp)}`,
         `| where Fqdn in~ (${encodeKqlStringLiteral(fqdn)}, ${encodeKqlStringLiteral(`${fqdn}.`)})`,
         '| project TimeGenerated, Category="AZFWApplicationRule", ResourceId=_ResourceId, Action, ActionReason, Protocol, SourceIp, SourcePort, DestinationPort, Fqdn, TargetUrl, Policy, RuleCollectionGroup, RuleCollection, Rule',
         '| order by TimeGenerated asc',
@@ -1037,9 +1067,9 @@ export function buildDnsRelatedEvidenceQueries(
   }
   if (
     observation.protocol?.toUpperCase() === 'TCP' &&
-    observation.clientIp &&
-    observation.clientPort &&
-    observation.serverIp
+    clientIp !== undefined &&
+    clientPort !== undefined &&
+    serverIp !== undefined
   ) {
     queries.push({
       source: 'flow-trace',
@@ -1049,7 +1079,7 @@ export function buildDnsRelatedEvidenceQueries(
         'AZFWFlowTrace',
         resourceClause,
         '| where Protocol =~ "TCP"',
-        `| where (SourceIp == ${encodeKqlStringLiteral(observation.clientIp)} and tostring(SourcePort) == ${encodeKqlStringLiteral(observation.clientPort)} and DestinationIp == ${encodeKqlStringLiteral(observation.serverIp)} and toint(DestinationPort) == 53) or (DestinationIp == ${encodeKqlStringLiteral(observation.clientIp)} and tostring(DestinationPort) == ${encodeKqlStringLiteral(observation.clientPort)} and SourceIp == ${encodeKqlStringLiteral(observation.serverIp)} and toint(SourcePort) == 53)`,
+        `| where (SourceIp == ${encodeKqlStringLiteral(clientIp)} and tostring(SourcePort) == ${encodeKqlStringLiteral(clientPort)} and DestinationIp == ${encodeKqlStringLiteral(serverIp)} and toint(DestinationPort) == 53) or (DestinationIp == ${encodeKqlStringLiteral(clientIp)} and tostring(DestinationPort) == ${encodeKqlStringLiteral(clientPort)} and SourceIp == ${encodeKqlStringLiteral(serverIp)} and toint(SourcePort) == 53)`,
         '| project TimeGenerated, Category="AZFWFlowTrace", ResourceId=_ResourceId, Action, ActionReason, Flag, Protocol, SourceIp, SourcePort, DestinationIp, DestinationPort',
         '| order by TimeGenerated asc',
         `| take ${RELATED_DETAIL_LIMIT + 1}`,
@@ -1059,9 +1089,9 @@ export function buildDnsRelatedEvidenceQueries(
   if (
     (observation.protocol?.toUpperCase() === 'TCP' ||
       observation.protocol?.toUpperCase() === 'UDP') &&
-    observation.clientIp &&
-    observation.clientPort &&
-    observation.serverIp
+    clientIp !== undefined &&
+    clientPort !== undefined &&
+    serverIp !== undefined
   ) {
     queries.push({
       source: 'nat-rule',
@@ -1071,9 +1101,9 @@ export function buildDnsRelatedEvidenceQueries(
         'AZFWNatRule',
         resourceClause,
         `| where Protocol =~ ${encodeKqlStringLiteral(observation.protocol)}`,
-        `| where SourceIp == ${encodeKqlStringLiteral(observation.clientIp)} and tostring(SourcePort) == ${encodeKqlStringLiteral(observation.clientPort)}`,
+        `| where SourceIp == ${encodeKqlStringLiteral(clientIp)} and tostring(SourcePort) == ${encodeKqlStringLiteral(clientPort)}`,
         '| where toint(DestinationPort) == 53 or toint(TranslatedPort) == 53',
-        `| where DestinationIp == ${encodeKqlStringLiteral(observation.serverIp)} or TranslatedIp == ${encodeKqlStringLiteral(observation.serverIp)}`,
+        `| where DestinationIp == ${encodeKqlStringLiteral(serverIp)} or TranslatedIp == ${encodeKqlStringLiteral(serverIp)}`,
         '| project TimeGenerated, Category="AZFWNatRule", ResourceId=_ResourceId, Protocol, SourceIp, SourcePort, DestinationIp, DestinationPort, TranslatedIp, TranslatedPort, Policy, RuleCollectionGroup, RuleCollection, Rule',
         '| order by TimeGenerated asc',
         `| take ${RELATED_DETAIL_LIMIT + 1}`,
@@ -1093,7 +1123,7 @@ async function mapRelatedRows(
     .slice(0, RELATED_DETAIL_LIMIT)
     .map<DnsRelatedEvidence>(({ id, row }) => {
       const timestamp = text(row['TimeGenerated'])
-      if (!timestamp || !Number.isFinite(Date.parse(timestamp))) {
+      if (timestamp === undefined || !Number.isFinite(Date.parse(timestamp))) {
         throw new LogAnalyticsQueryError('upstream')
       }
       const raw: DnsRawProjection = {}

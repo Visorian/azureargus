@@ -1,7 +1,8 @@
 import type { FirewallLogRecord } from '#shared/types/firewall'
+import { isJsonObject } from '#shared/utils/json'
 
 export const NETWORK_RULE_CORRELATION_WINDOW_MS = 250
-const ICMP_PROTOCOL_PATTERN = /^ICMP(?:\s|$)/
+const ICMP_PROTOCOL_PATTERN = /^ICMP(?:\s|$)/u
 
 type NetworkRuleSchema = 'legacy' | 'structured'
 
@@ -18,8 +19,14 @@ interface CandidateBucket {
 }
 
 export interface NetworkRuleCorrelationScheduler {
-  clearTimeout(handle: ReturnType<typeof setTimeout>): void
-  setTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>
+  clearTimeout: (handle: ReturnType<typeof setTimeout>) => void
+  setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+}
+
+export interface NetworkRuleCorrelator {
+  clear: () => void
+  flush: () => void
+  push: (records: readonly FirewallLogRecord[]) => void
 }
 
 interface NetworkRuleCorrelatorOptions {
@@ -27,10 +34,6 @@ interface NetworkRuleCorrelatorOptions {
   maxCandidates: () => number
   onRecords: (records: readonly FirewallLogRecord[]) => void
   scheduler?: NetworkRuleCorrelationScheduler
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function getNetworkRuleSchema(category: string): NetworkRuleSchema | undefined {
@@ -45,12 +48,12 @@ function getNetworkRuleSchema(category: string): NetworkRuleSchema | undefined {
 }
 
 function readExactSourceTimestamp(raw: unknown): string | undefined {
-  if (!isRecord(raw)) {
+  if (!isJsonObject(raw)) {
     return undefined
   }
 
-  const properties = isRecord(raw['properties']) ? raw['properties'] : undefined
-  const sources = properties ? [raw, properties] : [raw]
+  const properties = isJsonObject(raw['properties']) ? raw['properties'] : undefined
+  const sources = properties === undefined ? [raw] : [raw, properties]
   for (const source of sources) {
     for (const key of ['time', 'TimeGenerated', 'timestamp'] as const) {
       const value = source[key]
@@ -71,7 +74,7 @@ function normalizeRequired(
   casing: 'lower' | 'upper',
 ): string | undefined {
   const normalized = value?.trim()
-  if (!normalized) {
+  if (normalized === undefined || normalized === '') {
     return undefined
   }
   return casing === 'lower' ? normalized.toLowerCase() : normalized.toUpperCase()
@@ -79,7 +82,7 @@ function normalizeRequired(
 
 function normalizeProtocol(protocol: string): string | undefined {
   const normalized = normalizeRequired(protocol, 'upper')
-  if (!normalized || normalized === 'UNKNOWN') {
+  if (normalized === undefined || normalized === 'UNKNOWN') {
     return undefined
   }
   return ICMP_PROTOCOL_PATTERN.test(normalized) ? 'ICMP' : normalized
@@ -100,15 +103,17 @@ export function getNetworkRuleCorrelationKey(record: FirewallLogRecord): string 
   const destinationPort = record.destinationPort?.trim()
 
   if (
-    !timestamp ||
-    !resourceId ||
-    !protocol ||
-    !action ||
+    timestamp === undefined ||
+    resourceId === undefined ||
+    protocol === undefined ||
+    action === undefined ||
     action === 'UNKNOWN' ||
-    !sourceIp ||
-    !sourcePort ||
-    !destinationIp ||
-    !destinationPort
+    sourceIp === undefined ||
+    sourcePort === undefined ||
+    sourcePort === '' ||
+    destinationIp === undefined ||
+    destinationPort === undefined ||
+    destinationPort === ''
   ) {
     return undefined
   }
@@ -146,7 +151,7 @@ export function createNetworkRuleCorrelator({
   maxCandidates,
   onRecords,
   scheduler = defaultScheduler,
-}: NetworkRuleCorrelatorOptions) {
+}: NetworkRuleCorrelatorOptions): NetworkRuleCorrelator {
   const buckets = new Map<string, CandidateBucket>()
   const candidates = new Set<CorrelationCandidate>()
   let lastNow = Number.NEGATIVE_INFINITY
@@ -293,7 +298,7 @@ export function createNetworkRuleCorrelator({
     for (const record of records) {
       const schema = getNetworkRuleSchema(record.category)
       const key = schema ? getNetworkRuleCorrelationKey(record) : undefined
-      if (!schema || !key) {
+      if (!schema || key === undefined) {
         accepted.push(record)
         continue
       }

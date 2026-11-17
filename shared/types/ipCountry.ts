@@ -1,3 +1,5 @@
+import { isJsonObject } from '../utils/json'
+
 export const MAX_IP_COUNTRY_BATCH_SIZE = 32
 export const MAX_IP_COUNTRY_REQUEST_BYTES = 2_048
 export const MAX_IP_COUNTRY_VALUE_LENGTH = 45
@@ -15,12 +17,8 @@ export interface IpCountryLookupResponse {
   results: IpCountryLookupResult[]
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 export function isIpCountryLookupRequest(value: unknown): value is IpCountryLookupRequest {
-  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value['ips'])) {
+  if (!isJsonObject(value) || Object.keys(value).length !== 1 || !Array.isArray(value['ips'])) {
     return false
   }
 
@@ -31,7 +29,7 @@ export function isIpCountryLookupRequest(value: unknown): value is IpCountryLook
 }
 
 export function isIpCountryLookupResponse(value: unknown): value is IpCountryLookupResponse {
-  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value['results'])) {
+  if (!isJsonObject(value) || Object.keys(value).length !== 1 || !Array.isArray(value['results'])) {
     return false
   }
 
@@ -42,7 +40,7 @@ export function isIpCountryLookupResponse(value: unknown): value is IpCountryLoo
   const seenIps = new Set<string>()
   for (const result of value['results']) {
     if (
-      !isRecord(result) ||
+      !isJsonObject(result) ||
       Object.keys(result).length !== 2 ||
       typeof result['ip'] !== 'string' ||
       result['ip'].length > MAX_IP_COUNTRY_VALUE_LENGTH ||

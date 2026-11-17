@@ -71,7 +71,7 @@ export const DNS_READINESS_SOURCE_DEFINITIONS = [
 export function hasDnsReadinessData(
   readiness: readonly DnsSourceReadiness[],
   storage: LogAnalyticsStorageKind,
-) {
+): boolean {
   return readiness.some(
     (item) =>
       item.storage === storage &&

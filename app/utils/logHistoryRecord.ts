@@ -104,10 +104,15 @@ export function toPersistedFirewallLogRecord(
   return persisted
 }
 
-export function toPersistedFirewallLogRecords(logs: readonly FirewallLogRecord[]) {
+export function toPersistedFirewallLogRecords(
+  logs: readonly FirewallLogRecord[],
+): PersistedFirewallLogRecord[] {
   return logs.map((log) => toPersistedFirewallLogRecord(log))
 }
 
-export function getLogHistoryCutoffTimestamp(now = new Date(), maxAgeMs = LOG_HISTORY_MAX_AGE_MS) {
+export function getLogHistoryCutoffTimestamp(
+  now = new Date(),
+  maxAgeMs = LOG_HISTORY_MAX_AGE_MS,
+): string {
   return new Date(now.getTime() - Math.max(0, maxAgeMs)).toISOString()
 }

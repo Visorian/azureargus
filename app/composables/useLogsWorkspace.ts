@@ -1,5 +1,7 @@
 import { useMediaQuery } from '@vueuse/core'
+import type { ComputedRef, Ref, ShallowRef, WritableComputedRef } from 'vue'
 
+import type { AzureAccessibleTenant, AzureAccessibleWorkspace } from '#shared/types/azureAccess'
 import type {
   DnsDetailQueryRequest,
   DnsDetailQueryResponse,
@@ -9,12 +11,27 @@ import type {
   DnsReadinessResponse,
   DnsSort,
 } from '#shared/types/dns'
-import type { FirewallLogRecord, FirewallLogSortKey } from '#shared/types/firewall'
+import type {
+  FirewallLogFilters,
+  FirewallLogRecord,
+  FirewallLogSortKey,
+  FirewallLogSortState,
+} from '#shared/types/firewall'
 import type { LogAnalyticsQueryResponse, LogAnalyticsStorageKind } from '#shared/types/logAnalytics'
 import { hasDnsReadinessData } from '#shared/utils/dnsReadiness'
 import { DEFAULT_LOG_ANALYTICS_QUERY_LIMIT } from '#shared/utils/logAnalytics'
 import type { AnalysisMode } from '~/composables/useAnalysisMode'
-import type { DnsReadinessTarget } from '~/composables/useDnsSourceReadiness'
+import type {
+  DnsReadinessTarget,
+  UseDnsSourceReadinessReturn,
+} from '~/composables/useDnsSourceReadiness'
+import type { UseDnsTroubleshootingReturn } from '~/composables/useDnsTroubleshooting'
+import type { UseEventHubReceiverReturn } from '~/composables/useEventHubReceiver'
+import type { IpCountryLookupClient } from '~/composables/useIpCountryLookup'
+import type {
+  LogAnalyticsQueryStatus,
+  UseLogAnalyticsQueryReturn,
+} from '~/composables/useLogAnalyticsQuery'
 import {
   createDefaultLogFilters,
   isLogCategoryFilterValueActive,
@@ -23,7 +40,11 @@ import {
   toggleLogFilterValue,
 } from '~/composables/useLogQuery'
 import { createDefaultLogSort } from '~/composables/useLogSorting'
+import type { LogHourCycle } from '~/composables/useLogTimeFormat'
+import type { TemporaryLogAnalyticsAuth } from '~/composables/useTemporaryLogAnalyticsAuth'
+import type { TemporaryAccessStatus } from '~/composables/useTemporaryLogAnalyticsWorkspace'
 import type { LogQuickFilterKey, MobileQueryState } from '~/types/logs'
+import type { SegmentedControlItem, UiTone } from '~/types/ui'
 import type { EventHubConnectionForm } from '~/utils/eventHubConnection'
 import { validateEventHubConnectionForm } from '~/utils/eventHubConnection'
 import {
@@ -35,20 +56,128 @@ import {
 import type { LogAnalysisDateRange, LogAnalysisRangePreset } from '~/utils/logAnalysis'
 import { logFilterCount, logFilterSummary, logStatusTone } from '~/utils/logFilterPresentation'
 
-export function useLogsWorkspace() {
-  interface LogTableColumn {
-    key: FirewallLogSortKey
-    label: string
-  }
+function hasQueryError(state: MobileQueryState): boolean {
+  return state.error !== null && state.error !== ''
+}
 
-  interface LogsEmptyState {
-    description: string
-    settingsActionLabel?: string
-    title: string
-  }
+export interface LogTableColumn {
+  key: FirewallLogSortKey
+  label: string
+}
 
-  type LogsLens = 'all-logs' | 'dns-troubleshooting'
+export interface LogsEmptyState {
+  description: string
+  settingsActionLabel?: string
+  title: string
+}
 
+export type LogsLens = 'all-logs' | 'dns-troubleshooting'
+
+export interface UseLogsWorkspaceReturn {
+  actions: ComputedRef<string[]>
+  activeFilterCount: ComputedRef<number>
+  activeFilters: WritableComputedRef<FirewallLogFilters>
+  activeLens: Ref<LogsLens>
+  activeSort: WritableComputedRef<FirewallLogSortState>
+  allLogsLensActive: ComputedRef<boolean>
+  analysisMode: Ref<AnalysisMode>
+  appliedFilterSummary: ComputedRef<string[]>
+  authorizeTemporaryLogAnalytics: () => Promise<void>
+  categories: ComputedRef<string[]>
+  changeTemporaryTenant: (tenantId: string) => void
+  changeTemporaryWorkspace: (workspaceId: string) => void
+  clearActiveResults: () => void
+  clearClosedDetail: () => void
+  clearingLogHistory: Ref<boolean>
+  commitLogAnalysisInteraction: (event: Event) => void
+  connect: () => Promise<void>
+  connectTemporaryLogAnalytics: () => Promise<void>
+  connecting: Ref<boolean>
+  connectionForm: EventHubConnectionForm
+  connectionStringPersistenceError: Ref<string | null>
+  countLabel: ComputedRef<string>
+  detailOpen: Ref<boolean>
+  disconnectEventHub: () => Promise<void>
+  disconnectTemporaryLogAnalytics: () => Promise<void>
+  dns: UseDnsTroubleshootingReturn
+  dnsCountLabel: ComputedRef<string>
+  dnsDetailOpen: WritableComputedRef<boolean>
+  dnsLensActive: ComputedRef<boolean>
+  dnsSourceReadiness: UseDnsSourceReadinessReturn
+  dnsView: Readonly<ShallowRef<{ restoreFocus: () => void } | null>>
+  emptyState: ComputedRef<LogsEmptyState>
+  eventHubConnectionActive: ComputedRef<boolean>
+  formatLogTimestamp: (timestamp: string) => string
+  ipCountryLookup: IpCountryLookupClient
+  isMobile: ComputedRef<boolean>
+  isPhone: ComputedRef<boolean>
+  isQuickFilterActive: (key: LogQuickFilterKey, value: string | undefined) => boolean
+  lensItems: SegmentedControlItem<LogsLens>[]
+  logAnalysisActive: ComputedRef<boolean>
+  logAnalyticsQueryLimit: Ref<number>
+  logAnalyticsStorage: Ref<LogAnalyticsStorageKind>
+  logBrowserTimeZone: Ref<string>
+  logDraftRange: LogAnalysisDateRange
+  logRangePreset: Ref<LogAnalysisRangePreset>
+  logHistoryEnabled: ComputedRef<boolean>
+  logHistoryError: ComputedRef<string | null>
+  logHourCycle: ComputedRef<LogHourCycle>
+  logQuery: UseLogAnalyticsQueryReturn
+  logQueryStatus: Ref<LogAnalyticsQueryStatus>
+  logResultsTruncated: Ref<boolean>
+  logTableColumns: ComputedRef<LogTableColumn[]>
+  logTimeFormatError: Ref<string | null>
+  logTimeZone: ComputedRef<string>
+  logToolbar: Readonly<ShallowRef<{ openFilters: () => void; runStarted: () => void } | null>>
+  managedMode: ComputedRef<boolean>
+  mobileQueryState: ComputedRef<MobileQueryState>
+  mobileSortKey: WritableComputedRef<FirewallLogSortKey>
+  mobileStatusLabel: ComputedRef<string>
+  modeTransitioning: Ref<boolean>
+  openSettings: (trigger?: Event | HTMLElement) => void
+  protocols: ComputedRef<string[]>
+  receiver: UseEventHubReceiverReturn
+  refreshTemporaryAzureAccess: () => void
+  rememberConnectionString: Ref<boolean>
+  resetActiveFilters: () => void
+  restoreDnsFocus: (event: Event) => Promise<void>
+  restoreSettingsFocus: (event: Event) => void
+  runActiveLogAnalysis: () => Promise<void>
+  runLogAnalysis: () => Promise<void>
+  selectLog: (log: FirewallLogRecord) => void
+  selectMode: (mode: AnalysisMode) => void
+  selectedLog: Ref<FirewallLogRecord | null>
+  setLens: (lens: LogsLens) => void
+  setSort: (key: FirewallLogSortKey) => void
+  settingsOpen: Ref<boolean>
+  showRealTimeLag: ComputedRef<boolean>
+  sortedLogs: ComputedRef<FirewallLogRecord[]>
+  sourceItems: ComputedRef<SegmentedControlItem<AnalysisMode>[]>
+  statusTone: ComputedRef<UiTone>
+  temporaryAccessError: Ref<string | null>
+  temporaryAccessStatus: Ref<TemporaryAccessStatus>
+  temporaryAdminConsentUrl: ComputedRef<string | null>
+  temporaryAzureUsername: Ref<string>
+  temporaryLogAnalyticsAuth: TemporaryLogAnalyticsAuth
+  temporaryLogAnalyticsAuthorizing: Ref<boolean>
+  temporaryLogAnalyticsMode: ComputedRef<boolean>
+  temporaryTenantId: Ref<string>
+  temporaryTenants: Ref<AzureAccessibleTenant[]>
+  temporaryWorkspaceId: Ref<string>
+  temporaryWorkspaces: Ref<AzureAccessibleWorkspace[]>
+  toggleMobileSortDirection: () => void
+  togglePause: () => void
+  toggleQuickFilter: (key: LogQuickFilterKey, value: string | undefined) => void
+  updateConnectionForm: (value: EventHubConnectionForm) => void
+  updateDnsFilters: (value: DnsFilters) => void
+  updateDnsSort: (value: DnsSort) => void
+  updateLogDraftRange: (value: LogAnalysisDateRange) => void
+  updateLogRetention: (enabled: boolean) => Promise<void>
+  use12HourTime: WritableComputedRef<boolean>
+  useLocalTime: WritableComputedRef<boolean>
+}
+
+export function useLogsWorkspace(): UseLogsWorkspaceReturn {
   const {
     browserTimeZone: logBrowserTimeZone,
     formatTimestamp: formatLogTimestamp,
@@ -472,7 +601,7 @@ export function useLogsWorkspace() {
     error: dnsLensActive.value ? dns.lastError.value : logQuery.lastError.value,
   }))
   const mobileStatusLabel = computed(() => {
-    if (logAnalysisActive.value && mobileQueryState.value.error) {
+    if (logAnalysisActive.value && hasQueryError(mobileQueryState.value)) {
       return 'Query failed'
     }
     switch (activeStatus.value) {
@@ -844,7 +973,7 @@ export function useLogsWorkspace() {
     { value: 'dns-troubleshooting' as const, label: 'DNS troubleshooting' },
   ]
   const statusTone = computed(() => {
-    if (logAnalysisActive.value && mobileQueryState.value.error) {
+    if (logAnalysisActive.value && hasQueryError(mobileQueryState.value)) {
       return 'error'
     }
     if (!logAnalysisActive.value && showRealTimeLag.value && !receiver.caughtUp.value) {

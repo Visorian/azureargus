@@ -17,13 +17,15 @@ function getIndexedDBError(error: DOMException | null, fallback: string) {
 }
 
 function createTimestampRange({ from, to }: LogHistoryRangeQuery): IDBKeyRange | undefined {
-  if (from && to) {
+  const hasFrom = from !== undefined && from !== ''
+  const hasTo = to !== undefined && to !== ''
+  if (hasFrom && hasTo) {
     return IDBKeyRange.bound(from, to)
   }
-  if (from) {
+  if (hasFrom) {
     return IDBKeyRange.lowerBound(from)
   }
-  if (to) {
+  if (hasTo) {
     return IDBKeyRange.upperBound(to)
   }
 

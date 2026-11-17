@@ -1,8 +1,5 @@
 import type { ManagedEventHubStreamEnvelope } from '#shared/types/managedEventHub'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+import { isJsonObject } from '#shared/utils/json'
 
 export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStreamEnvelope {
   let parsed: unknown
@@ -12,7 +9,7 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
     throw new Error('Managed Event Hub stream returned invalid JSON')
   }
 
-  if (!isRecord(parsed) || typeof parsed['type'] !== 'string') {
+  if (!isJsonObject(parsed) || typeof parsed['type'] !== 'string') {
     throw new Error('Managed Event Hub stream returned invalid message')
   }
   if (parsed['type'] === 'heartbeat') {
@@ -30,12 +27,13 @@ export function parseManagedEventHubEnvelope(value: string): ManagedEventHubStre
   if (parsed['type'] === 'events' && Array.isArray(parsed['events'])) {
     const events = parsed['events'].map((event) => {
       if (
-        !isRecord(event) ||
+        !isJsonObject(event) ||
         typeof event['enqueuedTimeUtc'] !== 'string' ||
         typeof event['partitionId'] !== 'string' ||
         typeof event['sequenceNumber'] !== 'number' ||
         (event['offset'] !== undefined && typeof event['offset'] !== 'string') ||
-        (event['applicationProperties'] !== undefined && !isRecord(event['applicationProperties']))
+        (event['applicationProperties'] !== undefined &&
+          !isJsonObject(event['applicationProperties']))
       ) {
         throw new Error('Managed Event Hub stream returned invalid event')
       }
@@ -58,33 +56,61 @@ export async function consumeManagedEventHubStream(
   stream: ReadableStream<Uint8Array>,
   onEnvelope: (envelope: ManagedEventHubStreamEnvelope) => void | Promise<void>,
   signal: AbortSignal,
-) {
+): Promise<void> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buffered = ''
   const cancel = () => void reader.cancel()
   signal.addEventListener('abort', cancel, { once: true })
 
-  try {
-    while (!signal.aborted) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-      buffered += decoder.decode(value, { stream: true })
-      let newlineIndex = buffered.indexOf('\n')
-      while (newlineIndex >= 0) {
-        const line = buffered.slice(0, newlineIndex).trim()
-        buffered = buffered.slice(newlineIndex + 1)
-        if (line) {
-          await onEnvelope(parseManagedEventHubEnvelope(line))
-        }
-        newlineIndex = buffered.indexOf('\n')
-      }
+  // Lines are delivered one at a time, in order, each after the previous handler settles.
+  async function emitBufferedLines(): Promise<void> {
+    const newlineIndex = buffered.indexOf('\n')
+    if (newlineIndex === -1) {
+      return
     }
+    const line = buffered.slice(0, newlineIndex).trim()
+    buffered = buffered.slice(newlineIndex + 1)
+    if (line !== '') {
+      await onEnvelope(parseManagedEventHubEnvelope(line))
+    }
+    await emitBufferedLines()
+  }
+
+  async function readChunk(): Promise<boolean> {
+    const { done, value } = await reader.read()
+    if (done) {
+      return false
+    }
+    buffered += decoder.decode(value, { stream: true })
+    await emitBufferedLines()
+    return true
+  }
+
+  // The stream can stay open for hours. Each step starts the next one and finishes instead of
+  // awaiting it, so completed steps are released rather than chained until the stream ends.
+  function readUntilDone(resolve: () => void, reject: (error: unknown) => void): void {
+    void (async () => {
+      try {
+        if (signal.aborted || !(await readChunk())) {
+          resolve()
+          return
+        }
+      } catch (error: unknown) {
+        reject(error)
+        return
+      }
+      readUntilDone(resolve, reject)
+    })()
+  }
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      readUntilDone(resolve, reject)
+    })
 
     buffered += decoder.decode()
-    if (!signal.aborted && buffered.trim()) {
+    if (!signal.aborted && buffered.trim() !== '') {
       await onEnvelope(parseManagedEventHubEnvelope(buffered.trim()))
     }
   } finally {
