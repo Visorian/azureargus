@@ -57,6 +57,32 @@ describe('log sorting', () => {
     expect(result.map((log) => log.id)).toEqual(['newest', 'oldest'])
   })
 
+  it('sorts source ports numerically in ascending order', () => {
+    const logs = [
+      createLog({ id: '10015', sourcePort: '10015' }),
+      createLog({ id: 'missing' }),
+      createLog({ id: '1024', sourcePort: '1024' }),
+      createLog({ id: '443', sourcePort: '443' }),
+    ]
+
+    const result = sortFirewallLogs(logs, { key: 'sourcePort', direction: 'asc' })
+
+    expect(result.map((log) => log.id)).toStrictEqual(['missing', '443', '1024', '10015'])
+  })
+
+  it('sorts destination ports numerically in descending order', () => {
+    const logs = [
+      createLog({ id: '8080', destinationPort: '8080' }),
+      createLog({ id: '65535', destinationPort: '65535' }),
+      createLog({ id: 'missing', destinationPort: '' }),
+      createLog({ id: '80', destinationPort: '80' }),
+    ]
+
+    const result = sortFirewallLogs(logs, { key: 'destinationPort', direction: 'desc' })
+
+    expect(result.map((log) => log.id)).toStrictEqual(['65535', '8080', '80', 'missing'])
+  })
+
   it('toggles active columns and defaults date to descending', () => {
     expect(getNextSortDirection({ key: 'action', direction: 'asc' }, 'action')).toBe('desc')
     expect(getNextSortDirection({ key: 'action', direction: 'asc' }, 'timestamp')).toBe('desc')

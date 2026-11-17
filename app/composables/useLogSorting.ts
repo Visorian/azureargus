@@ -14,15 +14,42 @@ export function createDefaultLogSort(): FirewallLogSortState {
   }
 }
 
-function normalizeSortValue(log: FirewallLogRecord, key: FirewallLogSortKey) {
-  if (key === 'timestamp') {
-    return new Date(log.timestamp).getTime()
+const PORT_PATTERN = /^\d{1,5}$/u
+
+type SortValue = number | string
+
+// Ranks keep the order transitive: missing values first, then valid ports, then other text.
+function normalizePortValue(value: string | undefined): [rank: number, value: SortValue] {
+  const text = value?.trim() ?? ''
+  if (text === '') {
+    return [0, '']
   }
 
-  return (log[key] ?? '').toLowerCase()
+  const port = Number(text)
+  return PORT_PATTERN.test(text) && port <= 65535 ? [1, port] : [2, text.toLowerCase()]
 }
 
-function compareValues(left: number | string, right: number | string) {
+function normalizeSortValue(
+  log: FirewallLogRecord,
+  key: FirewallLogSortKey,
+): [rank: number, value: SortValue] {
+  if (key === 'timestamp') {
+    return [0, new Date(log.timestamp).getTime()]
+  }
+  if (key === 'sourcePort' || key === 'destinationPort') {
+    return normalizePortValue(log[key])
+  }
+
+  return [0, (log[key] ?? '').toLowerCase()]
+}
+
+function compareValues(
+  [leftRank, left]: [number, SortValue],
+  [rightRank, right]: [number, SortValue],
+) {
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank
+  }
   if (typeof left === 'number' && typeof right === 'number') {
     return left - right
   }
