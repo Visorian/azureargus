@@ -7,7 +7,7 @@ import {
   temporaryAzureWorkspaceId,
 } from './support/temporaryAzure'
 
-const readinessSummary = /Dedicated tables 7\/7 available/
+const readinessSummary = /Dedicated tables 7\/7 available/u
 const temporaryFirewallRow = /Network rules.*10\.0\.0\.4.*10\.0\.0\.53/u
 const removedDelegatedRoutes = [
   { method: 'GET', path: '/api/log-analytics/delegated-access' },
@@ -17,12 +17,14 @@ const removedDelegatedRoutes = [
   { method: 'POST', path: '/api/log-analytics/delegated-dns/detail' },
 ] as const
 
-test('removed delegated Log Analytics routes return 404', async ({ request }) => {
-  for (const route of removedDelegatedRoutes) {
+for (const route of removedDelegatedRoutes) {
+  test(`removed delegated Log Analytics route ${route.method} ${route.path} returns 404`, async ({
+    request,
+  }) => {
     const response = await request.fetch(route.path, { method: route.method })
     expect(response.status(), route.path).toBe(404)
-  }
-})
+  })
+}
 
 test('temporary Azure flows stay browser-direct', async ({ page }) => {
   const traffic = await mockTemporaryAzure(page)

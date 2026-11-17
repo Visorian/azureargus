@@ -56,7 +56,7 @@ describe('LogAnalyticsQueryControls', () => {
     await inputs[0]!.setValue('2026-07-12T07:30')
     await inputs[1]!.setValue('2026-07-12T09:30')
     await wrapper.setProps({ draftRange: { ...range } })
-    expect(range).toEqual({ from: '2026-07-12T07:30', to: '2026-07-12T09:30' })
+    expect(range).toStrictEqual({ from: '2026-07-12T07:30', to: '2026-07-12T09:30' })
     expect(wrapper.get('summary').text()).toContain('07:30–09:30 UTC')
     await inputs[1]!.setValue('2026-07-12T06:30')
     await wrapper.setProps({ draftRange: { ...range } })
@@ -150,8 +150,10 @@ describe('LogAnalyticsSettingsPanel', () => {
     expect(wrapper.text()).toContain('Log Analytics access available for selected directory.')
     await directory.setValue('55555555-5555-4555-8555-555555555555')
     await workspace.setValue('33333333-3333-4333-8333-333333333333')
-    expect(wrapper.emitted('changeTenant')?.[0]).toEqual(['55555555-5555-4555-8555-555555555555'])
-    expect(wrapper.emitted('changeWorkspace')?.[0]).toEqual([
+    expect(wrapper.emitted('changeTenant')?.[0]).toStrictEqual([
+      '55555555-5555-4555-8555-555555555555',
+    ])
+    expect(wrapper.emitted('changeWorkspace')?.[0]).toStrictEqual([
       '33333333-3333-4333-8333-333333333333',
     ])
     await wrapper.setProps({
@@ -168,7 +170,7 @@ describe('LogAnalyticsSettingsPanel', () => {
   it('renders visible source states and lets a failed readiness check be retried', async () => {
     const wrapper = await mountSuspended(LogAnalyticsSettingsPanel, { props: createProps() })
     expect(wrapper.text()).toContain('Waiting for workspace check.')
-    expect(wrapper.findAll('tbody').map((body) => body.text())).toEqual([
+    expect(wrapper.findAll('tbody').map((body) => body.text())).toStrictEqual([
       expect.stringContaining('DNS sources'),
       expect.stringContaining('General firewall logs'),
     ])
@@ -211,7 +213,10 @@ describe('LogAnalyticsSettingsPanel', () => {
     const sourceRow = wrapper
       .findAll('tr')
       .find((row) => row.text().includes('Structured DNS proxy logs'))!
-    expect(sourceRow.findAll('td').map((cell) => cell.text())).toEqual(['Available', 'Not found'])
+    expect(sourceRow.findAll('td').map((cell) => cell.text())).toStrictEqual([
+      'Available',
+      'Not found',
+    ])
     expect(wrapper.text()).toContain('Access denied')
     expect(wrapper.text()).toContain('Check failed')
     expect(wrapper.text()).toContain('No data')
@@ -226,7 +231,7 @@ describe('LogAnalyticsSettingsPanel', () => {
     })
     expect(querySource.props('disabled')).toBe(false)
     await querySource.setValue('azure-diagnostics')
-    expect(wrapper.emitted('update:queryStorage')?.[0]).toEqual(['azure-diagnostics'])
+    expect(wrapper.emitted('update:queryStorage')?.[0]).toStrictEqual(['azure-diagnostics'])
   })
 
   it('shows readiness after a temporary workspace is selected and keeps result limits bounded', async () => {
@@ -237,10 +242,10 @@ describe('LogAnalyticsSettingsPanel', () => {
     const limit = wrapper.getComponent({ name: 'UInputNumber' })
     expect(limit.props()).toMatchObject({ min: 100, max: 5_000, step: 100, modelValue: 1_000 })
     await limit.setValue(2_000)
-    expect(wrapper.emitted('update:queryLimit')?.[0]).toEqual([2_000])
+    expect(wrapper.emitted('update:queryLimit')?.[0]).toStrictEqual([2_000])
     await limit.setValue(undefined)
     await flushPromises()
-    expect(wrapper.emitted('update:queryLimit')?.at(-1)).toEqual([1_000])
+    expect(wrapper.emitted('update:queryLimit')?.at(-1)).toStrictEqual([1_000])
     expect(wrapper.emitted('update:queryLimit')?.flat()).not.toContain(undefined)
     await wrapper.setProps({ workspaceId: '33333333-3333-4333-8333-333333333333' })
     expect(wrapper.text()).toContain('Source readiness')

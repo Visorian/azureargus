@@ -71,7 +71,7 @@ describe('log history persistence queue', () => {
     queue.queueRecords([createLog('log')])
     await queue.flush()
 
-    expect(batches).toEqual([])
+    expect(batches).toStrictEqual([])
   })
 
   it('flushes by batch size without throwing into the caller', async () => {
@@ -87,7 +87,7 @@ describe('log history persistence queue', () => {
     }).not.toThrow()
     await flushPromises()
 
-    expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([['one', 'two']])
+    expect(batches.map((batch) => batch.map((record) => record.id))).toStrictEqual([['one', 'two']])
   })
 
   it('limits oversized persistence writes to configured batch size', async () => {
@@ -107,7 +107,7 @@ describe('log history persistence queue', () => {
     ])
     await queue.waitForIdle()
 
-    expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([
+    expect(batches.map((batch) => batch.map((record) => record.id))).toStrictEqual([
       ['one', 'two'],
       ['three', 'four'],
       ['five'],
@@ -126,12 +126,12 @@ describe('log history persistence queue', () => {
     queue.queueRecords([createLog('delayed')])
     vi.advanceTimersByTime(499)
     await flushPromises()
-    expect(batches).toEqual([])
+    expect(batches).toStrictEqual([])
 
     vi.advanceTimersByTime(1)
     await flushPromises()
 
-    expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([['delayed']])
+    expect(batches.map((batch) => batch.map((record) => record.id))).toStrictEqual([['delayed']])
   })
 
   it('uses idle callback when available', async () => {
@@ -146,7 +146,7 @@ describe('log history persistence queue', () => {
         }
         return 1
       },
-      setTimeout: vi.fn(),
+      setTimeout: vi.fn<Scheduler['setTimeout']>(),
     }
     const queue = createLogHistoryPersistenceQueue({
       enabled: true,
@@ -159,7 +159,7 @@ describe('log history persistence queue', () => {
     idleCallback?.()
     await flushPromises()
 
-    expect(batches.map((batch) => batch.map((record) => record.id))).toEqual([['idle']])
+    expect(batches.map((batch) => batch.map((record) => record.id))).toStrictEqual([['idle']])
   })
 
   it('disables itself when writes fail', async () => {
@@ -202,7 +202,7 @@ describe('log history persistence queue', () => {
     queue.queueRecords([createLog('after-disable')])
     await queue.flush()
 
-    expect(batches).toEqual([])
+    expect(batches).toStrictEqual([])
   })
 
   it('waits for an active write before reporting idle', async () => {
@@ -223,7 +223,7 @@ describe('log history persistence queue', () => {
     })
 
     queue.queueRecords([createLog('active')])
-    expect(startedBatches).toEqual([['active']])
+    expect(startedBatches).toStrictEqual([['active']])
     expect(resolveAppend).toBeDefined()
 
     queue.disable()
@@ -272,11 +272,11 @@ describe('log history persistence queue', () => {
       idleResolved = true
     })()
 
-    expect(startedBatches).toEqual([['first']])
+    expect(startedBatches).toStrictEqual([['first']])
     firstWrite.resolve()
     await flushPromises()
 
-    expect(startedBatches).toEqual([['first'], ['second']])
+    expect(startedBatches).toStrictEqual([['first'], ['second']])
     expect(idleResolved).toBe(false)
 
     secondWrite.resolve()

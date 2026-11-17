@@ -142,11 +142,11 @@ test('temporary transport sends discovery and every query flow only to matching 
   )
   const urls = calls.map((call) => call.url)
   expect(urls.some((url) => url.includes('/api/log-analytics/delegated-'))).toBe(false)
-  expect(new Set(calls.map((call) => call.origin))).toEqual(
+  expect(new Set(calls.map((call) => call.origin))).toStrictEqual(
     new Set(['https://management.azure.com', 'https://api.loganalytics.azure.com']),
   )
   expect(calls.every((call) => call.redirect === 'error')).toBe(true)
-  expect(managementCalls.map((call) => call.path)).toEqual(
+  expect(managementCalls.map((call) => call.path)).toStrictEqual(
     expect.arrayContaining([
       '/tenants',
       '/subscriptions',
@@ -203,7 +203,7 @@ test('temporary discovery enforces one overall timeout including token acquisiti
     const result = client.discover(tenantId, new AbortController().signal)
     await vi.advanceTimersByTimeAsync(21)
 
-    await expect(result).rejects.toEqual(
+    await expect(result).rejects.toStrictEqual(
       new TemporaryLogAnalyticsClientError('Azure resource discovery timed out.', 'timeout'),
     )
     expect(fetchImplementation).not.toHaveBeenCalled()

@@ -6,8 +6,8 @@ import networkFixture from '../fixtures/dns/log-analytics-azfwnetworkrule.saniti
 import azureDiagnosticsNetworkFixture from '../fixtures/dns/log-analytics-azurediagnostics-azfwnetworkrule.sanitized.json'
 
 const workspaceId = '33333333-3333-4333-8333-333333333333'
-const STRUCTURED_QUERY_PATTERN = /^AZFWDnsQuery\n/
-const NETWORK_QUERY_PATTERN = /^AZFWNetworkRule\n/
+const STRUCTURED_QUERY_PATTERN = /^AZFWDnsQuery\n/u
+const NETWORK_QUERY_PATTERN = /^AZFWNetworkRule\n/u
 
 function normalizedAzureDiagnosticsNetworkFixture() {
   const table = azureDiagnosticsNetworkFixture.tables[0]!
@@ -105,12 +105,12 @@ describe('sanitized DNS Log Analytics fixtures', () => {
     )
 
     expect(fetchImplementation).toHaveBeenCalledOnce()
-    expect(result.sources).toEqual([
+    expect(result.sources).toStrictEqual([
       { source: 'proxy-structured', availability: 'available', truncated: false },
     ])
-    expect(result.transportObservations).toEqual([])
+    expect(result.transportObservations).toStrictEqual([])
     expect(result.queriedEntries).toHaveLength(6)
-    expect(result.queriedEntries.map((entry) => entry.outcome)).toEqual(
+    expect(result.queriedEntries.map((entry) => entry.outcome)).toStrictEqual(
       expect.arrayContaining([
         'response-unknown',
         'response-unknown',
@@ -201,9 +201,9 @@ describe('sanitized DNS Log Analytics fixtures', () => {
     )
 
     expect(fetchImplementation).toHaveBeenCalledOnce()
-    expect(result.queriedEntries).toEqual([])
+    expect(result.queriedEntries).toStrictEqual([])
     expect(result.transportObservations).toHaveLength(8)
-    expect(result.transportObservations).toEqual(
+    expect(result.transportObservations).toStrictEqual(
       expect.arrayContaining([
         expect.objectContaining({ outcome: 'blocked' }),
         expect.objectContaining({ outcome: 'transport-observed' }),
@@ -247,7 +247,7 @@ describe('sanitized DNS Log Analytics fixtures', () => {
       { fetchImplementation, queryId: 'fixture-azure-diagnostics-network' },
     )
 
-    expect(result.queriedEntries).toEqual([])
+    expect(result.queriedEntries).toStrictEqual([])
     expect(fetchImplementation).toHaveBeenCalledOnce()
     expect(
       fetchImplementation.mock.calls
@@ -256,7 +256,7 @@ describe('sanitized DNS Log Analytics fixtures', () => {
     ).toBe(true)
     expect(result.transportObservations).toHaveLength(4)
     expect(result.transportObservations.every((row) => row.serverPort === '53')).toBe(true)
-    expect(result.transportObservations).toEqual(
+    expect(result.transportObservations).toStrictEqual(
       expect.arrayContaining([
         expect.objectContaining({
           logAnalyticsStorage: 'azure-diagnostics',
@@ -288,7 +288,7 @@ describe('sanitized DNS Log Analytics fixtures', () => {
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(2)
-    expect(detail.observations).toEqual([
+    expect(detail.observations).toStrictEqual([
       expect.objectContaining({
         logAnalyticsStorage: 'azure-diagnostics',
         protocol: 'TCP',
@@ -341,7 +341,7 @@ describe('sanitized DNS Log Analytics fixtures', () => {
     const idsByName = (entries: typeof initial.queriedEntries) =>
       new Map(entries.map(({ id, queryName }): [string | undefined, string] => [queryName, id]))
 
-    expect(idsByName(reordered.queriedEntries)).toEqual(idsByName(initial.queriedEntries))
+    expect(idsByName(reordered.queriedEntries)).toStrictEqual(idsByName(initial.queriedEntries))
   })
 
   it('normalizes transport direction while preserving raw endpoints and rule metadata', async () => {
@@ -462,13 +462,13 @@ describe('sanitized DNS Log Analytics fixtures', () => {
       fetchImplementation: async () => response(ambiguousPayload),
     })
 
-    expect(missing).toEqual({
+    expect(missing).toStrictEqual({
       observations: [],
       detailTruncated: false,
       completeness: 'partial',
       warnings: ['Selected DNS entry is no longer available'],
     })
-    expect(ambiguous).toEqual({
+    expect(ambiguous).toStrictEqual({
       observations: [],
       detailTruncated: false,
       completeness: 'partial',

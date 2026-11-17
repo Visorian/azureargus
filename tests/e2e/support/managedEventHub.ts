@@ -60,14 +60,14 @@ export async function enqueueManagedEventHubEnvelope(
         ),
     )
     .toBe(true)
-  await page.evaluate((nextEnvelope) => {
+  await page.evaluate((serializedEnvelope) => {
     const controller = (globalThis as ManagedEventHubTestGlobal).azureArgusManagedEventHubTestStream
       ?.controller
     if (!controller) {
       throw new Error('Managed Event Hub test stream is unavailable')
     }
-    controller.enqueue(new TextEncoder().encode(`${JSON.stringify(nextEnvelope)}\n`))
-  }, envelope)
+    controller.enqueue(new TextEncoder().encode(`${serializedEnvelope}\n`))
+  }, JSON.stringify(envelope))
 }
 
 export async function closeManagedEventHubStream(page: Page) {

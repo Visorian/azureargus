@@ -22,7 +22,7 @@ function requestBody(init: RequestInit | undefined): string {
 
 describe('Log Analytics configuration', () => {
   it('rejects incomplete private runtime config', () => {
-    expect(parseLogAnalyticsRuntimeConfig(config)).toEqual(config)
+    expect(parseLogAnalyticsRuntimeConfig(config)).toStrictEqual(config)
     expect(() => parseLogAnalyticsRuntimeConfig({ ...config, clientSecret: '' })).toThrow(
       LogAnalyticsConfigurationError,
     )
@@ -65,7 +65,10 @@ describe('Log Analytics token provider', () => {
     const second = getToken(config)
     resolveResponse?.(Response.json({ access_token: 'shared-token', expires_in: 3_600 }))
 
-    await expect(Promise.all([first, second])).resolves.toEqual(['shared-token', 'shared-token'])
+    await expect(Promise.all([first, second])).resolves.toStrictEqual([
+      'shared-token',
+      'shared-token',
+    ])
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
@@ -127,7 +130,7 @@ describe('Log Analytics token provider', () => {
     const getToken = createLogAnalyticsTokenProvider(fetchImplementation)
     const secondConfig = { ...config, clientId: 'another-client' }
 
-    await expect(Promise.all([getToken(config), getToken(secondConfig)])).resolves.toEqual([
+    await expect(Promise.all([getToken(config), getToken(secondConfig)])).resolves.toStrictEqual([
       `token-${config.clientId}`,
       'token-another-client',
     ])

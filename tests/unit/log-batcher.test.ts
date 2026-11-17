@@ -22,10 +22,10 @@ describe('log batcher', () => {
     batcher.pushMany(['old'])
     batcher.pushMany(['new'])
 
-    expect(flushedItems).toEqual([])
+    expect(flushedItems).toStrictEqual([])
     vi.advanceTimersByTime(100)
 
-    expect(flushedItems).toEqual([['old', 'new']])
+    expect(flushedItems).toStrictEqual([['old', 'new']])
     expect(batcher.pendingCount).toBe(0)
   })
 
@@ -42,7 +42,7 @@ describe('log batcher', () => {
     batcher.clear()
     vi.advanceTimersByTime(100)
 
-    expect(flushedItems).toEqual([])
+    expect(flushedItems).toStrictEqual([])
     expect(batcher.pendingCount).toBe(0)
   })
 
@@ -59,7 +59,7 @@ describe('log batcher', () => {
     batcher.flush()
     vi.advanceTimersByTime(100)
 
-    expect(flushedItems).toEqual([['pending']])
+    expect(flushedItems).toStrictEqual([['pending']])
   })
 
   it('flushes pending records before teardown and preserves final buffer order', () => {
@@ -76,6 +76,6 @@ describe('log batcher', () => {
     batcher.flush()
     vi.advanceTimersByTime(100)
 
-    expect(buffer).toEqual(['new', 'old'])
+    expect(buffer).toStrictEqual(['new', 'old'])
   })
 })

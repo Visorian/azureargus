@@ -9,7 +9,7 @@ function createLookup() {
   const queue = vi.fn<IpCountryLookupClient['queue']>()
   const lookup: IpCountryLookupClient = {
     dispose: vi.fn<IpCountryLookupClient['dispose']>(),
-    getCountryCode: (ip) => (ip ? cache.get(ip) : undefined),
+    getCountryCode: (ip) => (ip !== undefined && ip !== '' ? cache.get(ip) : undefined),
     queue,
     setActive: vi.fn<IpCountryLookupClient['setActive']>(),
   }

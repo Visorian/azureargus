@@ -20,7 +20,7 @@ describe('Log Analytics onboarding', () => {
     expect(url.origin + url.pathname).toBe(
       `https://login.microsoftonline.com/${tenantId}/v2.0/adminconsent`,
     )
-    expect(Object.fromEntries(url.searchParams)).toEqual({
+    expect(Object.fromEntries(url.searchParams)).toStrictEqual({
       client_id: clientId,
       redirect_uri: 'https://argus.example.com/log-analytics-redirect.html',
       scope: 'https://api.loganalytics.io/.default',

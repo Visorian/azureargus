@@ -46,7 +46,7 @@ describe('log history store', () => {
 
     await store.appendLogHistoryBatch(records, { maxAgeMs: 120_000, maxRecords: 1 })
 
-    expect(calls).toEqual(['put', 'delete-before', 'delete-excess'])
+    expect(calls).toStrictEqual(['put', 'delete-before', 'delete-excess'])
     expect(adapter.putMany).toHaveBeenCalledWith(records)
     expect(adapter.deleteBefore).toHaveBeenCalledWith('2026-07-09T11:59:30.000Z')
     expect(adapter.deleteExcessRecords).toHaveBeenCalledWith(1)

@@ -50,11 +50,11 @@ describe('DNS observation store', () => {
     expect(store.snapshot().transports).toHaveLength(1)
     const result = store.pushRecords([transportRecord(2), transportRecord(3)])
 
-    expect(store.snapshot().transports.map((observation) => observation.clientIp)).toEqual([
+    expect(store.snapshot().transports.map((observation) => observation.clientIp)).toStrictEqual([
       '10.1.0.3',
       '10.1.0.2',
     ])
-    expect(result.evictedEntryIds).toEqual([])
+    expect(result.evictedEntryIds).toStrictEqual([])
     expect(result.evictedTransportIds).toHaveLength(1)
   })
 
@@ -101,7 +101,7 @@ describe('DNS observation store', () => {
     store.pushRecords([delivered, delivered, distinctDelivery])
 
     expect(store.snapshot().transports).toHaveLength(2)
-    expect(new Set(store.snapshot().transports.map((observation) => observation.id))).toEqual(
+    expect(new Set(store.snapshot().transports.map((observation) => observation.id))).toStrictEqual(
       new Set([delivered.dns?.id, distinctDelivery.dns?.id]),
     )
   })
@@ -113,7 +113,7 @@ describe('DNS observation store', () => {
 
     store.pushRecords([newerTransport, olderTransport])
 
-    expect(store.snapshot().transports.map((observation) => observation.id)).toEqual([
+    expect(store.snapshot().transports.map((observation) => observation.id)).toStrictEqual([
       newerTransport.dns?.id,
       olderTransport.dns?.id,
     ])

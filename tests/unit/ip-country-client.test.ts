@@ -26,7 +26,7 @@ describe('IP country client', () => {
     await vi.advanceTimersByTimeAsync(50)
 
     expect(request).toHaveBeenCalledOnce()
-    expect(request.mock.calls[0]?.[0]).toEqual({ ips: ['8.8.8.8', '1.1.1.1'] })
+    expect(request.mock.calls[0]?.[0]).toStrictEqual({ ips: ['8.8.8.8', '1.1.1.1'] })
     expect(client.getCountryCode('8.8.8.8')).toBe('DE')
     client.dispose()
   })
@@ -93,10 +93,12 @@ describe('IP country client', () => {
     const request = vi.fn<LookupRequest>(async ({ ips }) => createResponse(ips, null))
     const client = createIpCountryLookupClient(request, { cacheSize: 2 })
 
-    for (const ip of ['1.1.1.1', '8.8.8.8', '9.9.9.9']) {
-      client.queue(ip)
-      await vi.advanceTimersByTimeAsync(50)
-    }
+    client.queue('1.1.1.1')
+    await vi.advanceTimersByTimeAsync(50)
+    client.queue('8.8.8.8')
+    await vi.advanceTimersByTimeAsync(50)
+    client.queue('9.9.9.9')
+    await vi.advanceTimersByTimeAsync(50)
 
     expect(client.getCountryCode('1.1.1.1')).toBeUndefined()
     expect(client.getCountryCode('8.8.8.8')).toBeNull()
@@ -136,7 +138,7 @@ describe('IP country client', () => {
   })
 
   it('fails closed without retrying malformed successful responses', async () => {
-    const request = vi.fn(async () => ({}))
+    const request = vi.fn<LookupRequest>(async () => ({}))
     const client = createIpCountryLookupClient(request)
 
     client.queue('8.8.8.8')
@@ -150,7 +152,7 @@ describe('IP country client', () => {
   })
 
   it('ignores unknown results and negatively caches missing or invalid countries', async () => {
-    const request = vi.fn(async () => ({
+    const request = vi.fn<LookupRequest>(async () => ({
       results: [
         { ip: '203.0.113.1', countryCode: 'US' },
         { ip: '8.8.8.8', countryCode: 'invalid' },
@@ -169,7 +171,7 @@ describe('IP country client', () => {
   })
 
   it('disables session after unavailable response', async () => {
-    const request = vi.fn(async () => {
+    const request = vi.fn<LookupRequest>(async () => {
       throw Object.assign(new Error('IP country lookup unavailable'), { statusCode: 503 })
     })
     const client = createIpCountryLookupClient(request)
@@ -184,7 +186,7 @@ describe('IP country client', () => {
   })
 
   it('disables session after a permanent client error', async () => {
-    const request = vi.fn(async () => {
+    const request = vi.fn<LookupRequest>(async () => {
       throw Object.assign(new Error('Invalid IP country lookup request'), { statusCode: 400 })
     })
     const client = createIpCountryLookupClient(request)
@@ -235,13 +237,13 @@ describe('IP country client', () => {
     await vi.advanceTimersByTimeAsync(150)
 
     expect(request).toHaveBeenCalledTimes(2)
-    expect(request.mock.calls[1]?.[0]).toEqual({ ips: ['3.3.3.3', '4.4.4.4'] })
+    expect(request.mock.calls[1]?.[0]).toStrictEqual({ ips: ['3.3.3.3', '4.4.4.4'] })
     client.dispose()
   })
 
   it('aborts active request when disposed', async () => {
     let signal: AbortSignal | undefined
-    const request = vi.fn(async (_body, nextSignal: AbortSignal) => {
+    const request = vi.fn<LookupRequest>(async (_body, nextSignal: AbortSignal) => {
       signal = nextSignal
       return await new Promise<IpCountryLookupResponse>(() => {})
     })
@@ -256,7 +258,7 @@ describe('IP country client', () => {
 
   it('aborts and drops pending lookup work while its pane is inactive', async () => {
     let signal: AbortSignal | undefined
-    const request = vi.fn(async (_body, nextSignal: AbortSignal) => {
+    const request = vi.fn<LookupRequest>(async (_body, nextSignal: AbortSignal) => {
       signal = nextSignal
       return await new Promise<IpCountryLookupResponse>((_resolve, reject) => {
         nextSignal.addEventListener('abort', () => {

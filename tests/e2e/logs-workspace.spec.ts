@@ -378,7 +378,7 @@ test('keeps recent logs visible when delayed batches exceed the display and raw 
   await expect(status.locator('time')).toHaveText('10m ago')
 
   let received = 2
-  for (const batchSize of [100, 1_000]) {
+  async function receiveBatchAndFilter(batchSize: number) {
     const receivedBeforeBatch = received
     await enqueueManagedEventHubEnvelope(page, {
       type: 'events',
@@ -399,6 +399,8 @@ test('keeps recent logs visible when delayed batches exceed the display and raw 
     await page.getByRole('textbox', { name: 'Source address', exact: true }).fill('')
     await expect(newestRow).toBeVisible()
   }
+  await receiveBatchAndFilter(100)
+  await receiveBatchAndFilter(1_000)
 
   await newestRow.getByRole('gridcell').first().click()
   const detail = page.getByRole('dialog', { name: 'Log detail' })
@@ -709,7 +711,7 @@ test('renders application-rule FQDN destinations and full category names', async
   await expect(structuredRow.getByTitle('Internet-Access', { exact: true })).toBeVisible()
 
   await page.locator('summary').filter({ hasText: 'Categories' }).click()
-  for (const category of ['Application rules', 'AzureFirewallApplicationRule']) {
+  async function expectCategoryFits(category: string) {
     const categoryFields = page.getByRole('group', { name: 'Categories', exact: true })
     await expect(
       categoryFields.getByRole('checkbox', { name: category, exact: true }),
@@ -722,6 +724,8 @@ test('renders application-rule FQDN destinations and full category names', async
       )
       .toBe(true)
   }
+  await expectCategoryFits('Application rules')
+  await expectCategoryFits('AzureFirewallApplicationRule')
 })
 
 test.describe('time display preferences', () => {

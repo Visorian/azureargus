@@ -5,7 +5,7 @@ import { FIREWALL_SIMULATOR_EXAMPLE } from '../../app/utils/firewallSimulatorExa
 import type { FirewallJsonObject } from '../../shared/types/firewallSimulator'
 import { mockTemporaryAzure } from './support/temporaryAzure'
 
-const COPY_COMMAND_PATTERN = /^Copy command/
+const COPY_COMMAND_PATTERN = /^Copy command/u
 const policyScope =
   '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example/providers/Microsoft.Network/firewallPolicies'
 

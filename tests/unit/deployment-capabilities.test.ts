@@ -37,7 +37,7 @@ function parse(runtimeConfig: unknown) {
 
 describe('deployment capabilities', () => {
   it('uses anonymous mode when all data-source configuration is absent', () => {
-    expect(parse({})).toEqual({
+    expect(parse({})).toStrictEqual({
       mode: 'anonymous',
       eventHubAvailable: false,
       predefinedLogAnalyticsAvailable: false,
@@ -55,7 +55,7 @@ describe('deployment capabilities', () => {
           },
         },
       }),
-    ).toEqual({
+    ).toStrictEqual({
       mode: 'anonymous',
       eventHubAvailable: false,
       predefinedLogAnalyticsAvailable: false,

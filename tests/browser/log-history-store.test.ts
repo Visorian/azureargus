@@ -48,9 +48,9 @@ test('browser log history store queries, limits, deletes, and clears records', a
   await clearLogHistory()
   const afterClear = await queryLogHistoryRange({ limit: 10 })
 
-  expect(afterCountPrune.map((record) => record.id)).toEqual(['newest', 'middle'])
-  expect(limitedRange.map((record) => record.id)).toEqual(['newest'])
+  expect(afterCountPrune.map((record) => record.id)).toStrictEqual(['newest', 'middle'])
+  expect(limitedRange.map((record) => record.id)).toStrictEqual(['newest'])
   expect(deletedCount).toBe(1)
-  expect(afterDelete.map((record) => record.id)).toEqual(['newest'])
-  expect(afterClear).toEqual([])
+  expect(afterDelete.map((record) => record.id)).toStrictEqual(['newest'])
+  expect(afterClear).toStrictEqual([])
 })

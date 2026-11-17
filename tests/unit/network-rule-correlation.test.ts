@@ -153,7 +153,7 @@ describe('network rule correlator', () => {
     structuredFirst.correlator.push([pair.structured])
     vi.advanceTimersByTime(100)
     structuredFirst.correlator.push([pair.legacy])
-    expect(structuredFirst.batches).toEqual([[pair.structured]])
+    expect(structuredFirst.batches).toStrictEqual([[pair.structured]])
     structuredFirst.correlator.clear()
 
     vi.setSystemTime(0)
@@ -161,7 +161,7 @@ describe('network rule correlator', () => {
     legacyFirst.correlator.push([pair.legacy])
     vi.advanceTimersByTime(100)
     legacyFirst.correlator.push([pair.structured])
-    expect(legacyFirst.batches).toEqual([[pair.structured]])
+    expect(legacyFirst.batches).toStrictEqual([[pair.structured]])
     legacyFirst.correlator.clear()
   })
 
@@ -171,10 +171,10 @@ describe('network rule correlator', () => {
     const { batches, correlator } = createCorrelator()
 
     correlator.push([udp, icmp])
-    expect(batches).toEqual([])
+    expect(batches).toStrictEqual([])
     vi.advanceTimersByTime(NETWORK_RULE_CORRELATION_WINDOW_MS)
 
-    expect(batches).toEqual([[udp, icmp]])
+    expect(batches).toStrictEqual([[udp, icmp]])
     correlator.clear()
   })
 
@@ -186,7 +186,7 @@ describe('network rule correlator', () => {
     vi.setSystemTime(NETWORK_RULE_CORRELATION_WINDOW_MS)
     correlator.push([pair.structured])
 
-    expect(batches).toEqual([[pair.legacy, pair.structured]])
+    expect(batches).toStrictEqual([[pair.legacy, pair.structured]])
     correlator.clear()
   })
 
@@ -199,14 +199,14 @@ describe('network rule correlator', () => {
     correlator.push([pair.structured, structuredDuplicate])
     correlator.push([pair.legacy, legacyDuplicate])
 
-    expect(batches).toEqual([[pair.structured, structuredDuplicate]])
+    expect(batches).toStrictEqual([[pair.structured, structuredDuplicate]])
     correlator.clear()
 
     const excessLegacy = createCorrelator()
     excessLegacy.correlator.push([pair.legacy, legacyDuplicate])
     excessLegacy.correlator.push([pair.structured])
     vi.advanceTimersByTime(NETWORK_RULE_CORRELATION_WINDOW_MS)
-    expect(excessLegacy.batches).toEqual([[pair.structured], [legacyDuplicate]])
+    expect(excessLegacy.batches).toStrictEqual([[pair.structured], [legacyDuplicate]])
     excessLegacy.correlator.clear()
   })
 
@@ -218,7 +218,7 @@ describe('network rule correlator', () => {
 
     correlator.push([application, incomplete])
 
-    expect(batches).toEqual([[application, incomplete]])
+    expect(batches).toStrictEqual([[application, incomplete]])
     correlator.clear()
   })
 
@@ -229,10 +229,10 @@ describe('network rule correlator', () => {
 
     correlator.push([first])
     correlator.push([second])
-    expect(batches).toEqual([[first]])
+    expect(batches).toStrictEqual([[first]])
 
     correlator.flush()
-    expect(batches).toEqual([[first], [second]])
+    expect(batches).toStrictEqual([[first], [second]])
   })
 
   it('discards oldest structured credit on overflow without losing later legacy', () => {
@@ -245,7 +245,7 @@ describe('network rule correlator', () => {
     correlator.push([first.legacy])
     correlator.flush()
 
-    expect(batches).toEqual([[first.structured], [second.structured], [first.legacy]])
+    expect(batches).toStrictEqual([[first.structured], [second.structured], [first.legacy]])
   })
 
   it('applies reduced candidate capacity on next batch', () => {
@@ -267,7 +267,7 @@ describe('network rule correlator', () => {
     correlator.push([second.legacy])
     correlator.flush()
 
-    expect(batches).toEqual([[second.structured], [first.legacy, passthrough]])
+    expect(batches).toStrictEqual([[second.structured], [first.legacy, passthrough]])
   })
 
   it('disables holding at zero capacity without dropping records', () => {
@@ -276,7 +276,7 @@ describe('network rule correlator', () => {
 
     correlator.push([pair.legacy, pair.structured])
 
-    expect(batches).toEqual([[pair.legacy, pair.structured]])
+    expect(batches).toStrictEqual([[pair.legacy, pair.structured]])
     correlator.clear()
   })
 
@@ -286,13 +286,13 @@ describe('network rule correlator', () => {
     flushed.correlator.push([pair.legacy])
     flushed.correlator.flush()
     vi.advanceTimersByTime(NETWORK_RULE_CORRELATION_WINDOW_MS)
-    expect(flushed.batches).toEqual([[pair.legacy]])
+    expect(flushed.batches).toStrictEqual([[pair.legacy]])
 
     const cleared = createCorrelator()
     cleared.correlator.push([pair.legacy])
     cleared.correlator.clear()
     vi.advanceTimersByTime(NETWORK_RULE_CORRELATION_WINDOW_MS)
-    expect(cleared.batches).toEqual([])
+    expect(cleared.batches).toStrictEqual([])
   })
 
   it('ignores stale scheduled callback after clear', () => {
@@ -319,6 +319,6 @@ describe('network rule correlator', () => {
     correlator.clear()
     scheduledCallback?.()
 
-    expect(batches).toEqual([])
+    expect(batches).toStrictEqual([])
   })
 })

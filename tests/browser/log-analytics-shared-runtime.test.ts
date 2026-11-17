@@ -147,7 +147,7 @@ test('shared query maps Azure response and hashes DNS identities with Web Crypto
     queryId: 'browser',
   })
 
-  expect(result.records).toEqual([
+  expect(result.records).toStrictEqual([
     expect.objectContaining({ id: 'browser:0:0', message: 'Allow TCP' }),
   ])
 })

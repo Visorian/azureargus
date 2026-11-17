@@ -33,7 +33,7 @@ describe('Event Hub connection helpers', () => {
     const form = createInitialEventHubConnectionForm()
     form.connectionString = 'Endpoint=sb://example.servicebus.windows.net/'
 
-    expect(validateEventHubConnectionForm(form)).toEqual([
+    expect(validateEventHubConnectionForm(form)).toStrictEqual([
       'Connection string must include SharedAccessKeyName.',
       'Connection string must include SharedAccessKey.',
       'Event Hub name is required when EntityPath is not present.',

@@ -6,10 +6,10 @@ const eventHubOnlyDeploymentUrl =
   'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy-event-hub-only.json'
 const eventHubWithDiagnosticsDeploymentUrl =
   'https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FVisorian%2Fazureargus%2Fmain%2Finfrastructure%2Fevent-hub%2Fazuredeploy.json'
-const LOGS_URL_PATTERN = /\/logs/
-const LOGIN_URL_PATTERN = /\/login/
-const DARK_CLASS_PATTERN = /dark/
-const VISIBLE_RECEIVED_PATTERN = /visible \/ .*received/
+const LOGS_URL_PATTERN = /\/logs/u
+const LOGIN_URL_PATTERN = /\/login/u
+const DARK_CLASS_PATTERN = /dark/u
+const VISIBLE_RECEIVED_PATTERN = /visible \/ .*received/u
 
 test('anonymous deployment bypasses application login', async ({ page }) => {
   await page.goto('/login')
