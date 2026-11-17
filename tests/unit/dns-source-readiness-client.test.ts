@@ -69,7 +69,7 @@ describe('DNS source readiness client', () => {
 
     expect(request).toHaveBeenCalledOnce()
     expect(request).toHaveBeenCalledWith({ mode: 'managed' }, expect.any(AbortSignal))
-    expect(readiness.readiness.value).toEqual(response(2).readiness)
+    expect(readiness.readiness.value).toStrictEqual(response(2).readiness)
     scope.stop()
   })
 
@@ -110,7 +110,7 @@ describe('DNS source readiness client', () => {
     await vi.waitFor(() => {
       expect(readiness.status.value).toBe('success')
     })
-    expect(readiness.readiness.value).toEqual(response(2).readiness)
+    expect(readiness.readiness.value).toStrictEqual(response(2).readiness)
     scope.stop()
   })
 
@@ -138,7 +138,7 @@ describe('DNS source readiness client', () => {
 
     expect(signal?.aborted).toBe(true)
     expect(readiness.status.value).toBe('idle')
-    expect(readiness.readiness.value).toEqual([])
+    expect(readiness.readiness.value).toStrictEqual([])
     scope.stop()
   })
 
@@ -157,7 +157,7 @@ describe('DNS source readiness client', () => {
     await vi.waitFor(() => {
       expect(readiness.status.value).toBe('success')
     })
-    expect(readiness.readiness.value).toEqual(storageResponse().readiness)
+    expect(readiness.readiness.value).toStrictEqual(storageResponse().readiness)
 
     target.value = {
       mode: 'delegated',
@@ -167,7 +167,7 @@ describe('DNS source readiness client', () => {
     await nextTick()
 
     expect(readiness.status.value).toBe('loading')
-    expect(readiness.readiness.value).toEqual([])
+    expect(readiness.readiness.value).toStrictEqual([])
     next.resolve(response(0))
     await vi.waitFor(() => {
       expect(readiness.status.value).toBe('success')

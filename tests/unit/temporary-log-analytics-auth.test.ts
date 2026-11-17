@@ -1,67 +1,62 @@
+import { BrowserCacheLocation, EventType, InteractionRequiredAuthError } from '@azure/msal-browser'
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 
-const msal = vi.hoisted(() => {
-  interface AuthEvent {
-    eventType: string
-    payload: unknown
+import type {
+  CreateTemporaryAuthClient,
+  TemporaryAuthClient,
+} from '../../app/composables/useTemporaryLogAnalyticsAuth'
+
+type AuthEventCallback = Parameters<TemporaryAuthClient['addEventCallback']>[0]
+type AuthResult = Awaited<ReturnType<TemporaryAuthClient['loginPopup']>>
+interface AuthEvent {
+  eventType: EventType
+  payload: unknown
+}
+
+function createMsalFake() {
+  const eventCallbacks = new Set<{ callback: AuthEventCallback; eventTypes?: EventType[] }>()
+  const client = {
+    acquireTokenPopup: vi.fn<TemporaryAuthClient['acquireTokenPopup']>(),
+    acquireTokenSilent: vi.fn<TemporaryAuthClient['acquireTokenSilent']>(),
+    addEventCallback: vi.fn<TemporaryAuthClient['addEventCallback']>((callback, eventTypes) => {
+      eventCallbacks.add({ callback, eventTypes })
+      return 'temporary-auth-event-callback'
+    }),
+    clearCache: vi.fn<TemporaryAuthClient['clearCache']>(),
+    initialize: vi.fn<TemporaryAuthClient['initialize']>(),
+    loginPopup: vi.fn<TemporaryAuthClient['loginPopup']>(),
+    removeEventCallback: vi.fn<TemporaryAuthClient['removeEventCallback']>(() => {
+      eventCallbacks.clear()
+    }),
   }
-  const eventCallbacks = new Set<(event: AuthEvent) => void>()
-  const addEventCallback = vi.fn<(callback: (event: AuthEvent) => void) => string>((callback) => {
-    eventCallbacks.add(callback)
-    return 'temporary-auth-event-callback'
-  })
-  const clearCache = vi.fn()
-  const initialize = vi.fn()
-  const loginPopup = vi.fn()
-  const acquireTokenPopup = vi.fn()
-  const acquireTokenSilent = vi.fn()
-  const removeEventCallback = vi.fn<(callbackId: string) => void>(() => {
-    eventCallbacks.clear()
-  })
-  // oxlint-disable-next-line eslint/prefer-arrow-callback -- PublicClientApplication is instantiated with `new`, which arrow functions do not support
-  const constructor = vi.fn(function () {
-    return {
-      acquireTokenPopup,
-      acquireTokenSilent,
-      addEventCallback,
-      clearCache,
-      initialize,
-      loginPopup,
-      removeEventCallback,
-    }
-  })
 
   return {
-    acquireTokenPopup,
-    acquireTokenSilent,
-    addEventCallback,
-    clearCache,
-    constructor,
+    ...client,
+    createClient: vi.fn<CreateTemporaryAuthClient>(async () => client),
+    // Like MSAL, deliver an event only to callbacks registered for its type.
     emitEvent(event: AuthEvent) {
-      for (const callback of eventCallbacks) {
-        callback(event)
+      for (const { callback, eventTypes } of eventCallbacks) {
+        if (eventTypes === undefined || eventTypes.includes(event.eventType)) {
+          callback(event)
+        }
       }
     },
     eventCallbacks,
-    initialize,
-    loginPopup,
-    removeEventCallback,
   }
-})
+}
 
-const MockInteractionRequiredAuthError = vi.hoisted(() => class extends Error {})
+const msal = createMsalFake()
 
-vi.mock('@azure/msal-browser', () => ({
-  BrowserCacheLocation: { MemoryStorage: 'MemoryStorage' },
-  EventType: { POPUP_OPENED: 'msal:popupOpened' },
-  InteractionRequiredAuthError: MockInteractionRequiredAuthError,
-  PublicClientApplication: msal.constructor,
-}))
+function createInteractionRequiredError() {
+  return new InteractionRequiredAuthError('interaction_required', 'test-correlation-id')
+}
 
 const tenantId = '22222222-2222-4222-8222-222222222222'
 const account = {
+  environment: 'login.microsoftonline.com',
   homeAccountId: 'temporary-user',
+  localAccountId: 'temporary-user',
   tenantId,
   username: 'user@example.com',
 }
@@ -72,7 +67,7 @@ async function createAuth() {
   vi.resetModules()
   const { useTemporaryLogAnalyticsAuth } =
     await import('../../app/composables/useTemporaryLogAnalyticsAuth')
-  return useTemporaryLogAnalyticsAuth()
+  return useTemporaryLogAnalyticsAuth({ createClient: msal.createClient })
 }
 
 function createDeferred<T>() {
@@ -86,7 +81,7 @@ beforeEach(() => {
   msal.acquireTokenSilent.mockReset()
   msal.acquireTokenPopup.mockReset()
   msal.clearCache.mockReset().mockResolvedValue(undefined)
-  msal.constructor.mockClear()
+  msal.createClient.mockClear()
   msal.initialize.mockReset().mockResolvedValue(undefined)
   msal.loginPopup.mockReset().mockResolvedValue({
     accessToken: 'management-login-token',
@@ -122,7 +117,11 @@ afterEach(() => {
 
 describe('temporary Log Analytics authentication', () => {
   it('rejects a sign-in result without a valid tenant', async () => {
-    msal.loginPopup.mockResolvedValue({ account: { ...account, tenantId: '' } })
+    msal.loginPopup.mockResolvedValue({
+      accessToken: 'management-login-token',
+      account: { ...account, tenantId: '' },
+      tenantId: '',
+    })
     const auth = await createAuth()
 
     await expect(auth.connect()).resolves.toBeNull()
@@ -135,7 +134,7 @@ describe('temporary Log Analytics authentication', () => {
   it('derives tenant from organization login backed by MSAL memory storage', async () => {
     const auth = await createAuth()
 
-    await expect(auth.connect()).resolves.toEqual({
+    await expect(auth.connect()).resolves.toStrictEqual({
       accessToken: 'management-login-token',
       tenantId,
       username: 'user@example.com',
@@ -146,10 +145,10 @@ describe('temporary Log Analytics authentication', () => {
       authority: 'https://login.microsoftonline.com/organizations',
       redirectUri: 'https://argus.example.com/log-analytics-redirect.html',
     })
-    expect(msal.constructor).toHaveBeenCalledWith(
+    expect(msal.createClient).toHaveBeenCalledWith(
       expect.objectContaining({
         auth: expectedAuth,
-        cache: { cacheLocation: 'MemoryStorage' },
+        cache: { cacheLocation: BrowserCacheLocation.MemoryStorage },
       }),
     )
     expect(msal.loginPopup).toHaveBeenCalledWith({
@@ -165,11 +164,7 @@ describe('temporary Log Analytics authentication', () => {
 
   it('accepts a sign-in result delivered after the popup closes', async () => {
     vi.useFakeTimers()
-    const popup = createDeferred<{
-      account: typeof account
-      accessToken: string
-      tenantId: string
-    }>()
+    const popup = createDeferred<AuthResult>()
     msal.loginPopup.mockReturnValueOnce(popup.promise)
     const auth = await createAuth()
 
@@ -178,14 +173,14 @@ describe('temporary Log Analytics authentication', () => {
       expect(msal.loginPopup).toHaveBeenCalledOnce()
     })
     const popupWindow = { closed: false }
-    msal.emitEvent({ eventType: 'msal:popupOpened', payload: { popupWindow } })
+    msal.emitEvent({ eventType: EventType.POPUP_OPENED, payload: { popupWindow } })
     popupWindow.closed = true
     await vi.advanceTimersByTimeAsync(500)
 
     expect(auth.status.value).toBe('idle')
     expect(auth.lastError.value).toBeNull()
     popup.resolve({ account, accessToken: 'management-login-token', tenantId })
-    await expect(connection).resolves.toEqual({
+    await expect(connection).resolves.toStrictEqual({
       accessToken: 'management-login-token',
       tenantId,
       username: 'user@example.com',
@@ -198,11 +193,7 @@ describe('temporary Log Analytics authentication', () => {
 
   it('allows retry while a closed popup is still awaiting its bridge timeout', async () => {
     vi.useFakeTimers()
-    const firstPopup = createDeferred<{
-      account: typeof account
-      accessToken: string
-      tenantId: string
-    }>()
+    const firstPopup = createDeferred<AuthResult>()
     msal.loginPopup.mockReturnValueOnce(firstPopup.promise).mockResolvedValueOnce({
       accessToken: 'retried-management-token',
       account,
@@ -215,13 +206,13 @@ describe('temporary Log Analytics authentication', () => {
       expect(msal.loginPopup).toHaveBeenCalledOnce()
     })
     const popupWindow = { closed: false }
-    msal.emitEvent({ eventType: 'msal:popupOpened', payload: { popupWindow } })
+    msal.emitEvent({ eventType: EventType.POPUP_OPENED, payload: { popupWindow } })
     popupWindow.closed = true
     await vi.advanceTimersByTimeAsync(500)
 
     expect(auth.status.value).toBe('idle')
     const retriedConnection = auth.connect()
-    await expect(retriedConnection).resolves.toEqual({
+    await expect(retriedConnection).resolves.toStrictEqual({
       accessToken: 'retried-management-token',
       tenantId,
       username: 'user@example.com',
@@ -240,7 +231,7 @@ describe('temporary Log Analytics authentication', () => {
 
   it('returns a silently renewed token without copying it into Nuxt state', async () => {
     const token = 'delegated-access-token'
-    msal.acquireTokenSilent.mockResolvedValue({ accessToken: token, account })
+    msal.acquireTokenSilent.mockResolvedValue({ accessToken: token, account, tenantId })
     const auth = await createAuth()
     await auth.connect()
 
@@ -253,7 +244,7 @@ describe('temporary Log Analytics authentication', () => {
     })
     await expect(auth.getAccessToken(tenantId)).resolves.toBe(token)
     expect(msal.acquireTokenSilent).toHaveBeenCalledTimes(2)
-    expect([...state.entries()]).toEqual([
+    expect([...state.entries()]).toStrictEqual([
       ['temporary-log-analytics-connected', expect.objectContaining({ value: true })],
       ['temporary-log-analytics-status', expect.objectContaining({ value: 'connected' })],
       ['temporary-log-analytics-authorized', expect.objectContaining({ value: true })],
@@ -263,7 +254,7 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('detects cached Log Analytics permission silently', async () => {
-    msal.acquireTokenSilent.mockResolvedValue({ accessToken: 'cached-token', account })
+    msal.acquireTokenSilent.mockResolvedValue({ accessToken: 'cached-token', account, tenantId })
     const auth = await createAuth()
     await auth.connect()
 
@@ -275,7 +266,7 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('leaves interactive authorization available when silent permission is required', async () => {
-    msal.acquireTokenSilent.mockRejectedValue(new MockInteractionRequiredAuthError())
+    msal.acquireTokenSilent.mockRejectedValue(createInteractionRequiredError())
     const auth = await createAuth()
     await auth.connect()
 
@@ -342,8 +333,8 @@ describe('temporary Log Analytics authentication', () => {
   it('ignores a stale directory token result after a newer directory is selected', async () => {
     const firstTenantId = '33333333-3333-4333-8333-333333333333'
     const secondTenantId = '44444444-4444-4444-8444-444444444444'
-    const first = createDeferred<{ accessToken: string; account: typeof account }>()
-    const second = createDeferred<{ accessToken: string; account: typeof account }>()
+    const first = createDeferred<AuthResult>()
+    const second = createDeferred<AuthResult>()
     msal.acquireTokenSilent.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
     const auth = await createAuth()
     await auth.connect()
@@ -353,14 +344,20 @@ describe('temporary Log Analytics authentication', () => {
     second.resolve({
       accessToken: 'second-token',
       account: { ...account, tenantId: secondTenantId },
+      tenantId: secondTenantId,
     })
     await expect(secondRequest).resolves.toBe('second-token')
-    first.resolve({ accessToken: 'first-token', account: { ...account, tenantId: firstTenantId } })
+    first.resolve({
+      accessToken: 'first-token',
+      account: { ...account, tenantId: firstTenantId },
+      tenantId: firstTenantId,
+    })
     await expect(firstRequest).rejects.toBeInstanceOf(Error)
 
     msal.acquireTokenSilent.mockResolvedValue({
       accessToken: 'query-token',
       account: { ...account, tenantId: secondTenantId },
+      tenantId: secondTenantId,
     })
     await expect(auth.getAccessToken(secondTenantId)).resolves.toBe('query-token')
     expect(msal.acquireTokenSilent).toHaveBeenLastCalledWith(
@@ -371,8 +368,8 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('uses popup fallback only for an explicitly interactive token request', async () => {
-    msal.acquireTokenSilent.mockRejectedValue(new MockInteractionRequiredAuthError())
-    msal.acquireTokenPopup.mockResolvedValue({ accessToken: 'popup-token' })
+    msal.acquireTokenSilent.mockRejectedValue(createInteractionRequiredError())
+    msal.acquireTokenPopup.mockResolvedValue({ accessToken: 'popup-token', account, tenantId })
     const auth = await createAuth()
     await auth.connect()
 
@@ -403,14 +400,14 @@ describe('temporary Log Analytics authentication', () => {
     const auth = await createAuth()
 
     await expect(auth.connect()).resolves.toBeNull()
-    await expect(auth.connect()).resolves.toEqual(expect.objectContaining({ tenantId }))
+    await expect(auth.connect()).resolves.toStrictEqual(expect.objectContaining({ tenantId }))
 
-    expect(msal.constructor).toHaveBeenCalledTimes(2)
+    expect(msal.createClient).toHaveBeenCalledTimes(2)
     expect(auth.connected.value).toBe(true)
   })
 
   it('preserves Azure connection when interactive Log Analytics authorization fails', async () => {
-    msal.acquireTokenSilent.mockRejectedValue(new MockInteractionRequiredAuthError())
+    msal.acquireTokenSilent.mockRejectedValue(createInteractionRequiredError())
     msal.acquireTokenPopup.mockRejectedValue(new Error('popup closed'))
     const auth = await createAuth()
     await auth.connect()
@@ -424,7 +421,7 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('does not open a popup for a non-interactive query token request', async () => {
-    msal.acquireTokenSilent.mockRejectedValue(new MockInteractionRequiredAuthError())
+    msal.acquireTokenSilent.mockRejectedValue(createInteractionRequiredError())
     const auth = await createAuth()
     await auth.connect()
 
@@ -437,7 +434,11 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('clears only the temporary account and local state on disconnect', async () => {
-    msal.acquireTokenSilent.mockResolvedValue({ accessToken: 'delegated-access-token', account })
+    msal.acquireTokenSilent.mockResolvedValue({
+      accessToken: 'delegated-access-token',
+      account,
+      tenantId,
+    })
     const auth = await createAuth()
     await auth.connect()
     await auth.getAccessToken(tenantId)
@@ -462,11 +463,7 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('does not restore authentication when popup resolves after disconnect', async () => {
-    const popup = createDeferred<{
-      account: typeof account
-      accessToken: string
-      tenantId: string
-    }>()
+    const popup = createDeferred<AuthResult>()
     msal.loginPopup.mockReturnValue(popup.promise)
     const auth = await createAuth()
 
@@ -483,8 +480,8 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('does not retain popup token when query preparation resolves after disconnect', async () => {
-    const popup = createDeferred<{ account: typeof account; accessToken: string }>()
-    msal.acquireTokenSilent.mockRejectedValue(new MockInteractionRequiredAuthError())
+    const popup = createDeferred<AuthResult>()
+    msal.acquireTokenSilent.mockRejectedValue(createInteractionRequiredError())
     msal.acquireTokenPopup.mockReturnValue(popup.promise)
     const auth = await createAuth()
     await auth.connect()
@@ -494,7 +491,7 @@ describe('temporary Log Analytics authentication', () => {
       expect(msal.acquireTokenPopup).toHaveBeenCalledOnce()
     })
     await auth.disconnect()
-    popup.resolve({ account, accessToken: 'late-token' })
+    popup.resolve({ account, accessToken: 'late-token', tenantId })
 
     await expect(preparing).rejects.toBeInstanceOf(Error)
     expect(auth.connected.value).toBe(false)
@@ -504,7 +501,7 @@ describe('temporary Log Analytics authentication', () => {
   })
 
   it('does not restore authorization when a silent check resolves after disconnect', async () => {
-    const token = createDeferred<{ account: typeof account; accessToken: string }>()
+    const token = createDeferred<AuthResult>()
     msal.acquireTokenSilent.mockReturnValue(token.promise)
     const auth = await createAuth()
     await auth.connect()
@@ -514,7 +511,7 @@ describe('temporary Log Analytics authentication', () => {
       expect(msal.acquireTokenSilent).toHaveBeenCalledOnce()
     })
     await auth.disconnect()
-    token.resolve({ account, accessToken: 'late-token' })
+    token.resolve({ account, accessToken: 'late-token', tenantId })
 
     await expect(checking).resolves.toBe(false)
     expect(auth.authorized.value).toBe(false)

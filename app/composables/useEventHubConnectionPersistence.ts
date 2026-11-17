@@ -7,10 +7,15 @@ import {
 } from '~/utils/eventHubConnectionStorage'
 import type { EventHubConnectionStorage } from '~/utils/eventHubConnectionStorage'
 
+export interface UseEventHubConnectionPersistenceReturn {
+  enabled: Ref<boolean>
+  lastError: Ref<string | null>
+}
+
 export function useEventHubConnectionPersistence(
   connectionString: Ref<string>,
   options: { active?: Readonly<Ref<boolean>> } = {},
-) {
+): UseEventHubConnectionPersistenceReturn {
   const enabled = ref(false)
   const lastError = ref<string | null>(null)
   const active = options.active ?? ref(true)

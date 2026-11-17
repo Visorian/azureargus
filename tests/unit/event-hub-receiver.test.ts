@@ -89,18 +89,18 @@ function createDuplicateNetworkRuleBodies() {
 function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unknown>>) {
   const logs = shallowRef<FirewallLogRecord[]>([])
   const snapshotVersion = shallowRef(0)
-  const pushMany = vi.fn((records: readonly FirewallLogRecord[]) => {
+  const pushMany = vi.fn<(records: readonly FirewallLogRecord[]) => void>((records) => {
     order.push('batch-flush')
     logs.value = [...records, ...logs.value]
   })
-  const historyFlush = vi.fn(async () => {
+  const historyFlush = vi.fn<() => Promise<void>>(async () => {
     order.push('history-flush')
   })
   const historyClear = vi.fn<() => Promise<boolean>>(async () => {
     order.push('history-clear')
     return true
   })
-  const queueRecords = vi.fn()
+  const queueRecords = vi.fn<(records: readonly FirewallLogRecord[]) => void>()
 
   vi.stubGlobal('useState', (key: string, initializer: () => unknown): Ref<unknown> => {
     const existing = stateCache?.get(key)
@@ -116,7 +116,7 @@ function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unk
   vi.stubGlobal('useBoundedLogBuffer', () => ({
     items: logs,
     pushMany,
-    flush: vi.fn(),
+    flush: vi.fn<() => void>(),
     getRawItems: () => logs.value,
     version: snapshotVersion,
     clear: () => {
@@ -126,7 +126,7 @@ function installNuxtMocks(order: string[] = [], stateCache?: Map<string, Ref<unk
   }))
   vi.stubGlobal('useLogHistoryPersistence', () => ({
     clearHistory: historyClear,
-    clearQueueIfDisabled: vi.fn(),
+    clearQueueIfDisabled: vi.fn<() => void>(),
     flush: historyFlush,
     queueRecords,
   }))
@@ -260,14 +260,14 @@ describe('Event Hub receiver helpers', () => {
 
     await expect(receiver.reset()).rejects.toThrow('history flush failed')
 
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(receiver.receivedCount.value).toBe(0)
-    expect(receiver.categoryOptions.value).toEqual([])
-    expect(receiver.actionOptions.value).toEqual([])
-    expect(receiver.protocolOptions.value).toEqual([])
+    expect(receiver.categoryOptions.value).toStrictEqual([])
+    expect(receiver.actionOptions.value).toStrictEqual([])
+    expect(receiver.protocolOptions.value).toStrictEqual([])
     expect(onClear).toHaveBeenCalledOnce()
     expect(receiver.status.value).toBe('idle')
-    expect(receiver.errors.value).toEqual(['history flush failed'])
+    expect(receiver.errors.value).toStrictEqual(['history flush failed'])
   })
 
   it('reconnects managed streams with resume positions and resets backoff on recovery', async () => {
@@ -293,7 +293,7 @@ describe('Event Hub receiver helpers', () => {
       ),
     )
     await vi.waitFor(() => {
-      expect(receiver.getResumeFrom()).toEqual({ '0': 42 })
+      expect(receiver.getResumeFrom()).toStrictEqual({ '0': 42 })
     })
 
     controllers[0]!.close()
@@ -306,7 +306,7 @@ describe('Event Hub receiver helpers', () => {
     })
     expect(receiver.status.value).toBe('connected')
     expect(receiver.errors.value).toStrictEqual([])
-    expect(JSON.parse(requestBody(managedFetch.mock.calls[1]?.[1]))).toEqual({
+    expect(JSON.parse(requestBody(managedFetch.mock.calls[1]?.[1]))).toStrictEqual({
       consumerGroup: '$Default',
       lookbackMinutes: 15,
       resumeFrom: { '0': 42 },
@@ -319,7 +319,7 @@ describe('Event Hub receiver helpers', () => {
       ),
     )
     await vi.waitFor(() => {
-      expect(receiver.getResumeFrom()).toEqual({ '0': 43 })
+      expect(receiver.getResumeFrom()).toStrictEqual({ '0': 43 })
     })
     controllers[1]!.close()
     await vi.waitFor(() => {
@@ -430,7 +430,7 @@ describe('Event Hub receiver helpers', () => {
     })
     expect(first.subscriptionClose).toHaveBeenCalledOnce()
     expect(first.close).toHaveBeenCalledOnce()
-    expect(clients[1]!.options.startPosition).toEqual({
+    expect(clients[1]!.options.startPosition).toStrictEqual({
       '0': { sequenceNumber: 10, isInclusive: false },
       '1': { enqueuedOn: anyDate },
     })
@@ -444,7 +444,7 @@ describe('Event Hub receiver helpers', () => {
     )
     await vi.advanceTimersByTimeAsync(100)
     expect(receiver.receivedCount.value).toBe(2)
-    expect(receiver.getResumeFrom()).toEqual({ '0': 11 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 11 })
 
     await receiver.disconnect()
   })
@@ -482,7 +482,7 @@ describe('Event Hub receiver helpers', () => {
       })
       expect(receiver.status.value).toBe(expectedStatus)
       expect(receiver.receivedCount.value).toBe(0)
-      expect(receiver.errors.value).toEqual([])
+      expect(receiver.errors.value).toStrictEqual([])
       receiver.clear()
       expect(receiver.caughtUp.value).toBe(true)
       await receiver.disconnect()
@@ -542,7 +542,7 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(100)
 
     expect(onRecords).toHaveBeenCalledOnce()
-    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+    expect(onRecords.mock.calls[0]?.[0]).toStrictEqual([
       expect.objectContaining({
         dns: networkRuleDnsMatcher,
         enqueuedTimeUtc: '2026-07-12T12:00:01.000Z',
@@ -600,13 +600,13 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(100)
 
     expect(onRecords).toHaveBeenCalledOnce()
-    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+    expect(onRecords.mock.calls[0]?.[0]).toStrictEqual([
       expect.objectContaining({ category: 'AZFWNetworkRule' }),
     ])
     expect(mocks.logs.value).toHaveLength(1)
     expect(mocks.queueRecords).toHaveBeenCalledOnce()
     expect(receiver.receivedCount.value).toBe(1)
-    expect(receiver.categoryOptions.value).toEqual(['AZFWNetworkRule'])
+    expect(receiver.categoryOptions.value).toStrictEqual(['AZFWNetworkRule'])
 
     await receiver.disconnect()
   })
@@ -668,13 +668,13 @@ describe('Event Hub receiver helpers', () => {
 
     await receiver.connect(createInitialEventHubConnectionForm(), 'managed')
     await vi.waitFor(() => {
-      expect(receiver.getResumeFrom()).toEqual({ '0': 5, '1': 3 })
+      expect(receiver.getResumeFrom()).toStrictEqual({ '0': 5, '1': 3 })
     })
     vi.advanceTimersByTime(100)
 
     expect(receiver.receivedCount.value).toBe(3)
     receiver.clear()
-    expect(receiver.getResumeFrom()).toEqual({ '0': 5, '1': 3 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 5, '1': 3 })
     await receiver.disconnect()
   })
 
@@ -703,7 +703,7 @@ describe('Event Hub receiver helpers', () => {
 
     expect(result.nextIndex).toBe(10)
     expect(new Set(result.records.map((log) => log.id)).size).toBe(3)
-    expect(result.records.map((log) => log.id)).toEqual([
+    expect(result.records.map((log) => log.id)).toStrictEqual([
       '0:10:0:2026-07-09T12:00:00.000Z:resource:unknown',
       '0:10:1:2026-07-09T12:00:01.000Z:resource:unknown',
       '0:11:0:2026-07-09T12:00:02.000Z:resource:unknown',
@@ -721,7 +721,7 @@ describe('Event Hub receiver helpers', () => {
       0,
     )
 
-    expect(result.records).toEqual([
+    expect(result.records).toStrictEqual([
       expect.objectContaining({
         timestamp: '2026-07-16T16:28:38.728Z',
         category: 'AzureFirewallDnsProxy',
@@ -772,7 +772,7 @@ describe('Event Hub receiver helpers', () => {
       0,
     )
 
-    expect(managed).toEqual(manual)
+    expect(managed).toStrictEqual(manual)
     expect(managed.records[0]).toMatchObject({
       applicationProperties: properties,
       enqueuedTimeUtc: '2026-07-12T12:00:01.000Z',
@@ -819,13 +819,13 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(100)
 
     expect(onRecords).toHaveBeenCalledOnce()
-    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+    expect(onRecords.mock.calls[0]?.[0]).toStrictEqual([
       expect.objectContaining({ category: 'AZFWNetworkRule' }),
     ])
     expect(mocks.logs.value).toHaveLength(1)
     expect(mocks.queueRecords).toHaveBeenCalledOnce()
     expect(receiver.receivedCount.value).toBe(1)
-    expect(receiver.categoryOptions.value).toEqual(['AZFWNetworkRule'])
+    expect(receiver.categoryOptions.value).toStrictEqual(['AZFWNetworkRule'])
 
     await receiver.disconnect()
   })
@@ -933,7 +933,7 @@ describe('Event Hub receiver helpers', () => {
     expect(onRecords).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(onRecords).toHaveBeenCalledOnce()
-    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+    expect(onRecords.mock.calls[0]?.[0]).toStrictEqual([
       expect.objectContaining({ category: 'AzureFirewallNetworkRule' }),
     ])
     expect(receiver.receivedCount.value).toBe(1)
@@ -948,7 +948,7 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(250)
 
     expect(onRecords).not.toHaveBeenCalled()
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(receiver.receivedCount.value).toBe(0)
     await receiver.disconnect()
   })
@@ -1035,22 +1035,22 @@ describe('Event Hub receiver helpers', () => {
 
     expect(mocks.logs.value).toHaveLength(1)
     expect(receiver.receivedCount.value).toBe(1)
-    expect(receiver.categoryOptions.value).toEqual(['AZFWNetworkRule'])
-    expect(receiver.actionOptions.value).toEqual(['Deny'])
-    expect(receiver.protocolOptions.value).toEqual(['TCP'])
-    expect(receiver.errors.value).toEqual(['source A error'])
-    expect(receiver.getResumeFrom()).toEqual({ '0': 7 })
+    expect(receiver.categoryOptions.value).toStrictEqual(['AZFWNetworkRule'])
+    expect(receiver.actionOptions.value).toStrictEqual(['Deny'])
+    expect(receiver.protocolOptions.value).toStrictEqual(['TCP'])
+    expect(receiver.errors.value).toStrictEqual(['source A error'])
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 7 })
 
     await receiver.connect(createValidForm())
 
     expect(clientCloses[0]).toHaveBeenCalledOnce()
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(receiver.receivedCount.value).toBe(0)
-    expect(receiver.categoryOptions.value).toEqual([])
-    expect(receiver.actionOptions.value).toEqual([])
-    expect(receiver.protocolOptions.value).toEqual([])
-    expect(receiver.errors.value).toEqual([])
-    expect(receiver.getResumeFrom()).toEqual({})
+    expect(receiver.categoryOptions.value).toStrictEqual([])
+    expect(receiver.actionOptions.value).toStrictEqual([])
+    expect(receiver.protocolOptions.value).toStrictEqual([])
+    expect(receiver.errors.value).toStrictEqual([])
+    expect(receiver.getResumeFrom()).toStrictEqual({})
     expect(mocks.historyClear).toHaveBeenCalledTimes(2)
 
     await requireHandlers(handlers[1]).processEvents(
@@ -1068,7 +1068,7 @@ describe('Event Hub receiver helpers', () => {
     )
     vi.advanceTimersByTime(100)
 
-    expect(mocks.logs.value).toEqual([
+    expect(mocks.logs.value).toStrictEqual([
       expect.objectContaining({
         category: 'AZFWApplicationRule',
         action: 'Allow',
@@ -1076,7 +1076,7 @@ describe('Event Hub receiver helpers', () => {
       }),
     ])
     expect(receiver.receivedCount.value).toBe(1)
-    expect(receiver.getResumeFrom()).toEqual({ '0': 1 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 1 })
     await receiver.disconnect()
   })
 
@@ -1119,14 +1119,17 @@ describe('Event Hub receiver helpers', () => {
     await expect(receiver.connect(createValidForm())).resolves.toBe(false)
 
     expect(createClient).toHaveBeenCalledOnce()
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(receiver.receivedCount.value).toBe(0)
-    expect(receiver.categoryOptions.value).toEqual([])
-    expect(receiver.actionOptions.value).toEqual([])
-    expect(receiver.protocolOptions.value).toEqual([])
-    expect(receiver.getResumeFrom()).toEqual({})
+    expect(receiver.categoryOptions.value).toStrictEqual([])
+    expect(receiver.actionOptions.value).toStrictEqual([])
+    expect(receiver.protocolOptions.value).toStrictEqual([])
+    expect(receiver.getResumeFrom()).toStrictEqual({})
     expect(mocks.historyClear).toHaveBeenCalledTimes(2)
-    expect(receiver.errors.value).toEqual(['subscription close failed', 'client close failed'])
+    expect(receiver.errors.value).toStrictEqual([
+      'subscription close failed',
+      'client close failed',
+    ])
     expect(receiver.status.value).toBe('error')
   })
 
@@ -1141,14 +1144,16 @@ describe('Event Hub receiver helpers', () => {
 
     expect(loadClientFactory).not.toHaveBeenCalled()
     expect(receiver.status.value).toBe('error')
-    expect(receiver.errors.value).toEqual(['Stored Event Hub history could not be cleared.'])
+    expect(receiver.errors.value).toStrictEqual(['Stored Event Hub history could not be cleared.'])
   })
 
   it('does not create or subscribe a client after connect is invalidated', async () => {
     installNuxtMocks()
     const factory = createDeferred<CreateEventHubReceiverClient>()
     const createClient = vi.fn<CreateEventHubReceiverClient>()
-    const loadClientFactory = vi.fn(async () => await factory.promise)
+    const loadClientFactory = vi.fn<() => Promise<CreateEventHubReceiverClient>>(
+      async () => await factory.promise,
+    )
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
     const receiver = useEventHubReceiver({ loadClientFactory })
 
@@ -1169,12 +1174,14 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     const firstFactory = createDeferred<CreateEventHubReceiverClient>()
     const firstCreateClient = vi.fn<CreateEventHubReceiverClient>()
-    const secondSubscribe = vi.fn(() => ({ close: vi.fn(async () => {}) }))
+    const secondSubscribe = vi.fn<EventHubReceiverClient['subscribe']>(() => ({
+      close: vi.fn<() => Promise<void>>(async () => {}),
+    }))
     const secondClient: EventHubReceiverClient = {
-      close: vi.fn(async () => {}),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: secondSubscribe,
     }
-    const secondCreateClient = vi.fn(() => secondClient)
+    const secondCreateClient = vi.fn<CreateEventHubReceiverClient>(() => secondClient)
     const loadClientFactory = vi
       .fn<() => Promise<CreateEventHubReceiverClient>>()
       .mockReturnValueOnce(firstFactory.promise)
@@ -1205,10 +1212,10 @@ describe('Event Hub receiver helpers', () => {
     vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'))
     installNuxtMocks()
     const subscribe = vi.fn<EventHubReceiverClient['subscribe']>(() => ({
-      close: vi.fn(async () => {}),
+      close: vi.fn<() => Promise<void>>(async () => {}),
     }))
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => {}),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe,
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1267,11 +1274,11 @@ describe('Event Hub receiver helpers', () => {
       context,
     )
     expect(updateCheckpoint).toHaveBeenCalledOnce()
-    expect(getManualEventHubStartPosition(3, ['0', '1'], new Map([['0', 43]]))).toEqual({
+    expect(getManualEventHubStartPosition(3, ['0', '1'], new Map([['0', 43]]))).toStrictEqual({
       '0': { sequenceNumber: 43, isInclusive: false },
       '1': { enqueuedOn: new Date('2026-07-10T11:57:00.000Z') },
     })
-    expect(getManualEventHubStartPosition(3, [], new Map([['0', 43]]))).toEqual({
+    expect(getManualEventHubStartPosition(3, [], new Map([['0', 43]]))).toStrictEqual({
       enqueuedOn: new Date('2026-07-10T11:57:00.000Z'),
     })
 
@@ -1308,7 +1315,7 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(100)
 
     expect(receiver.receivedCount.value).toBe(3)
-    expect(receiver.getResumeFrom()).toEqual({ '0': 11, '1': 1 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 11, '1': 1 })
 
     receiver.pause()
     receiver.resume()
@@ -1323,18 +1330,18 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(100)
 
     expect(receiver.receivedCount.value).toBe(1)
-    expect(receiver.getResumeFrom()).toEqual({ '0': 12, '1': 1 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 12, '1': 1 })
 
     await receiver.connect(createValidForm())
-    expect(receiver.getResumeFrom()).toEqual({})
+    expect(receiver.getResumeFrom()).toStrictEqual({})
     await requireHandlers(handlers).processEvents(
       [{ body: { msg: 'new generation' }, sequenceNumber: 1 }],
       { partitionId: '0' },
     )
-    expect(receiver.getResumeFrom()).toEqual({ '0': 1 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 1 })
 
     await receiver.reset()
-    expect(receiver.getResumeFrom()).toEqual({})
+    expect(receiver.getResumeFrom()).toStrictEqual({})
   })
 
   it('marks a quiet temporary receiver caught up after reaching the partition head', async () => {
@@ -1383,10 +1390,10 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => {}),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn(async () => {}) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1421,9 +1428,9 @@ describe('Event Hub receiver helpers', () => {
     )
     vi.advanceTimersByTime(100)
 
-    expect(receiver.categoryOptions.value).toEqual(['AZFWApplicationRule', 'AZFWNetworkRule'])
-    expect(receiver.actionOptions.value).toEqual(['Allow'])
-    expect(receiver.protocolOptions.value).toEqual(['HTTPS', 'TCP'])
+    expect(receiver.categoryOptions.value).toStrictEqual(['AZFWApplicationRule', 'AZFWNetworkRule'])
+    expect(receiver.actionOptions.value).toStrictEqual(['Allow'])
+    expect(receiver.protocolOptions.value).toStrictEqual(['HTTPS', 'TCP'])
     expect(receiver.latestSourceTimestamp.value).toBe('2026-07-12T12:00:02.000Z')
     expect(receiver.caughtUp.value).toBe(true)
 
@@ -1435,9 +1442,9 @@ describe('Event Hub receiver helpers', () => {
     expect(receiver.latestSourceTimestamp.value).toBe('2026-07-12T12:00:02.000Z')
 
     receiver.clear()
-    expect(receiver.categoryOptions.value).toEqual([])
-    expect(receiver.actionOptions.value).toEqual([])
-    expect(receiver.protocolOptions.value).toEqual([])
+    expect(receiver.categoryOptions.value).toStrictEqual([])
+    expect(receiver.actionOptions.value).toStrictEqual([])
+    expect(receiver.protocolOptions.value).toStrictEqual([])
     expect(receiver.latestSourceTimestamp.value).toBeNull()
     expect(receiver.caughtUp.value).toBe(false)
     await receiver.disconnect()
@@ -1448,10 +1455,10 @@ describe('Event Hub receiver helpers', () => {
     installNuxtMocks()
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => {}),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn(async () => {}) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1495,7 +1502,7 @@ describe('Event Hub receiver helpers', () => {
     expect(onRecords).not.toHaveBeenCalled()
     vi.advanceTimersByTime(100)
     expect(onRecords).toHaveBeenCalledOnce()
-    expect(onRecords.mock.calls[0]?.[0]).toEqual([
+    expect(onRecords.mock.calls[0]?.[0]).toStrictEqual([
       expect.objectContaining({
         category: 'AZFWNetworkRule',
         dns: networkRuleDnsMatcher,
@@ -1518,10 +1525,10 @@ describe('Event Hub receiver helpers', () => {
     const uiPublishingEnabled = shallowRef(false)
     let handlers: ReceiverHandlers | undefined
     const client: EventHubReceiverClient = {
-      close: vi.fn(async () => {}),
+      close: vi.fn<() => Promise<void>>(async () => {}),
       subscribe: (nextHandlers) => {
         handlers = nextHandlers
-        return { close: vi.fn(async () => {}) }
+        return { close: vi.fn<() => Promise<void>>(async () => {}) }
       },
     }
     const { useEventHubReceiver } = await import('../../app/composables/useEventHubReceiver')
@@ -1545,14 +1552,14 @@ describe('Event Hub receiver helpers', () => {
     )
     vi.advanceTimersByTime(100)
 
-    expect(receiver.categoryOptions.value).toEqual([])
-    expect(receiver.actionOptions.value).toEqual([])
-    expect(receiver.protocolOptions.value).toEqual([])
+    expect(receiver.categoryOptions.value).toStrictEqual([])
+    expect(receiver.actionOptions.value).toStrictEqual([])
+    expect(receiver.protocolOptions.value).toStrictEqual([])
 
     uiPublishingEnabled.value = true
-    expect(receiver.categoryOptions.value).toEqual(['AZFWNetworkRule'])
-    expect(receiver.actionOptions.value).toEqual(['Deny'])
-    expect(receiver.protocolOptions.value).toEqual(['UDP'])
+    expect(receiver.categoryOptions.value).toStrictEqual(['AZFWNetworkRule'])
+    expect(receiver.actionOptions.value).toStrictEqual(['Deny'])
+    expect(receiver.protocolOptions.value).toStrictEqual(['UDP'])
     await receiver.disconnect()
   })
 
@@ -1585,16 +1592,19 @@ describe('Event Hub receiver helpers', () => {
     receiver.pause()
     await requireHandlers(handlers).processError(new Error('paused receive failure'))
     expect(receiver.status.value).toBe('paused')
-    expect(receiver.errors.value).toEqual(['paused receive failure'])
+    expect(receiver.errors.value).toStrictEqual(['paused receive failure'])
     receiver.resume()
 
     await requireHandlers(handlers).processError(new Error('transient receive failure'))
     expect(receiver.status.value).toBe('reconnecting')
-    expect(receiver.errors.value).toEqual(['transient receive failure', 'paused receive failure'])
+    expect(receiver.errors.value).toStrictEqual([
+      'transient receive failure',
+      'paused receive failure',
+    ])
     await vi.advanceTimersByTimeAsync(1_000)
     expect(receiver.status.value).toBe('connected')
     expect(receiver.errors.value).toStrictEqual([])
-    expect(startPositions[1]).toEqual({ '0': { sequenceNumber: 4, isInclusive: false } })
+    expect(startPositions[1]).toStrictEqual({ '0': { sequenceNumber: 4, isInclusive: false } })
     expect(mocks.historyClear).toHaveBeenCalledOnce()
 
     await requireHandlers(handlers).processEvents(
@@ -1604,7 +1614,7 @@ describe('Event Hub receiver helpers', () => {
     vi.advanceTimersByTime(100)
     expect(mocks.logs.value).toHaveLength(2)
     expect(receiver.receivedCount.value).toBe(2)
-    expect(receiver.getResumeFrom()).toEqual({ '0': 5 })
+    expect(receiver.getResumeFrom()).toStrictEqual({ '0': 5 })
 
     await receiver.disconnect()
   })
@@ -1613,7 +1623,7 @@ describe('Event Hub receiver helpers', () => {
     const order: string[] = []
     const mocks = installNuxtMocks(order)
     let handlers: ReceiverHandlers | undefined
-    const subscriptionClose = vi.fn(async () => {
+    const subscriptionClose = vi.fn<() => Promise<void>>(async () => {
       order.push('subscription-close')
       const registeredHandlers = requireHandlers(handlers)
       await registeredHandlers.processEvents(
@@ -1622,7 +1632,7 @@ describe('Event Hub receiver helpers', () => {
       )
       await registeredHandlers.processError(new Error('late receiver error'))
     })
-    const clientClose = vi.fn(async () => {
+    const clientClose = vi.fn<() => Promise<void>>(async () => {
       order.push('client-close')
     })
     const client: EventHubReceiverClient = {
@@ -1646,17 +1656,17 @@ describe('Event Hub receiver helpers', () => {
 
     await receiver.disconnect()
 
-    expect(order).toEqual([
+    expect(order).toStrictEqual([
       'subscription-close',
       'client-close',
       'batch-flush',
       'history-flush',
       'history-clear',
     ])
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(mocks.queueRecords).toHaveBeenCalledOnce()
     expect(receiver.receivedCount.value).toBe(0)
-    expect(receiver.errors.value).toEqual([])
+    expect(receiver.errors.value).toStrictEqual([])
     expect(receiver.status.value).toBe('idle')
   })
 
@@ -1688,14 +1698,14 @@ describe('Event Hub receiver helpers', () => {
     })
     await receiver.disconnect()
 
-    expect(order).toEqual([
+    expect(order).toStrictEqual([
       'subscription-close',
       'client-close',
       'batch-flush',
       'history-flush',
       'history-clear',
     ])
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(mocks.queueRecords).toHaveBeenCalledOnce()
     expect(receiver.receivedCount.value).toBe(0)
   })
@@ -1746,10 +1756,10 @@ describe('Event Hub receiver helpers', () => {
 
     expect(subscriptionClose).toHaveBeenCalledOnce()
     expect(clientClose).toHaveBeenCalledOnce()
-    expect(mocks.logs.value).toEqual([])
+    expect(mocks.logs.value).toStrictEqual([])
     expect(receiver.receivedCount.value).toBe(0)
     expect(receiver.latestSourceTimestamp.value).toBeNull()
-    expect(receiver.errors.value).toEqual([])
+    expect(receiver.errors.value).toStrictEqual([])
     expect(receiver.status.value).toBe('idle')
     expect(onClear).toHaveBeenCalledOnce()
   })
@@ -1757,10 +1767,10 @@ describe('Event Hub receiver helpers', () => {
   it('shares one teardown across overlapping disconnect calls', async () => {
     installNuxtMocks()
     const closeBarrier: PromiseWithResolvers<void> = Promise.withResolvers()
-    const subscriptionClose = vi.fn(async () => {
+    const subscriptionClose = vi.fn<() => Promise<void>>(async () => {
       await closeBarrier.promise
     })
-    const clientClose = vi.fn(async () => {})
+    const clientClose = vi.fn<() => Promise<void>>(async () => {})
     const client: EventHubReceiverClient = {
       close: clientClose,
       subscribe: () => ({ close: subscriptionClose }),
@@ -1787,10 +1797,10 @@ describe('Event Hub receiver helpers', () => {
 
   it('attempts both closes, reports failures, and clears resource references', async () => {
     installNuxtMocks()
-    const subscriptionClose = vi.fn(async () => {
+    const subscriptionClose = vi.fn<() => Promise<void>>(async () => {
       throw new Error('subscription close failed')
     })
-    const clientClose = vi.fn(async () => {
+    const clientClose = vi.fn<() => Promise<void>>(async () => {
       throw new Error('client close failed')
     })
     const client: EventHubReceiverClient = {
@@ -1809,7 +1819,10 @@ describe('Event Hub receiver helpers', () => {
 
     expect(subscriptionClose).toHaveBeenCalledOnce()
     expect(clientClose).toHaveBeenCalledOnce()
-    expect(receiver.errors.value).toEqual(['subscription close failed', 'client close failed'])
+    expect(receiver.errors.value).toStrictEqual([
+      'subscription close failed',
+      'client close failed',
+    ])
     expect(receiver.status.value).toBe('idle')
 
     await expect(receiver.disconnect()).resolves.toBeUndefined()

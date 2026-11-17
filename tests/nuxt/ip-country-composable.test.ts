@@ -2,9 +2,16 @@ import { mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { effectScope } from 'vue'
 
 import { useIpCountryLookup } from '../../app/composables/useIpCountryLookup'
+import type { IpCountryLookupRequest } from '../../shared/types/ipCountry'
 
 const { requestFetch } = vi.hoisted(() => ({
-  requestFetch: vi.fn(),
+  requestFetch:
+    vi.fn<
+      (
+        url: string,
+        options: { body: IpCountryLookupRequest; method: 'POST'; signal: AbortSignal },
+      ) => Promise<unknown>
+    >(),
 }))
 
 mockNuxtImport('useRequestFetch', () => () => requestFetch)

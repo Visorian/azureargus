@@ -27,7 +27,7 @@ describe('log sorting', () => {
       createLog({ id: 'newest', timestamp: '2026-08-13T13:06:47.932Z' }),
     ]
 
-    expect(sortFirewallLogs(logs, createDefaultLogSort()).map((log) => log.id)).toEqual([
+    expect(sortFirewallLogs(logs, createDefaultLogSort()).map((log) => log.id)).toStrictEqual([
       'newest',
       'middle',
       'oldest',
@@ -42,8 +42,8 @@ describe('log sorting', () => {
 
     const result = sortFirewallLogs(logs, { key: 'action', direction: 'asc' })
 
-    expect(result.map((log) => log.id)).toEqual(['allow', 'deny'])
-    expect(logs.map((log) => log.id)).toEqual(['deny', 'allow'])
+    expect(result.map((log) => log.id)).toStrictEqual(['allow', 'deny'])
+    expect(logs.map((log) => log.id)).toStrictEqual(['deny', 'allow'])
   })
 
   it('sorts Log snapshots by date even when input has another server order', () => {
@@ -54,7 +54,7 @@ describe('log sorting', () => {
 
     const result = sortFirewallLogs(logs, createDefaultLogSort())
 
-    expect(result.map((log) => log.id)).toEqual(['newest', 'oldest'])
+    expect(result.map((log) => log.id)).toStrictEqual(['newest', 'oldest'])
   })
 
   it('sorts source ports numerically in ascending order', () => {

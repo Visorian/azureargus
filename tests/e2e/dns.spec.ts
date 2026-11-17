@@ -9,7 +9,7 @@ import {
   openSettings,
 } from './support/logsWorkspace'
 
-const EDIT_FILTERS_PATTERN = /Edit filters/
+const EDIT_FILTERS_PATTERN = /Edit filters/u
 async function expectActiveDnsEntry(page: Page, row: Locator) {
   const results = page.getByRole('grid', { name: 'DNS results', exact: true })
   await expect(results).toBeFocused()

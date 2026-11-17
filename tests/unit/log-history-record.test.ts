@@ -34,15 +34,21 @@ describe('log history record mapping', () => {
 
     const persisted = toPersistedFirewallLogRecord(logWithExtraFields)
 
-    expect(persisted).toEqual({
+    expect(persisted).toStrictEqual({
       action: 'Allow',
       category: 'AZFWNetworkRule',
+      destinationIp: undefined,
+      destinationPort: undefined,
       id: 'id',
       message: 'Allow TCP',
       policy: 'hub-policy',
       protocol: 'TCP',
+      rule: undefined,
+      ruleCollection: undefined,
       ruleCollectionGroup: 'hub-collection-group',
       searchableText: 'allow tcp',
+      sourceIp: undefined,
+      sourcePort: undefined,
       timestamp: '2026-07-09T12:00:00.000Z',
     })
   })

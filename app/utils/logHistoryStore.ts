@@ -8,11 +8,11 @@ export interface LogHistoryRangeQuery {
 }
 
 export interface LogHistoryStoreAdapter {
-  putMany(records: readonly PersistedFirewallLogRecord[]): Promise<void>
-  queryRange(query: LogHistoryRangeQuery): Promise<PersistedFirewallLogRecord[]>
-  deleteBefore(timestamp: string): Promise<number>
-  deleteExcessRecords(maxRecords: number): Promise<number>
-  clear(): Promise<void>
+  putMany: (records: readonly PersistedFirewallLogRecord[]) => Promise<void>
+  queryRange: (query: LogHistoryRangeQuery) => Promise<PersistedFirewallLogRecord[]>
+  deleteBefore: (timestamp: string) => Promise<number>
+  deleteExcessRecords: (maxRecords: number) => Promise<number>
+  clear: () => Promise<void>
 }
 
 export interface LogHistoryStoreApi {

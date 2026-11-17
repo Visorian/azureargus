@@ -144,7 +144,7 @@ describe('DNS troubleshooting client', () => {
       return createResponse(createEntry(`entry-${requests.length}`))
     })
 
-    expect(requests).toEqual([])
+    expect(requests).toStrictEqual([])
     await harness.dns.run()
     expect(requests).toHaveLength(1)
     expect(requests[0]?.limit).toBe(1_000)
@@ -203,7 +203,9 @@ describe('DNS troubleshooting client', () => {
 
   it('ignores a duplicate run and rejects assignment after lens deactivation', async () => {
     const first = createDeferred<DnsListQueryResponse>()
-    const request = vi.fn(async () => await first.promise)
+    const request = vi.fn<
+      (body: DnsListQueryRequest, signal: AbortSignal) => Promise<DnsListQueryResponse>
+    >(async () => await first.promise)
     const harness = createHarness(request)
 
     const firstRun = harness.dns.run()
@@ -211,7 +213,7 @@ describe('DNS troubleshooting client', () => {
     expect(request).toHaveBeenCalledOnce()
     first.resolve(createResponse(createEntry('latest')))
     await firstRun
-    expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['latest'])
+    expect(harness.dns.entries.value.map((entry) => entry.id)).toStrictEqual(['latest'])
 
     const inactive = createDeferred<DnsListQueryResponse>()
     const inactiveHarness = createHarness(async () => await inactive.promise)
@@ -220,7 +222,7 @@ describe('DNS troubleshooting client', () => {
     await nextTick()
     inactive.resolve(createResponse(createEntry('inactive')))
     await inactiveRun
-    expect(inactiveHarness.dns.entries.value).toEqual([])
+    expect(inactiveHarness.dns.entries.value).toStrictEqual([])
 
     harness.scope.stop()
     inactiveHarness.scope.stop()
@@ -242,7 +244,7 @@ describe('DNS troubleshooting client', () => {
     response.resolve(createResponse(createEntry('retained')))
 
     await expect(run).resolves.toBe(true)
-    expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['retained'])
+    expect(harness.dns.entries.value.map((entry) => entry.id)).toStrictEqual(['retained'])
     expect(harness.dns.filters.value.search).toBe('new draft')
     expect(harness.dns.filtersDirty.value).toBe(true)
     expect(harness.dns.rangeDirty.value).toBe(true)
@@ -261,11 +263,11 @@ describe('DNS troubleshooting client', () => {
 
     harness.storage.value = 'azure-diagnostics'
     await nextTick()
-    expect(harness.dns.entries.value).toEqual([])
+    expect(harness.dns.entries.value).toStrictEqual([])
     expect(requests).toHaveLength(1)
 
     await harness.dns.run()
-    expect(requests.map((request) => request.storage)).toEqual([
+    expect(requests.map((request) => request.storage)).toStrictEqual([
       'resource-specific',
       'azure-diagnostics',
     ])
@@ -284,7 +286,7 @@ describe('DNS troubleshooting client', () => {
     await harness.dns.run()
 
     expect(harness.dns.selectedEntry.value).toBeNull()
-    expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['second'])
+    expect(harness.dns.entries.value.map((entry) => entry.id)).toStrictEqual(['second'])
     harness.scope.stop()
   })
 
@@ -344,7 +346,7 @@ describe('DNS troubleshooting client', () => {
 
     expect(harness.dns.entries.value).toHaveLength(2)
     await harness.dns.run()
-    expect(harness.dns.entries.value.map((entry) => entry.id)).toEqual(['a'])
+    expect(harness.dns.entries.value.map((entry) => entry.id)).toStrictEqual(['a'])
     harness.scope.stop()
   })
 
@@ -356,11 +358,11 @@ describe('DNS troubleshooting client', () => {
     }))
     await harness.dns.run()
 
-    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(['named'])
+    expect(harness.dns.entries.value.map((item) => item.id)).toStrictEqual(['named'])
     harness.dns.showUnidentifiedTransports.value = true
     await nextTick()
 
-    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(['transport', 'named'])
+    expect(harness.dns.entries.value.map((item) => item.id)).toStrictEqual(['transport', 'named'])
     expect(harness.dns.entries.value[0]).toMatchObject({
       completeness: 'partial',
       confidence: 'uncorrelated',
@@ -370,7 +372,7 @@ describe('DNS troubleshooting client', () => {
 
     harness.dns.filters.value.search = '168.63.129.16'
     await harness.dns.run()
-    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(['transport'])
+    expect(harness.dns.entries.value.map((item) => item.id)).toStrictEqual(['transport'])
     await harness.dns.selectEntry(harness.dns.entries.value[0]!)
     expect(harness.dns.detail.value).toMatchObject({
       completeness: 'partial',
@@ -380,7 +382,7 @@ describe('DNS troubleshooting client', () => {
     harness.dns.filters.value.search = ''
     harness.dns.filters.value.queryType = 'A'
     await harness.dns.run()
-    expect(harness.dns.entries.value.map((item) => item.id)).toEqual(['named'])
+    expect(harness.dns.entries.value.map((item) => item.id)).toStrictEqual(['named'])
     harness.scope.stop()
   })
 
@@ -429,9 +431,9 @@ describe('DNS troubleshooting client', () => {
           dns: record.dns ? { ...record.dns, id: `${record.dns.id}-duplicate` } : undefined,
         },
       ])
-      expect(harness.dns.entries.value).toEqual([])
+      expect(harness.dns.entries.value).toStrictEqual([])
       vi.advanceTimersByTime(249)
-      expect(harness.dns.entries.value).toEqual([])
+      expect(harness.dns.entries.value).toStrictEqual([])
       vi.advanceTimersByTime(1)
 
       expect(harness.dns.entries.value).toHaveLength(2)
@@ -471,12 +473,12 @@ describe('DNS troubleshooting client', () => {
         }),
       ])
 
-      expect(harness.dns.entries.value).toEqual([])
+      expect(harness.dns.entries.value).toStrictEqual([])
       harness.active.value = true
       await nextTick()
       vi.runOnlyPendingTimers()
 
-      expect(harness.dns.entries.value).toEqual([
+      expect(harness.dns.entries.value).toStrictEqual([
         expect.objectContaining({
           source: 'network-rule',
           outcome: 'transport-observed',

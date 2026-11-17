@@ -11,7 +11,7 @@ import type { LogHistoryStoreApi } from './logHistoryStore'
 
 interface IdleDeadlineLike {
   didTimeout: boolean
-  timeRemaining(): number
+  timeRemaining: () => number
 }
 
 interface LogHistoryPersistenceScheduler {
@@ -120,35 +120,37 @@ export function createLogHistoryPersistenceQueue({
     }
   }
 
-  async function flush() {
-    cancelScheduledFlush()
-
-    for (;;) {
-      if (activeFlushPromise !== null) {
-        const inFlight = activeFlushPromise
-        await inFlight
-        if (activeFlushPromise === inFlight) {
-          activeFlushPromise = null
-          isFlushing = false
-        }
-        continue
-      }
-
-      if (!isEnabled || pendingRecords.length === 0) {
-        return
-      }
-
-      const records = pendingRecords.splice(0, writeBatchSize)
-      isFlushing = true
-      const currentFlush = writeBatch(records)
-      activeFlushPromise = currentFlush
-
-      await currentFlush
-      if (activeFlushPromise === currentFlush) {
+  async function flushPending(): Promise<void> {
+    if (activeFlushPromise !== null) {
+      const inFlight = activeFlushPromise
+      await inFlight
+      if (activeFlushPromise === inFlight) {
         activeFlushPromise = null
         isFlushing = false
       }
+      await flushPending()
+      return
     }
+
+    if (!isEnabled || pendingRecords.length === 0) {
+      return
+    }
+
+    isFlushing = true
+    const currentFlush = writeBatch(pendingRecords.splice(0, writeBatchSize))
+    activeFlushPromise = currentFlush
+
+    await currentFlush
+    if (activeFlushPromise === currentFlush) {
+      activeFlushPromise = null
+      isFlushing = false
+    }
+    await flushPending()
+  }
+
+  async function flush() {
+    cancelScheduledFlush()
+    await flushPending()
   }
 
   function clearQueue() {

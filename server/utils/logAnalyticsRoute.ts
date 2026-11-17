@@ -4,7 +4,12 @@ import type { H3Error, H3Event } from 'h3'
 import { LogAnalyticsQueryError } from '../../shared/utils/logAnalyticsQuery'
 import { LogAnalyticsConfigurationError, LogAnalyticsTokenError } from './logAnalyticsAuth'
 
-export function createIncomingRequestSignal(event: H3Event) {
+export interface IncomingRequestSignal {
+  signal: AbortSignal
+  cleanup: () => void
+}
+
+export function createIncomingRequestSignal(event: H3Event): IncomingRequestSignal {
   const controller = new AbortController()
   const abort = () => {
     controller.abort()
@@ -16,7 +21,7 @@ export function createIncomingRequestSignal(event: H3Event) {
   }
   const webSignal = event.web?.request?.signal
 
-  if (webSignal?.aborted) {
+  if (webSignal?.aborted === true) {
     abort()
   } else {
     webSignal?.addEventListener('abort', abort, { once: true })

@@ -212,13 +212,13 @@ describe('DNS Log Analytics KQL', () => {
 
     const queries = buildDnsListQueries(request)
 
-    expect(queries.map(({ source }) => source)).toEqual([
+    expect(queries.map(({ source }) => source)).toStrictEqual([
       'proxy-structured',
       'dns-flow-trace',
       'internal-fqdn-failure',
       'network-rule',
     ])
-    expect(queries.map(({ query }) => firstLine(query))).toEqual([
+    expect(queries.map(({ query }) => firstLine(query))).toStrictEqual([
       'AZFWDnsQuery',
       'AZFWDnsFlowTrace',
       'AZFWInternalFqdnResolutionFailure',
@@ -267,7 +267,7 @@ describe('DNS Log Analytics KQL', () => {
   it('checks every dedicated table and matching AzureDiagnostics category explicitly', () => {
     const probes = buildDnsReadinessProbes()
 
-    expect(probes.map(({ sources }) => sources)).toEqual([
+    expect(probes.map(({ sources }) => sources)).toStrictEqual([
       ['proxy-structured'],
       ['proxy-structured'],
       ['dns-flow-trace'],
@@ -283,7 +283,7 @@ describe('DNS Log Analytics KQL', () => {
       ['nat-rule'],
       ['nat-rule'],
     ])
-    expect(probes.map(({ storage }) => storage)).toEqual(
+    expect(probes.map(({ storage }) => storage)).toStrictEqual(
       Array.from({ length: 7 }, () => ['resource-specific', 'azure-diagnostics']).flat(),
     )
     expect(probes).toHaveLength(14)
@@ -488,12 +488,12 @@ describe('DNS Log Analytics KQL', () => {
   it('builds bounded related evidence queries from exact observation anchors', () => {
     const queries = buildDnsRelatedEvidenceQueries(relatedObservation())
 
-    expect(queries.map(({ source }) => source)).toEqual([
+    expect(queries.map(({ source }) => source)).toStrictEqual([
       'application-rule',
       'flow-trace',
       'nat-rule',
     ])
-    expect(queries.map(({ query }) => firstLine(query))).toEqual([
+    expect(queries.map(({ query }) => firstLine(query))).toStrictEqual([
       'AZFWApplicationRule',
       'AZFWFlowTrace',
       'AZFWNatRule',
@@ -502,7 +502,7 @@ describe('DNS Log Analytics KQL', () => {
     expect(
       queries.every(({ query }) => query.includes(`| where _ResourceId =~ "${resourceId}"`)),
     ).toBe(true)
-    expect(queries.map(({ timespan }) => timespan)).toEqual([
+    expect(queries.map(({ timespan }) => timespan)).toStrictEqual([
       '2026-07-10T10:00:55.000Z/2026-07-10T10:02:00.000Z',
       '2026-07-10T10:00:55.000Z/2026-07-10T10:01:05.000Z',
       '2026-07-10T10:00:55.000Z/2026-07-10T10:01:05.000Z',
@@ -537,14 +537,14 @@ describe('DNS Log Analytics KQL', () => {
       true,
     )
 
-    expect(buildDnsRelatedEvidenceQueries(relatedObservation({ resourceId: undefined }))).toEqual(
-      [],
-    )
+    expect(
+      buildDnsRelatedEvidenceQueries(relatedObservation({ resourceId: undefined })),
+    ).toStrictEqual([])
     expect(
       buildDnsRelatedEvidenceQueries(
         relatedObservation({ logAnalyticsStorage: 'azure-diagnostics' }),
       ),
-    ).toEqual([])
+    ).toStrictEqual([])
     expect(
       buildDnsRelatedEvidenceQueries(
         relatedObservation({
@@ -554,12 +554,12 @@ describe('DNS Log Analytics KQL', () => {
           serverIp: undefined,
         }),
       ),
-    ).toEqual([])
+    ).toStrictEqual([])
     expect(
       buildDnsRelatedEvidenceQueries(relatedObservation({ protocol: 'UDP' })).map(
         ({ source }) => source,
       ),
-    ).toEqual(['application-rule', 'nat-rule'])
+    ).toStrictEqual(['application-rule', 'nat-rule'])
   })
 })
 
@@ -575,7 +575,7 @@ describe('DNS Log Analytics source mapping', () => {
     const idsByName = (assigned: typeof initial) =>
       new Map(assigned.map(({ id, row }): [unknown, string] => [row['QueryName'], id]))
 
-    expect(idsByName(reordered)).toEqual(idsByName(initial))
+    expect(idsByName(reordered)).toStrictEqual(idsByName(initial))
     expect(initial.every(({ id }) => id.startsWith('la:proxy-structured:'))).toBe(true)
   })
 
@@ -592,7 +592,11 @@ describe('DNS Log Analytics source mapping', () => {
     ])
 
     expect(new Set(assigned.map(({ id }) => id)).size).toBe(3)
-    expect(assigned.map(({ id }) => id.slice(id.lastIndexOf(':')))).toEqual([':1', ':2', ':3'])
+    expect(assigned.map(({ id }) => id.slice(id.lastIndexOf(':')))).toStrictEqual([
+      ':1',
+      ':2',
+      ':3',
+    ])
     expect(assigned.every(({ collision }) => !collision)).toBe(true)
   })
 
@@ -605,7 +609,7 @@ describe('DNS Log Analytics source mapping', () => {
 
     expect(assigned.every(({ collision }) => collision)).toBe(true)
     expect(new Set(assigned.map(({ id }) => id)).size).toBe(2)
-    expect(assigned.map(({ id }) => id).toSorted()).toEqual([
+    expect(assigned.map(({ id }) => id).toSorted()).toStrictEqual([
       'la:proxy-structured:forced-collision:collision-1:1',
       'la:proxy-structured:forced-collision:collision-2:1',
     ])
@@ -716,7 +720,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.readiness.map(({ source, storage }) => [source, storage])).toEqual(
+    expect(result.readiness.map(({ source, storage }) => [source, storage])).toStrictEqual(
       [
         'proxy-structured',
         'dns-flow-trace',
@@ -731,7 +735,7 @@ describe('DNS Log Analytics source mapping', () => {
       ]),
     )
     expect(result.readiness.every(({ status }) => status === 'success')).toBe(true)
-    expect(result.readiness.map(({ sampleCount }) => sampleCount)).toEqual(sampleCounts)
+    expect(result.readiness.map(({ sampleCount }) => sampleCount)).toStrictEqual(sampleCounts)
     expect(fetchImplementation).toHaveBeenCalledTimes(14)
     for (const [, init] of fetchImplementation.mock.calls) {
       expect(requestJson(init)).not.toHaveProperty('timespan')
@@ -750,7 +754,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.readiness.filter(({ source }) => source === 'dns-flow-trace')).toEqual([
+    expect(result.readiness.filter(({ source }) => source === 'dns-flow-trace')).toStrictEqual([
       {
         source: 'dns-flow-trace',
         storage: 'resource-specific',
@@ -815,7 +819,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.readiness.filter(({ source }) => source === 'network-rule')).toEqual([
+    expect(result.readiness.filter(({ source }) => source === 'network-rule')).toStrictEqual([
       {
         source: 'network-rule',
         storage: 'resource-specific',
@@ -905,7 +909,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.sources).toEqual([
+    expect(result.sources).toStrictEqual([
       {
         source: 'network-rule',
         availability,
@@ -951,7 +955,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.sources).toEqual([
+    expect(result.sources).toStrictEqual([
       { source: 'network-rule', availability: 'available', truncated: false },
     ])
     expect(fetchImplementation).toHaveBeenCalledOnce()
@@ -972,7 +976,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.sources).toEqual([
+    expect(result.sources).toStrictEqual([
       {
         source: 'network-rule',
         availability: 'forbidden',
@@ -1076,18 +1080,23 @@ describe('DNS Log Analytics source mapping', () => {
     expect(fetchImplementation).toHaveBeenCalledOnce()
     expect(
       result.transportObservations.map(({ logAnalyticsStorage }) => logAnalyticsStorage),
-    ).toEqual(['azure-diagnostics'])
+    ).toStrictEqual(['azure-diagnostics'])
   })
 
-  it('retains successful zero-row sources across malformed failure envelopes', async () => {
-    const failureResponses = [
-      new Response(null, { status: 200, headers: { 'content-type': 'application/json' } }),
-      response({}),
-      response({ error: { message: 'query failed' } }),
-      response({ tables: [{}] }),
-    ]
-
-    for (const failedResponse of failureResponses) {
+  it.each([
+    {
+      envelope: 'an empty body',
+      failedResponse: new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    },
+    { envelope: 'no tables', failedResponse: response({}) },
+    { envelope: 'an error', failedResponse: response({ error: { message: 'query failed' } }) },
+    { envelope: 'a table without rows', failedResponse: response({ tables: [{}] }) },
+  ])(
+    'retains successful zero-row sources across a malformed failure envelope with $envelope',
+    async ({ failedResponse }) => {
       const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
         const query = requestQuery(init)
         return query.startsWith('AZFWDnsQuery')
@@ -1102,7 +1111,7 @@ describe('DNS Log Analytics source mapping', () => {
         { fetchImplementation },
       )
 
-      expect(result.sources).toEqual([
+      expect(result.sources).toStrictEqual([
         {
           source: 'proxy-structured',
           availability: 'failed',
@@ -1113,10 +1122,10 @@ describe('DNS Log Analytics source mapping', () => {
         { source: 'internal-fqdn-failure', availability: 'available', truncated: false },
         { source: 'network-rule', availability: 'available', truncated: false },
       ])
-      expect(result.queriedEntries).toEqual([])
-      expect(result.transportObservations).toEqual([])
-    }
-  })
+      expect(result.queriedEntries).toStrictEqual([])
+      expect(result.transportObservations).toStrictEqual([])
+    },
+  )
 
   it('returns per-source diagnostics when every source probe fails', async () => {
     const fetchImplementation = vi
@@ -1129,8 +1138,8 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.queriedEntries).toEqual([])
-    expect(result.transportObservations).toEqual([])
+    expect(result.queriedEntries).toStrictEqual([])
+    expect(result.transportObservations).toStrictEqual([])
     expect(result.sources).toHaveLength(4)
     expect(result.sources.every((source) => source.availability === 'failed')).toBe(true)
   })
@@ -1297,7 +1306,7 @@ describe('DNS Log Analytics source mapping', () => {
       source: 'proxy-structured',
       queryName: 'example.com.',
     })
-    expect(result.relatedEvidence).toEqual([
+    expect(result.relatedEvidence).toStrictEqual([
       expect.objectContaining({
         source: 'application-rule',
         action: 'Allow',
@@ -1307,7 +1316,7 @@ describe('DNS Log Analytics source mapping', () => {
         rule: 'allow-example',
       }),
     ])
-    expect(result.relatedSources).toEqual([
+    expect(result.relatedSources).toStrictEqual([
       { source: 'application-rule', availability: 'available', truncated: false },
       { source: 'flow-trace', availability: 'not-applicable', truncated: false },
       { source: 'nat-rule', availability: 'not-applicable', truncated: false },
@@ -1378,7 +1387,7 @@ describe('DNS Log Analytics source mapping', () => {
       fetchImplementation,
     })
 
-    expect(result.observations).toEqual([
+    expect(result.observations).toStrictEqual([
       expect.objectContaining({
         source: 'network-rule',
         clientIp: '10.0.0.4',
@@ -1386,8 +1395,8 @@ describe('DNS Log Analytics source mapping', () => {
         outcome: 'transport-observed',
       }),
     ])
-    expect(result.relatedEvidence).toEqual([])
-    expect(result.relatedSources).toEqual([
+    expect(result.relatedEvidence).toStrictEqual([])
+    expect(result.relatedSources).toStrictEqual([
       { source: 'application-rule', availability: 'not-applicable', truncated: false },
       {
         source: 'flow-trace',

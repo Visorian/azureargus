@@ -30,7 +30,7 @@ describe('managed Event Hub NDJSON parser', () => {
       new AbortController().signal,
     )
 
-    expect(envelopes).toEqual([
+    expect(envelopes).toStrictEqual([
       { type: 'heartbeat' },
       { type: 'caught-up' },
       {

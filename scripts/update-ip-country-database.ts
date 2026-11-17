@@ -9,8 +9,8 @@ import { Reader } from '@maxmind/geoip2-node'
 export const MAX_COMPRESSED_BYTES = 16 * 1024 * 1024
 export const MAX_DATABASE_BYTES = 32 * 1024 * 1024
 const DEFAULT_PIN_PATH = fileURLToPath(new URL('dbip-country-lite.pin.json', import.meta.url))
-const RELEASE_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/
-const SHA256_PATTERN = /^[0-9a-f]{64}$/
+const RELEASE_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/u
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u
 
 interface DatabasePin {
   archiveSha256: string
@@ -61,10 +61,17 @@ async function readPin(pinPath: string) {
   return parsePin(value)
 }
 
+function defaultDatabasePath(): string {
+  const configuredPath = process.env['NUXT_IP_COUNTRY_DATABASE_PATH']
+  return resolve(
+    configuredPath === undefined || configuredPath === ''
+      ? '.data/dbip-country-lite.mmdb'
+      : configuredPath,
+  )
+}
+
 export async function updateIpCountryDatabase({
-  databasePath = resolve(
-    process.env['NUXT_IP_COUNTRY_DATABASE_PATH'] || '.data/dbip-country-lite.mmdb',
-  ),
+  databasePath = defaultDatabasePath(),
   fetcher = fetch,
   fileOperations = { mkdir, rename, rm, writeFile },
   maxCompressedBytes = MAX_COMPRESSED_BYTES,

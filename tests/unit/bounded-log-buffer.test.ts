@@ -43,9 +43,9 @@ describe('bounded log buffer helpers', () => {
 
       expect(
         mergeIntoBoundedBuffer(current, incoming, limit, (left, right) => right - left),
-      ).toEqual(expected)
-      expect(current).toEqual(originalCurrent)
-      expect(incoming).toEqual(originalIncoming)
+      ).toStrictEqual(expected)
+      expect(current).toStrictEqual(originalCurrent)
+      expect(incoming).toStrictEqual(originalIncoming)
     },
   )
 
@@ -56,44 +56,42 @@ describe('bounded log buffer helpers', () => {
     })
     buffer.pushMany([90, 100])
     buffer.flush()
-    expect(buffer.items.value).toEqual([100, 90])
+    expect(buffer.items.value).toStrictEqual([100, 90])
 
     buffer.pushMany([1, 5, 3, 4])
     buffer.flush()
-    expect(buffer.getRawItems()).toEqual([100, 90, 5])
-    expect(buffer.items.value).toEqual([100, 90])
+    expect(buffer.getRawItems()).toStrictEqual([100, 90, 5])
+    expect(buffer.items.value).toStrictEqual([100, 90])
 
     buffer.pushMany([110, 2])
     buffer.flush()
-    expect(buffer.getRawItems()).toEqual([110, 100, 90])
-    expect(buffer.items.value).toEqual([110, 100])
+    expect(buffer.getRawItems()).toStrictEqual([110, 100, 90])
+    expect(buffer.items.value).toStrictEqual([110, 100])
   })
 
   it('keeps newest-first items at the front of the buffer', () => {
-    expect(trimToBufferSize(['newest', 'middle', 'oldest'], 2)).toEqual(['newest', 'middle'])
+    expect(trimToBufferSize(['newest', 'middle', 'oldest'], 2)).toStrictEqual(['newest', 'middle'])
   })
 
   it('normalizes invalid buffer sizes to an empty buffer', () => {
-    expect(trimToBufferSize(['newest'], Number.NaN)).toEqual([])
+    expect(trimToBufferSize(['newest'], Number.NaN)).toStrictEqual([])
   })
 
   it('prepends incoming batches with the current newest-first ordering', () => {
-    expect(prependToBoundedBuffer(['old-1', 'old-2'], ['batch-old', 'batch-new'], 3)).toEqual([
-      'batch-new',
-      'batch-old',
-      'old-1',
-    ])
+    expect(prependToBoundedBuffer(['old-1', 'old-2'], ['batch-old', 'batch-new'], 3)).toStrictEqual(
+      ['batch-new', 'batch-old', 'old-1'],
+    )
   })
 
   it('keeps newest incoming items when the incoming batch exceeds capacity', () => {
-    expect(prependToBoundedBuffer(['old'], ['oldest', 'middle', 'newest'], 2)).toEqual([
+    expect(prependToBoundedBuffer(['old'], ['oldest', 'middle', 'newest'], 2)).toStrictEqual([
       'newest',
       'middle',
     ])
   })
 
   it('retains current items only up to remaining capacity', () => {
-    expect(prependToBoundedBuffer(['old-1', 'old-2', 'old-3'], ['new'], 3)).toEqual([
+    expect(prependToBoundedBuffer(['old-1', 'old-2', 'old-3'], ['new'], 3)).toStrictEqual([
       'new',
       'old-1',
       'old-2',
@@ -101,12 +99,12 @@ describe('bounded log buffer helpers', () => {
   })
 
   it('normalizes invalid prepend buffer sizes to an empty buffer', () => {
-    expect(prependToBoundedBuffer(['old'], ['new'], Number.NaN)).toEqual([])
-    expect(prependToBoundedBuffer(['old'], ['new'], 0)).toEqual([])
+    expect(prependToBoundedBuffer(['old'], ['new'], Number.NaN)).toStrictEqual([])
+    expect(prependToBoundedBuffer(['old'], ['new'], 0)).toStrictEqual([])
   })
 
   it('keeps current items when prepending an empty batch', () => {
-    expect(prependToBoundedBuffer(['newest', 'oldest'], [], 5)).toEqual(['newest', 'oldest'])
+    expect(prependToBoundedBuffer(['newest', 'oldest'], [], 5)).toStrictEqual(['newest', 'oldest'])
   })
 
   it('publishes only visible rows on the coalesced interval', () => {
@@ -117,13 +115,13 @@ describe('bounded log buffer helpers', () => {
 
     buffer.pushMany(records)
 
-    expect(buffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1])
-    expect(buffer.items.value).toEqual([])
+    expect(buffer.getRawItems().map((record) => record.id)).toStrictEqual([3, 2, 1])
+    expect(buffer.items.value).toStrictEqual([])
     vi.advanceTimersByTime(249)
-    expect(buffer.items.value).toEqual([])
+    expect(buffer.items.value).toStrictEqual([])
 
     vi.advanceTimersByTime(1)
-    expect(buffer.items.value).toEqual([{ id: 3 }, { id: 2 }])
+    expect(buffer.items.value).toStrictEqual([{ id: 3 }, { id: 2 }])
     expect(buffer.version.value).toBe(1)
   })
 
@@ -138,8 +136,8 @@ describe('bounded log buffer helpers', () => {
       publishedSize: ref(2),
     })
 
-    expect(recreatedBuffer.items.value).toEqual([{ id: 3 }, { id: 2 }])
-    expect(recreatedBuffer.getRawItems().map((record) => record.id)).toEqual([3, 2, 1])
+    expect(recreatedBuffer.items.value).toStrictEqual([{ id: 3 }, { id: 2 }])
+    expect(recreatedBuffer.getRawItems().map((record) => record.id)).toStrictEqual([3, 2, 1])
   })
 
   it('flushes a pending publication immediately and cancels its timer', () => {
@@ -150,7 +148,7 @@ describe('bounded log buffer helpers', () => {
     buffer.pushMany(['old', 'new'])
     buffer.flush()
 
-    expect(buffer.items.value).toEqual(['new', 'old'])
+    expect(buffer.items.value).toStrictEqual(['new', 'old'])
     expect(buffer.version.value).toBe(1)
     vi.advanceTimersByTime(250)
     expect(buffer.version.value).toBe(1)
@@ -164,14 +162,14 @@ describe('bounded log buffer helpers', () => {
     buffer.flush()
     vi.advanceTimersByTime(500)
 
-    expect(buffer.getRawItems()).toEqual(['new', 'old'])
-    expect(buffer.items.value).toEqual([])
+    expect(buffer.getRawItems()).toStrictEqual(['new', 'old'])
+    expect(buffer.items.value).toStrictEqual([])
     expect(buffer.version.value).toBe(0)
 
     publishingEnabled.value = true
     vi.advanceTimersByTime(250)
 
-    expect(buffer.items.value).toEqual(['new', 'old'])
+    expect(buffer.items.value).toStrictEqual(['new', 'old'])
     expect(buffer.version.value).toBe(1)
   })
 
@@ -186,7 +184,7 @@ describe('bounded log buffer helpers', () => {
     scope.stop()
     vi.advanceTimersByTime(250)
 
-    expect(buffer.items.value).toEqual([])
+    expect(buffer.items.value).toStrictEqual([])
     expect(buffer.version.value).toBe(0)
   })
 })

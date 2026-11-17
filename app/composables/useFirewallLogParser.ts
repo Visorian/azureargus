@@ -1,23 +1,25 @@
 import type { FirewallLogRecord } from '#shared/types/firewall'
 import { parseDnsObservation } from '#shared/utils/dns'
+import { isJsonObject } from '#shared/utils/json'
+import type { JsonObject } from '#shared/utils/json'
 
-const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/i
-const LEGACY_RULE_COLLECTION_PATTERN = /\bRule Collection\s*:\s*(.*?)(?=\.\s*Rule\s*:|$)/i
-const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/i
-const LEGACY_ENDPOINTS_PATTERN = /\bfrom\s+(?<source>\S+)\s+to\s+(?<destination>\S+)/i
-const ENDPOINT_PORT_PATTERN = /^(?<address>.+):(?<port>\d{1,5})$/
-const TRAILING_ENDPOINT_PUNCTUATION_PATTERN = /[.,;]+$/
-const DNS_REQUEST_MESSAGE_PATTERN = /^\s*DNS Request\s*:/i
-const ACTION_FIELD_PATTERN = /\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/i
-const ACTION_KEYWORD_PATTERN = /\b(allow|allowed|deny|denied|dnat|snat)\b/i
-const PROTOCOL_FIELD_PATTERN = /\bprotocol\s*[:=]\s*([a-z0-9-]+)\b/i
-const PROTOCOL_KEYWORD_PATTERN = /\b(tcp|udp|icmp|http|https)\b/i
+const DEFAULT_ACTION_REASON_PATTERN = /\bdefault action\b/iu
+const LEGACY_RULE_COLLECTION_PATTERN = /\bRule Collection\s*:\s*(.*?)(?=\.\s*Rule\s*:|$)/iu
+const LEGACY_RULE_PATTERN = /\bRule\s*:\s*(.*?)\.?\s*$/iu
+const LEGACY_ENDPOINTS_PATTERN = /\bfrom\s+(?<source>\S+)\s+to\s+(?<destination>\S+)/iu
+const ENDPOINT_PORT_PATTERN = /^(?<address>.+):(?<port>\d{1,5})$/u
+const TRAILING_ENDPOINT_PUNCTUATION_PATTERN = /[.,;]+$/u
+const DNS_REQUEST_MESSAGE_PATTERN = /^\s*DNS Request\s*:/iu
+const ACTION_FIELD_PATTERN = /\b(action|decision)\s*[:=]\s*(allow|deny|dnat|snat)\b/iu
+const ACTION_KEYWORD_PATTERN = /\b(allow|allowed|deny|denied|dnat|snat)\b/iu
+const PROTOCOL_FIELD_PATTERN = /\bprotocol\s*[:=]\s*([a-z0-9-]+)\b/iu
+const PROTOCOL_KEYWORD_PATTERN = /\b(tcp|udp|icmp|http|https)\b/iu
 const LEGACY_POLICY_PATTERN =
-  /\bPolicy\s*:\s*(.*?)(?=\.\s*(?:Rule Collection Group|Rule Collection|Rule)\s*:|$)/i
+  /\bPolicy\s*:\s*(.*?)(?=\.\s*(?:Rule Collection Group|Rule Collection|Rule)\s*:|$)/iu
 const LEGACY_RULE_COLLECTION_GROUP_PATTERN =
-  /\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/i
+  /\bRule Collection Group\s*:\s*(.*?)(?=\.\s*(?:Rule Collection|Rule)\s*:|$)/iu
 const ESCAPED_MESSAGE_PROPERTIES_PATTERN =
-  /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/g
+  /"properties"\s*:\s*\{\\"msg\\":\\"((?:\\.|[^"\\])*)\\"\}/gu
 const utf8Decoder = new TextDecoder()
 
 export interface FirewallLogInput {
@@ -28,14 +30,10 @@ export interface FirewallLogInput {
   offset?: number | string
   index?: number
   eventRecordIndex?: number
-  applicationProperties?: Record<string, unknown>
+  applicationProperties?: FirewallLogRecord['applicationProperties']
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function readString(source: Record<string, unknown> | null, keys: string[]): string | undefined {
+function readString(source: JsonObject | null, keys: string[]): string | undefined {
   if (source === null) {
     return undefined
   }
@@ -78,16 +76,18 @@ function extractActionFallback(message: string, category: string) {
   }
 
   const actionMatch = ACTION_FIELD_PATTERN.exec(message)
-  if (actionMatch?.[2]) {
-    return actionMatch[2].toUpperCase()
+  const explicitAction = actionMatch?.[2]
+  if (explicitAction !== undefined) {
+    return explicitAction.toUpperCase()
   }
 
   const keywordMatch = ACTION_KEYWORD_PATTERN.exec(message)
-  if (!keywordMatch?.[1]) {
+  const keyword = keywordMatch?.[1]
+  if (keyword === undefined) {
     return 'Unknown'
   }
 
-  const value = keywordMatch[1].toLowerCase()
+  const value = keyword.toLowerCase()
   if (value === 'allowed') {
     return 'ALLOW'
   }
@@ -100,8 +100,9 @@ function extractActionFallback(message: string, category: string) {
 
 function extractLegacyProtocol(message: string) {
   const explicitMatch = PROTOCOL_FIELD_PATTERN.exec(message)
-  if (explicitMatch?.[1]) {
-    return explicitMatch[1].toUpperCase()
+  const explicitProtocol = explicitMatch?.[1]
+  if (explicitProtocol !== undefined) {
+    return explicitProtocol.toUpperCase()
   }
 
   const keywordMatch = PROTOCOL_KEYWORD_PATTERN.exec(message)
@@ -136,9 +137,11 @@ function parseEndpoint(value: string) {
 
 function extractIpPorts(message: string) {
   const endpoints = LEGACY_ENDPOINTS_PATTERN.exec(message)?.groups
-  if (endpoints?.['source'] && endpoints['destination']) {
-    const source = parseEndpoint(endpoints['source'])
-    const destination = parseEndpoint(endpoints['destination'])
+  const sourceEndpoint = endpoints?.['source']
+  const destinationEndpoint = endpoints?.['destination']
+  if (sourceEndpoint !== undefined && destinationEndpoint !== undefined) {
+    const source = parseEndpoint(sourceEndpoint)
+    const destination = parseEndpoint(destinationEndpoint)
     return {
       sourceIp: source.address,
       sourcePort: source.port,
@@ -147,7 +150,9 @@ function extractIpPorts(message: string) {
     }
   }
 
-  const matches = [...message.matchAll(/\b(?<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?<port>\d{1,5}))?\b/g)]
+  const matches = [
+    ...message.matchAll(/\b(?<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?<port>\d{1,5}))?\b/gu),
+  ]
   const first = matches[0]?.groups
   const second = matches[1]?.groups
 
@@ -229,7 +234,7 @@ export function expandAzureMonitorRecords(body: unknown): unknown[] {
     return expandedBody
   }
 
-  if (isRecord(expandedBody) && Array.isArray(expandedBody['records'])) {
+  if (isJsonObject(expandedBody) && Array.isArray(expandedBody['records'])) {
     return expandedBody['records']
   }
 
@@ -237,34 +242,35 @@ export function expandAzureMonitorRecords(body: unknown): unknown[] {
 }
 
 export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLogRecord {
-  const rawRecord = isRecord(input.raw) ? input.raw : null
-  const properties = rawRecord && isRecord(rawRecord['properties']) ? rawRecord['properties'] : null
+  const rawRecord = isJsonObject(input.raw) ? input.raw : null
+  const properties =
+    rawRecord !== null && isJsonObject(rawRecord['properties']) ? rawRecord['properties'] : null
   const message =
-    readString(properties, ['msg', 'message', 'Message']) ||
-    readString(rawRecord, ['msg', 'message', 'Message']) ||
+    readString(properties, ['msg', 'message', 'Message']) ??
+    readString(rawRecord, ['msg', 'message', 'Message']) ??
     safeJson(input.raw)
 
   const legacyAddressParts = extractIpPorts(message)
   const timestamp = normalizeTimestamp(
-    readString(rawRecord, ['time', 'TimeGenerated', 'timestamp']) ||
-      readString(properties, ['time', 'TimeGenerated', 'timestamp']) ||
+    readString(rawRecord, ['time', 'TimeGenerated', 'timestamp']) ??
+      readString(properties, ['time', 'TimeGenerated', 'timestamp']) ??
       input.enqueuedTimeUtc,
   )
   const category =
-    readString(rawRecord, ['category', 'Category']) ||
-    readString(properties, ['category', 'Category']) ||
+    readString(rawRecord, ['category', 'Category']) ??
+    readString(properties, ['category', 'Category']) ??
     'Unknown'
   const action =
-    readString(properties, ['action', 'Action']) ||
-    readString(rawRecord, ['action', 'Action']) ||
+    readString(properties, ['action', 'Action']) ??
+    readString(rawRecord, ['action', 'Action']) ??
     extractActionFallback(message, category)
   const protocol =
-    readString(properties, ['protocol', 'Protocol']) ||
-    readString(rawRecord, ['protocol', 'Protocol']) ||
+    readString(properties, ['protocol', 'Protocol']) ??
+    readString(rawRecord, ['protocol', 'Protocol']) ??
     extractLegacyProtocol(message)
   const sourceIp =
-    readString(properties, ['sourceIp', 'sourceIP', 'SourceIp', 'SourceIP']) ||
-    readString(rawRecord, ['sourceIp', 'sourceIP', 'SourceIp', 'SourceIP']) ||
+    readString(properties, ['sourceIp', 'sourceIP', 'SourceIp', 'SourceIP']) ??
+    readString(rawRecord, ['sourceIp', 'sourceIP', 'SourceIp', 'SourceIP']) ??
     legacyAddressParts.sourceIp
   const destinationIp =
     readString(properties, [
@@ -277,7 +283,7 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
       'FQDN',
       'destinationFqdn',
       'DestinationFqdn',
-    ]) ||
+    ]) ??
     readString(rawRecord, [
       'destinationIp',
       'destinationIP',
@@ -288,42 +294,42 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
       'FQDN',
       'destinationFqdn',
       'DestinationFqdn',
-    ]) ||
+    ]) ??
     legacyAddressParts.destinationIp
   const sourcePort =
-    readString(properties, ['sourcePort', 'SourcePort']) ||
-    readString(rawRecord, ['sourcePort', 'SourcePort']) ||
+    readString(properties, ['sourcePort', 'SourcePort']) ??
+    readString(rawRecord, ['sourcePort', 'SourcePort']) ??
     legacyAddressParts.sourcePort
   const destinationPort =
-    readString(properties, ['destinationPort', 'DestinationPort']) ||
-    readString(rawRecord, ['destinationPort', 'DestinationPort']) ||
+    readString(properties, ['destinationPort', 'DestinationPort']) ??
+    readString(rawRecord, ['destinationPort', 'DestinationPort']) ??
     legacyAddressParts.destinationPort
   const policy =
-    readString(properties, ['policy', 'Policy', 'policyName']) ||
-    readString(rawRecord, ['policy', 'Policy', 'policyName']) ||
+    readString(properties, ['policy', 'Policy', 'policyName']) ??
+    readString(rawRecord, ['policy', 'Policy', 'policyName']) ??
     extractLegacyPolicy(message)
   const ruleCollectionGroup =
     readString(properties, [
       'ruleCollectionGroup',
       'RuleCollectionGroup',
       'ruleCollectionGroupName',
-    ]) ||
+    ]) ??
     readString(rawRecord, [
       'ruleCollectionGroup',
       'RuleCollectionGroup',
       'ruleCollectionGroupName',
-    ]) ||
+    ]) ??
     extractLegacyRuleCollectionGroup(message)
   const ruleCollection =
-    readString(properties, ['ruleCollection', 'RuleCollection', 'ruleCollectionName']) ||
-    readString(rawRecord, ['ruleCollection', 'RuleCollection', 'ruleCollectionName']) ||
+    readString(properties, ['ruleCollection', 'RuleCollection', 'ruleCollectionName']) ??
+    readString(rawRecord, ['ruleCollection', 'RuleCollection', 'ruleCollectionName']) ??
     extractLegacyRuleCollection(message)
   const explicitRule =
-    readString(properties, ['rule', 'Rule', 'ruleName']) ||
-    readString(rawRecord, ['rule', 'Rule', 'ruleName']) ||
+    readString(properties, ['rule', 'Rule', 'ruleName']) ??
+    readString(rawRecord, ['rule', 'Rule', 'ruleName']) ??
     extractLegacyRule(message)
   const actionReason =
-    readString(properties, ['actionReason', 'ActionReason']) ||
+    readString(properties, ['actionReason', 'ActionReason']) ??
     readString(rawRecord, ['actionReason', 'ActionReason'])
   const usesDefaultAction =
     DEFAULT_ACTION_REASON_PATTERN.test(actionReason ?? '') ||
@@ -336,7 +342,7 @@ export function normalizeFirewallLogRecord(input: FirewallLogInput): FirewallLog
     input.enqueuedTimeUtc === undefined ? undefined : normalizeTimestamp(input.enqueuedTimeUtc)
   const eventRecordIndex = input.eventRecordIndex ?? input.index ?? 0
   const resourceId =
-    readString(rawRecord, ['resourceId', 'ResourceId', '_ResourceId']) ||
+    readString(rawRecord, ['resourceId', 'ResourceId', '_ResourceId']) ??
     readString(properties, ['resourceId', 'ResourceId', '_ResourceId'])
   const id = [
     input.partitionId ?? 'partition',

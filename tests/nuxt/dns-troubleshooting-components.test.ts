@@ -145,9 +145,9 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).not.toContain('Source query failed')
 
     await wrapper.get('[data-dns-entry="entry-1"]').trigger('click')
-    expect(wrapper.emitted('select')?.[0]).toEqual([entry])
+    expect(wrapper.emitted('select')?.[0]).toStrictEqual([entry])
     await wrapper.get('[data-dns-entry="transport-1"]').trigger('click')
-    expect(wrapper.emitted('select')?.[1]).toEqual([transportEntry])
+    expect(wrapper.emitted('select')?.[1]).toStrictEqual([transportEntry])
   })
 
   it('keeps retained DNS results visible and reports partial source failures', async () => {
@@ -231,7 +231,7 @@ describe('DNS troubleshooting components', () => {
       global: { stubs: { RecycleScroller: RecycleScrollerStub } },
     })
     const labels = wrapper.findAll('label').map((field) => field.text())
-    expect(labels).toEqual(
+    expect(labels).toStrictEqual(
       expect.arrayContaining([
         'Search',
         'Query type',
@@ -286,10 +286,17 @@ describe('DNS troubleshooting components', () => {
     expect(select.element.value).toBe('timestamp-desc')
     expect(wrapper.text()).not.toContain('Ascending')
     expect(wrapper.text()).not.toContain('Descending')
-    for (const [choice, expected] of choices) {
+    async function expectSortChoices(remainingChoices: [string, DnsSort][]): Promise<void> {
+      const [next, ...rest] = remainingChoices
+      if (next === undefined) {
+        return
+      }
+      const [choice, expected] = next
       await select.setValue(choice)
-      expect(sort).toEqual(expected)
+      expect(sort).toStrictEqual(expected)
+      await expectSortChoices(rest)
     }
+    await expectSortChoices(choices)
   })
 
   it('shows observed proxy flow and decoded response bytes in detail', async () => {
@@ -473,7 +480,7 @@ describe('DNS troubleshooting components', () => {
     expect(wrapper.text()).toContain('DNS transport detail')
     expect(wrapper.text()).toContain('Not observed')
     expect(wrapper.text()).toContain('168.63.129.16:53')
-    expect(wrapper.findAll('dt').map((label) => label.text())).toEqual(
+    expect(wrapper.findAll('dt').map((label) => label.text())).toStrictEqual(
       expect.arrayContaining([
         'Firewall policy',
         'Rule collection group',

@@ -81,7 +81,7 @@ describe('Azure Log Analytics access discovery', () => {
         new AbortController().signal,
         fetchImplementation,
       ),
-    ).resolves.toEqual({
+    ).resolves.toStrictEqual({
       tenants: [
         {
           defaultDomain: 'target.example',
@@ -102,7 +102,7 @@ describe('Azure Log Analytics access discovery', () => {
     })
     expect(graphRequest?.method).toBe('POST')
     expect(graphRequest?.redirect).toBe('error')
-    expect(graphRequest?.headers).toEqual(
+    expect(graphRequest?.headers).toStrictEqual(
       expect.objectContaining({ authorization: 'Bearer management-token' }),
     )
     expect(parseRequestBody(graphRequest?.body)).toMatchObject({
@@ -171,7 +171,7 @@ describe('Azure Log Analytics access discovery', () => {
     expect(access.workspaces).toHaveLength(1)
     expect(graphRequest).toBe(2)
     expect(readOptions(graphBodies[0])).toBeUndefined()
-    expect(readOptions(graphBodies[1])).toEqual({ $skipToken: 'next-page' })
+    expect(readOptions(graphBodies[1])).toStrictEqual({ $skipToken: 'next-page' })
   })
 
   it('rejects unauthorized ARM access', async () => {

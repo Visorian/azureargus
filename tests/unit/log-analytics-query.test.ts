@@ -255,7 +255,7 @@ describe('Log Analytics response mapping', () => {
       policy: 'app-policy',
       ruleCollectionGroup: 'app-collection-group',
     })
-    expect(result.records[0]?.raw).toEqual({
+    expect(result.records[0]?.raw).toStrictEqual({
       TimeGenerated: '2026-07-10T10:01:00.000Z',
       Category: 'AZFWApplicationRule',
       Action: 'Allow',
@@ -332,7 +332,7 @@ describe('Log Analytics Azure request', () => {
       throw new TypeError('Expected request body')
     }
     expect(url).toBe(`https://api.loganalytics.azure.com/v1/workspaces/${config.workspaceId}/query`)
-    expect(init.headers).toEqual({
+    expect(init.headers).toStrictEqual({
       authorization: 'Bearer access-token',
       'content-type': 'application/json',
     })
@@ -342,7 +342,7 @@ describe('Log Analytics Azure request', () => {
     })
     expect(requestQuery(init)).toContain('AZFWApplicationRule')
     expect(requestQuery(init)).not.toContain('AzureDiagnostics')
-    expect(result.records).toEqual([
+    expect(result.records).toStrictEqual([
       expect.objectContaining({ id: 'query-id:0:0', message: 'resource-specific' }),
     ])
   })
@@ -368,7 +368,7 @@ describe('Log Analytics Azure request', () => {
     expect(requestQuery(init)).toContain('AzureDiagnostics')
     expect(requestQuery(init)).not.toContain('union isfuzzy=true withsource=Category')
     expect(result).toMatchObject({ limit: 1_000, truncated: false })
-    expect(result.records).toEqual([
+    expect(result.records).toStrictEqual([
       expect.objectContaining({
         category: 'AZFWNetworkRule',
         id: 'query-id:azure-diagnostics:0:0',

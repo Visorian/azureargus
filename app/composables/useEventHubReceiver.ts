@@ -1,5 +1,5 @@
 import { computed, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 
 import type { FirewallLogRecord } from '#shared/types/firewall'
 import type { ManagedEventHubStreamRequest } from '#shared/types/managedEventHub'
@@ -22,7 +22,7 @@ import { compareFirewallLogs } from './useLogSorting'
 
 type ReceiverStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'paused' | 'error'
 const LIVE_TAIL_THRESHOLD_MS = 30_000
-const SEQUENCE_NUMBER_PATTERN = /^\d+$/
+const SEQUENCE_NUMBER_PATTERN = /^\d+$/u
 const MANUAL_EVENT_HUB_MAX_BATCH_SIZE = 50
 const MANUAL_EVENT_HUB_MAX_WAIT_TIME_SECONDS = 2
 const MAX_RECONNECT_ATTEMPTS = 5
@@ -30,19 +30,19 @@ const RECONNECT_BASE_DELAY_MS = 1_000
 const RECONNECT_MAX_DELAY_MS = 8_000
 
 export interface ReceiverSubscription {
-  close(): Promise<void>
+  close: () => Promise<void>
 }
 export interface EventHubLogEvent {
   body: unknown
   enqueuedTimeUtc?: Date | string
   sequenceNumber?: number | string
   offset?: number | string
-  properties?: Record<string, unknown>
+  properties?: FirewallLogRecord['applicationProperties']
 }
 
 interface ReceiverPartitionContext {
   partitionId: string
-  updateCheckpoint?(event: EventHubLogEvent): Promise<void>
+  updateCheckpoint?: (event: EventHubLogEvent) => Promise<void>
 }
 
 type ReceiverStartPosition =
@@ -50,22 +50,22 @@ type ReceiverStartPosition =
   | Record<string, { enqueuedOn: Date } | { sequenceNumber: number; isInclusive: false }>
 
 export interface EventHubReceiverClient {
-  close(): Promise<void>
-  getPartitionIds?(): Promise<string[]>
-  subscribe(
+  close: () => Promise<void>
+  getPartitionIds?: () => Promise<string[]>
+  subscribe: (
     handlers: {
-      processEvents(
+      processEvents: (
         events: readonly EventHubLogEvent[],
         context: ReceiverPartitionContext,
-      ): Promise<void>
-      processError(error: unknown): Promise<void>
+      ) => Promise<void>
+      processError: (error: unknown) => Promise<void>
     },
     options: {
       maxBatchSize: number
       maxWaitTimeInSeconds: number
       startPosition: ReceiverStartPosition
     },
-  ): ReceiverSubscription
+  ) => ReceiverSubscription
 }
 
 export type CreateEventHubReceiverClient = (form: EventHubConnectionForm) => EventHubReceiverClient
@@ -78,11 +78,35 @@ export interface EventHubReceiverOptions {
 }
 
 export interface NormalizedLogBatchSink {
-  onClear?(): void
-  onRecords(records: readonly FirewallLogRecord[]): void
+  onClear?: () => void
+  onRecords: (records: readonly FirewallLogRecord[]) => void
 }
 
 export type EventHubConnectionMode = 'manual' | 'managed'
+
+export interface UseEventHubReceiverReturn {
+  status: Ref<ReceiverStatus>
+  actionOptions: Ref<string[]>
+  categoryOptions: Ref<string[]>
+  errors: Ref<string[]>
+  getRawLogs: () => readonly FirewallLogRecord[]
+  logs: Ref<FirewallLogRecord[]>
+  protocolOptions: Ref<string[]>
+  snapshotVersion: Ref<number>
+  visibleLimit: Ref<number>
+  receivedCount: Ref<number>
+  latestSourceTimestamp: Ref<string | null>
+  caughtUp: Ref<boolean>
+  paused: ComputedRef<boolean>
+  getResumeFrom: () => Record<string, number>
+  connect: (form: EventHubConnectionForm, mode?: EventHubConnectionMode) => Promise<boolean>
+  disconnect: () => Promise<void>
+  reset: () => Promise<void>
+  pause: () => void
+  resume: () => void
+  clear: () => void
+  addNormalizedBatchSink: (sink: NormalizedLogBatchSink) => () => boolean
+}
 
 let client: EventHubReceiverClient | null = null
 let subscription: ReceiverSubscription | null = null
@@ -156,7 +180,25 @@ async function loadEventHubClientFactory(): Promise<CreateEventHubReceiverClient
         await eventHubClient.close()
       },
       getPartitionIds: async () => await eventHubClient.getPartitionIds(),
-      subscribe: (handlers, options) => eventHubClient.subscribe(handlers, options),
+      subscribe: (handlers, options) =>
+        eventHubClient.subscribe(
+          {
+            processEvents: async (events, context) => {
+              await handlers.processEvents(events, {
+                partitionId: context.partitionId,
+                updateCheckpoint: async (event) => {
+                  const receivedEvent = events.find((candidate) => candidate === event)
+                  if (receivedEvent === undefined) {
+                    throw new Error('Checkpoint event is not part of the received batch.')
+                  }
+                  await context.updateCheckpoint(receivedEvent)
+                },
+              })
+            },
+            processError: handlers.processError,
+          },
+          options,
+        ),
     }
   }
 }
@@ -203,11 +245,16 @@ function eventToFirewallLogs(
   )
 }
 
+export interface EventHubLogBatch {
+  nextIndex: number
+  records: FirewallLogRecord[]
+}
+
 export function eventsToFirewallLogs(
   events: readonly EventHubLogEvent[],
   partitionId: string,
   startIndex: number,
-) {
+): EventHubLogBatch {
   const records: FirewallLogRecord[] = []
   let nextIndex = startIndex
 
@@ -232,7 +279,7 @@ export function useEventHubReceiver({
     return auth.loggedIn.value
   },
   uiPublishingEnabled,
-}: EventHubReceiverOptions = {}) {
+}: EventHubReceiverOptions = {}): UseEventHubReceiverReturn {
   const status = useState<ReceiverStatus>('event-hub-status', () => 'idle')
   const errors = useState<string[]>('event-hub-errors', () => [])
   const receivedCount = useState('event-hub-received-count', () => 0)
@@ -333,7 +380,8 @@ export function useEventHubReceiver({
         nextLatestSourceTimestamp = record.timestamp
       }
       if (
-        record.enqueuedTimeUtc &&
+        record.enqueuedTimeUtc !== undefined &&
+        record.enqueuedTimeUtc !== '' &&
         (latestEnqueuedTimestamp === null || record.enqueuedTimeUtc > latestEnqueuedTimestamp)
       ) {
         latestEnqueuedTimestamp = record.enqueuedTimeUtc
@@ -446,7 +494,7 @@ export function useEventHubReceiver({
         try {
           await activeManagedStream
         } catch (error: unknown) {
-          if (!activeManagedController?.signal.aborted) {
+          if (activeManagedController?.signal.aborted !== true) {
             failures.push(error)
           }
         }

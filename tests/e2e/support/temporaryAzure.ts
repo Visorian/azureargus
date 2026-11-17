@@ -171,7 +171,7 @@ export async function mockTemporaryAzure(page: Page) {
     if (url.pathname.endsWith('/oauth2/v2.0/authorize')) {
       const redirectUri = url.searchParams.get('redirect_uri')
       const state = url.searchParams.get('state')
-      if (!redirectUri || !state) {
+      if (redirectUri === null || redirectUri === '' || state === null || state === '') {
         throw new Error('Expected MSAL authorization parameters')
       }
       const code = `temporary-code-${++authorizationCode}`

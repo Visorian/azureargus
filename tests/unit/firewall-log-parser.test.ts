@@ -7,20 +7,20 @@ describe('firewall log parser', () => {
   it('expands Azure Monitor Event Hub records payloads', () => {
     const records = [{ category: 'AZFWNetworkRule' }, { category: 'AZFWApplicationRule' }]
 
-    expect(expandAzureMonitorRecords({ records })).toEqual(records)
+    expect(expandAzureMonitorRecords({ records })).toStrictEqual(records)
   })
 
   it('expands UTF-8 encoded Azure Monitor Event Hub payloads', () => {
     const records = [{ category: 'AZFWNetworkRule' }, { category: 'AZFWApplicationRule' }]
     const body = new TextEncoder().encode(JSON.stringify({ records }))
 
-    expect(expandAzureMonitorRecords(body)).toEqual(records)
+    expect(expandAzureMonitorRecords(body)).toStrictEqual(records)
   })
 
   it('recovers escaped DNS message properties in Azure Monitor payloads', () => {
     const body = String.raw`{"records":[{"time":"2026-07-16T16:28:38.728265+00:00","properties": {\"msg\":\"DNS Request: 192.168.179.30:54245 - 49226 AAAA IN \\ 100.112.0.22. udp 42 false 1224 NXDOMAIN\"},"category":"AzureFirewallDnsProxy"}]}`
 
-    expect(expandAzureMonitorRecords(body)).toEqual([
+    expect(expandAzureMonitorRecords(body)).toStrictEqual([
       {
         time: '2026-07-16T16:28:38.728265+00:00',
         properties: {

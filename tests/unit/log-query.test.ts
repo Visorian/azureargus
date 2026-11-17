@@ -35,7 +35,7 @@ describe('log query', () => {
       (value) => value.toUpperCase(),
     )
 
-    expect(result).toEqual(['ALLOW', 'DENY'])
+    expect(result).toStrictEqual(['ALLOW', 'DENY'])
   })
 
   it('toggles exact quick-filter values case-insensitively', () => {
@@ -47,14 +47,14 @@ describe('log query', () => {
   })
 
   it('toggles multiple category quick-filter values case-insensitively', () => {
-    expect(toggleLogCategoryFilterValue([], ' AZFWNetworkRule ')).toEqual(['AZFWNetworkRule'])
-    expect(toggleLogCategoryFilterValue(['AZFWNetworkRule'], 'AZFWApplicationRule')).toEqual([
+    expect(toggleLogCategoryFilterValue([], ' AZFWNetworkRule ')).toStrictEqual(['AZFWNetworkRule'])
+    expect(toggleLogCategoryFilterValue(['AZFWNetworkRule'], 'AZFWApplicationRule')).toStrictEqual([
       'AZFWNetworkRule',
       'AZFWApplicationRule',
     ])
     expect(
       toggleLogCategoryFilterValue(['AZFWNetworkRule', 'AZFWApplicationRule'], 'azfwnetworkrule'),
-    ).toEqual(['AZFWApplicationRule'])
+    ).toStrictEqual(['AZFWApplicationRule'])
     expect(isLogCategoryFilterValueActive([' AZFWNetworkRule '], 'azfwnetworkrule')).toBe(true)
   })
 
@@ -72,7 +72,7 @@ describe('log query', () => {
       filters,
     )
 
-    expect(result.map((log) => log.id)).toEqual(['1'])
+    expect(result.map((log) => log.id)).toStrictEqual(['1'])
   })
 
   it('matches action and protocol filters case-insensitively', () => {
@@ -88,7 +88,7 @@ describe('log query', () => {
       filters,
     )
 
-    expect(result.map((log) => log.id)).toEqual(['1'])
+    expect(result.map((log) => log.id)).toStrictEqual(['1'])
   })
 
   it('matches source and destination addresses and ports exactly', () => {
@@ -111,28 +111,28 @@ describe('log query', () => {
     const filters = createDefaultLogFilters()
 
     filters.source = '10.141.8.1'
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(['exact'])
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toStrictEqual(['exact'])
 
     filters.source = '443'
-    expect(filterFirewallLogs(logs, filters)).toEqual([])
+    expect(filterFirewallLogs(logs, filters)).toStrictEqual([])
 
     filters.source = ''
     filters.sourcePort = ' 443 '
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(['exact'])
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toStrictEqual(['exact'])
 
     filters.sourcePort = ''
     filters.destination = 'example.com'
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(['exact'])
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toStrictEqual(['exact'])
 
     filters.destination = 'EXAMPLE.COM:8443'
-    expect(filterFirewallLogs(logs, filters)).toEqual([])
+    expect(filterFirewallLogs(logs, filters)).toStrictEqual([])
 
     filters.destination = ''
     filters.destinationPort = '8443'
-    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toEqual(['exact'])
+    expect(filterFirewallLogs(logs, filters).map((log) => log.id)).toStrictEqual(['exact'])
 
     filters.sourcePort = '4431'
-    expect(filterFirewallLogs(logs, filters)).toEqual([])
+    expect(filterFirewallLogs(logs, filters)).toStrictEqual([])
   })
 
   it('matches any selected category exactly and case-insensitively', () => {
@@ -149,7 +149,7 @@ describe('log query', () => {
       filters,
     )
 
-    expect(result.map((log) => log.id)).toEqual(['network', 'application'])
+    expect(result.map((log) => log.id)).toStrictEqual(['network', 'application'])
   })
 
   it('returns newest visible rows directly when no filters are active', () => {
@@ -161,7 +161,7 @@ describe('log query', () => {
       2,
     )
 
-    expect(result.map((log) => log.id)).toEqual(['newest', 'middle'])
+    expect(result.map((log) => log.id)).toStrictEqual(['newest', 'middle'])
   })
 
   it('applies the visible limit after filtering', () => {
@@ -179,7 +179,7 @@ describe('log query', () => {
       2,
     )
 
-    expect(result.map((log) => log.id)).toEqual(['tcp-1', 'tcp-2'])
+    expect(result.map((log) => log.id)).toStrictEqual(['tcp-1', 'tcp-2'])
   })
 
   it('limits visible filtered matches', () => {
@@ -196,7 +196,7 @@ describe('log query', () => {
       2,
     )
 
-    expect(result.map((log) => log.id)).toEqual(['tcp-1', 'tcp-2'])
+    expect(result.map((log) => log.id)).toStrictEqual(['tcp-1', 'tcp-2'])
   })
 
   it('preserves active filtered matches across nonmatching stream batches', () => {
@@ -208,8 +208,11 @@ describe('log query', () => {
 
     const result = mergeFilteredLogCache(currentMatches, cached, 2)
 
-    expect(result.map((log) => log.id)).toEqual(['tcp-new', 'tcp-1'])
-    expect(mergeFilteredLogCache([], cached, 2).map((log) => log.id)).toEqual(['tcp-1', 'tcp-2'])
+    expect(result.map((log) => log.id)).toStrictEqual(['tcp-new', 'tcp-1'])
+    expect(mergeFilteredLogCache([], cached, 2).map((log) => log.id)).toStrictEqual([
+      'tcp-1',
+      'tcp-2',
+    ])
   })
 
   it('rebuilds filtered matches when dataset identity changes', async () => {
@@ -222,13 +225,13 @@ describe('log query', () => {
 
     filters.protocol = 'tcp'
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['old'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['old'])
 
     logs.value = [createLog({ id: 'new', protocol: 'TCP', searchableText: 'tcp' })]
     datasetKey.value += 1
     await nextTick()
 
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['new'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['new'])
   })
 
   it('keeps filters isolated between query instances', async () => {
@@ -240,7 +243,7 @@ describe('log query', () => {
 
     expect(realTime.filters.action).toBe('Deny')
     expect(logAnalysis.filters.action).toBe('')
-    expect(logAnalysis.filteredLogs.value.map((log) => log.id)).toEqual(['log-analysis'])
+    expect(logAnalysis.filteredLogs.value.map((log) => log.id)).toStrictEqual(['log-analysis'])
   })
 
   it('reads the plain raw source only while filters are active', async () => {
@@ -250,20 +253,20 @@ describe('log query', () => {
       createLog({ id: 'raw-tcp', protocol: 'TCP', searchableText: 'tcp' }),
     ]
     const rawVersion = ref(0)
-    const getRecords = vi.fn(() => rawRecords)
+    const getRecords = vi.fn<() => readonly FirewallLogRecord[]>(() => rawRecords)
     const { filteredLogs, filters } = useLogQuery(logs, {
       rawSource: { getRecords, version: rawVersion },
       visibleLimit: ref(10),
     })
 
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['visible-udp'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['visible-udp'])
     expect(getRecords).not.toHaveBeenCalled()
 
     filters.protocol = 'tcp'
     await nextTick()
 
     expect(getRecords).toHaveBeenCalledOnce()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['raw-tcp'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['raw-tcp'])
   })
 
   it('retains surfaced matches across filter changes after raw-buffer eviction', async () => {
@@ -307,7 +310,7 @@ describe('log query', () => {
 
     filters.search = destinationIp
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual([
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual([
       'nat-2',
       'network-2',
       'nat-1',
@@ -318,7 +321,7 @@ describe('log query', () => {
     rawRecords = [latestLog]
     rawVersion.value += 1
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual([
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual([
       'nat-2',
       'network-2',
       'nat-1',
@@ -327,11 +330,11 @@ describe('log query', () => {
 
     filters.category = ['AZFWNatRule']
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['nat-2', 'nat-1'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['nat-2', 'nat-1'])
 
     filters.category = []
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual([
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual([
       'nat-2',
       'network-2',
       'nat-1',
@@ -340,11 +343,11 @@ describe('log query', () => {
 
     filters.search = ''
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['latest'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['latest'])
 
     filters.category = ['azfwnatrule']
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['nat-2', 'nat-1'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['nat-2', 'nat-1'])
   })
 
   it('discards retained matches when the live dataset is cleared', async () => {
@@ -363,7 +366,7 @@ describe('log query', () => {
 
     filters.search = '131.189.255.123'
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['old-nat'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['old-nat'])
 
     logs.value = []
     rawRecords = []
@@ -373,7 +376,7 @@ describe('log query', () => {
     filters.search = ''
     filters.category = ['AZFWNatRule']
     await nextTick()
-    expect(filteredLogs.value).toEqual([])
+    expect(filteredLogs.value).toStrictEqual([])
   })
 
   it('discards retained matches when the hidden live dataset is cleared', async () => {
@@ -400,7 +403,7 @@ describe('log query', () => {
 
     filters.category = ['AZFWNatRule']
     await nextTick()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['old-nat'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['old-nat'])
 
     active.value = false
     logs.value = []
@@ -414,13 +417,13 @@ describe('log query', () => {
     await nextTick()
 
     expect(getRecords).toHaveBeenCalledTimes(callsAfterClear + 1)
-    expect(filteredLogs.value).toEqual([])
+    expect(filteredLogs.value).toStrictEqual([])
   })
 
   it('does not scan hidden datasets and catches up when reactivated', async () => {
     const active = ref(false)
     const logs = ref([createLog({ id: 'first', protocol: 'TCP', searchableText: 'tcp' })])
-    const getRecords = vi.fn(() => logs.value)
+    const getRecords = vi.fn<() => readonly FirewallLogRecord[]>(() => logs.value)
     const { filteredLogs, filters } = useLogQuery(logs, {
       active,
       rawSource: { getRecords, version: ref(0) },
@@ -430,13 +433,13 @@ describe('log query', () => {
     await nextTick()
 
     expect(getRecords).not.toHaveBeenCalled()
-    expect(filteredLogs.value).toEqual([])
+    expect(filteredLogs.value).toStrictEqual([])
 
     logs.value = [createLog({ id: 'latest', protocol: 'TCP', searchableText: 'tcp' })]
     active.value = true
     await nextTick()
 
     expect(getRecords).toHaveBeenCalledOnce()
-    expect(filteredLogs.value.map((log) => log.id)).toEqual(['latest'])
+    expect(filteredLogs.value.map((log) => log.id)).toStrictEqual(['latest'])
   })
 })

@@ -12,7 +12,7 @@ interface CountryRecord {
 }
 
 export interface IpCountryReader {
-  country(ip: string): CountryRecord
+  country: (ip: string) => CountryRecord
 }
 
 interface IpCountryLookupOptions {
@@ -23,7 +23,7 @@ interface IpCountryLookupOptions {
 const nonPublicIpv4Addresses = new BlockList()
 const nonPublicIpv6Addresses = new BlockList()
 const publicIpv4Exceptions = new Set(['192.0.0.9', '192.0.0.10'])
-const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/
+const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/u
 
 for (const [network, prefix] of [
   ['0.0.0.0', 8],
@@ -74,7 +74,7 @@ export class IpCountryLookupUnavailableError extends Error {
 
 function normalizeCountryCode(value: string | undefined) {
   const countryCode = value?.trim().toUpperCase()
-  return countryCode && COUNTRY_CODE_PATTERN.test(countryCode) ? countryCode : null
+  return countryCode !== undefined && COUNTRY_CODE_PATTERN.test(countryCode) ? countryCode : null
 }
 
 function isPublicIp(ip: string) {
@@ -91,12 +91,16 @@ function isPublicIp(ip: string) {
   return false
 }
 
+export interface IpCountryLookup {
+  lookup: (ip: string, databasePath: string) => Promise<string | null>
+}
+
 export function createIpCountryLookup({
   onInitializationError = (message) => {
     console.error(message)
   },
   openReader = async (databasePath) => await Reader.open(databasePath),
-}: IpCountryLookupOptions = {}) {
+}: IpCountryLookupOptions = {}): IpCountryLookup {
   let readerPromise: Promise<IpCountryReader> | null = null
   let initializationErrorReported = false
 

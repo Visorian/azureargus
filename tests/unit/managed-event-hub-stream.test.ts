@@ -6,7 +6,10 @@ import {
   pipeManagedEventHubStream,
   validateManagedEventHubStreamRequest,
 } from '../../server/utils/managedEventHubStream'
-import type { ManagedEventHubClient } from '../../server/utils/managedEventHubStream'
+import type {
+  ManagedEventHubClient,
+  ManagedEventHubSubscription,
+} from '../../server/utils/managedEventHubStream'
 
 type StreamHandlers = Parameters<ManagedEventHubClient['subscribe']>[0]
 
@@ -19,8 +22,8 @@ function createPartitionContext(partitionId: string) {
 
 function createClient() {
   let handlers: StreamHandlers | undefined
-  const subscriptionClose = vi.fn(async () => {})
-  const clientClose = vi.fn(async () => {})
+  const subscriptionClose = vi.fn<ManagedEventHubSubscription['close']>(async () => {})
+  const clientClose = vi.fn<ManagedEventHubClient['close']>(async () => {})
   const subscribe = vi.fn<ManagedEventHubClient['subscribe']>((nextHandlers) => {
     handlers = nextHandlers
     return { close: subscriptionClose }
@@ -161,7 +164,7 @@ describe('managed Event Hub stream', () => {
     )
 
     const reader = managed.stream.getReader()
-    await expect(readEnvelope(reader)).resolves.toEqual({
+    await expect(readEnvelope(reader)).resolves.toStrictEqual({
       type: 'events',
       events: [
         {
@@ -192,7 +195,7 @@ describe('managed Event Hub stream', () => {
       maxBatchSize: 50,
       maxWaitTimeInSeconds: 2,
     })
-    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toEqual({
+    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toStrictEqual({
       enqueuedOn: new Date(-3 * 60_000),
     })
 
@@ -251,7 +254,7 @@ describe('managed Event Hub stream', () => {
     const reader = managed.stream.getReader()
     const context = createPartitionContext('0')
 
-    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toEqual({
+    expect(fixture.subscribe.mock.calls[0]?.[1].startPosition).toStrictEqual({
       '0': { sequenceNumber: 40, isInclusive: false },
       '1': { enqueuedOn: new Date(-3 * 60_000) },
     })
@@ -330,7 +333,7 @@ describe('managed Event Hub stream', () => {
     ).resolves.toBe('pending')
 
     const finalPartition = fixture.getHandlers().processEvents([], createPartitionContext('0'))
-    await expect(caughtUpRead.then(parseEnvelope)).resolves.toEqual({
+    await expect(caughtUpRead.then(parseEnvelope)).resolves.toStrictEqual({
       type: 'caught-up',
     })
     await finalPartition
@@ -359,7 +362,7 @@ describe('managed Event Hub stream', () => {
 
     const caughtUp = fixture.getHandlers().processEvents([], createPartitionContext('0'))
 
-    await expect(readEnvelope(reader)).resolves.toEqual({ type: 'caught-up' })
+    await expect(readEnvelope(reader)).resolves.toStrictEqual({ type: 'caught-up' })
     await caughtUp
     await reader.cancel()
   })
@@ -439,7 +442,7 @@ describe('managed Event Hub stream', () => {
 
     const heartbeat = readEnvelope(reader)
     await vi.advanceTimersByTimeAsync(1_000)
-    await expect(heartbeat).resolves.toEqual({ type: 'heartbeat' })
+    await expect(heartbeat).resolves.toStrictEqual({ type: 'heartbeat' })
 
     await reader.cancel()
     await managed.cleanup()
@@ -447,10 +450,11 @@ describe('managed Event Hub stream', () => {
     expect(fixture.clientClose).toHaveBeenCalledOnce()
   })
 
-  it('reports fixed expiry and failed session revalidation before cleanup', async () => {
-    vi.useFakeTimers()
+  it.each(['expiry', 'revalidation'] as const)(
+    'reports session end by %s before cleanup',
+    async (trigger) => {
+      vi.useFakeTimers()
 
-    for (const trigger of ['expiry', 'revalidation'] as const) {
       const fixture = createClient()
       const managed = createManagedEventHubStream({
         client: fixture.client,
@@ -466,7 +470,7 @@ describe('managed Event Hub stream', () => {
       const error = readEnvelope(reader)
 
       await vi.advanceTimersByTimeAsync(1_000)
-      await expect(error).resolves.toEqual({
+      await expect(error).resolves.toStrictEqual({
         type: 'error',
         message: 'Session expired',
       })
@@ -475,8 +479,8 @@ describe('managed Event Hub stream', () => {
       })
       expect(fixture.subscriptionClose).toHaveBeenCalledOnce()
       await reader.cancel()
-    }
-  })
+    },
+  )
 
   it('cleans up at session expiry even when an event write is backpressured', async () => {
     vi.useFakeTimers()

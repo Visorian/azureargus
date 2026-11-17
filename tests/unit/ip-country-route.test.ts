@@ -2,24 +2,18 @@ import { IncomingMessage, ServerResponse } from 'node:http'
 import { Socket } from 'node:net'
 
 import { createEvent } from 'h3'
-import type { H3Event } from 'h3'
 
-import {
-  ipCountryLookup,
-  IpCountryLookupUnavailableError,
-} from '../../server/utils/ipCountryLookup'
-import type * as IpCountryLookupModule from '../../server/utils/ipCountryLookup'
+import { createIpCountryHandler } from '../../server/utils/ipCountryHandler'
+import { IpCountryLookupUnavailableError } from '../../server/utils/ipCountryLookup'
+import type { IpCountryLookup } from '../../server/utils/ipCountryLookup'
 
-vi.mock('../../server/utils/ipCountryLookup', async (importOriginal) => ({
-  ...(await importOriginal<typeof IpCountryLookupModule>()),
-  ipCountryLookup: { lookup: vi.fn() },
-}))
-
-let handler: (event: H3Event) => Promise<unknown>
-
-function isEventHandler(value: unknown): value is (event: H3Event) => Promise<unknown> {
-  return typeof value === 'function'
-}
+const ipCountryLookup = { lookup: vi.fn<IpCountryLookup['lookup']>() }
+const handler = createIpCountryHandler({
+  getRuntimeConfig: () => ({
+    ipCountry: { databasePath: '/var/lib/geoip/dbip-country-lite.mmdb' },
+  }),
+  lookup: ipCountryLookup,
+})
 
 function createTestEvent(body: unknown) {
   const request = new IncomingMessage(new Socket())
@@ -33,35 +27,17 @@ function createTestEvent(body: unknown) {
   return createEvent(request, response)
 }
 
-beforeAll(async () => {
-  vi.stubGlobal('defineEventHandler', <T>(eventHandler: T) => eventHandler)
-  vi.stubGlobal('useRuntimeConfig', () => ({
-    ipCountry: { databasePath: '/var/lib/geoip/dbip-country-lite.mmdb' },
-  }))
-  const routeModule: { default: unknown } = await import('../../server/api/ip-country.post')
-  if (!isEventHandler(routeModule.default)) {
-    throw new TypeError('IP country route has no default event handler.')
-  }
-  handler = routeModule.default
-})
-
 beforeEach(() => {
-  vi.mocked(ipCountryLookup.lookup).mockReset().mockResolvedValue(null)
-})
-
-afterAll(() => {
-  vi.unstubAllGlobals()
+  ipCountryLookup.lookup.mockReset().mockResolvedValue(null)
 })
 
 describe('IP country route', () => {
   it('serves anonymous bounded lookups and preserves first-seen order', async () => {
-    vi.mocked(ipCountryLookup.lookup).mockImplementation(async (ip) =>
-      ip === '8.8.8.8' ? 'US' : null,
-    )
+    ipCountryLookup.lookup.mockImplementation(async (ip) => (ip === '8.8.8.8' ? 'US' : null))
 
     await expect(
       handler(createTestEvent({ ips: ['8.8.8.8', '10.0.0.1', 'example.com', '8.8.8.8'] })),
-    ).resolves.toEqual({
+    ).resolves.toStrictEqual({
       results: [
         { ip: '8.8.8.8', countryCode: 'US' },
         { ip: '10.0.0.1', countryCode: null },
@@ -74,7 +50,7 @@ describe('IP country route', () => {
   it('accepts exactly 32 unique inputs', async () => {
     const ips = Array.from({ length: 32 }, (_, index) => `8.8.8.${index}`)
 
-    await expect(handler(createTestEvent({ ips }))).resolves.toEqual({
+    await expect(handler(createTestEvent({ ips }))).resolves.toStrictEqual({
       results: ips.map((ip) => ({ ip, countryCode: null })),
     })
     expect(ipCountryLookup.lookup).toHaveBeenCalledTimes(32)
@@ -95,7 +71,7 @@ describe('IP country route', () => {
   })
 
   it('returns sanitized 503 when database is unavailable', async () => {
-    vi.mocked(ipCountryLookup.lookup).mockRejectedValueOnce(new IpCountryLookupUnavailableError())
+    ipCountryLookup.lookup.mockRejectedValueOnce(new IpCountryLookupUnavailableError())
 
     await expect(handler(createTestEvent({ ips: ['8.8.8.8'] }))).rejects.toMatchObject({
       statusCode: 503,

@@ -1,10 +1,19 @@
+import type { Ref } from 'vue'
+
 import type { DeploymentCapabilities } from '#shared/types/deploymentCapabilities'
 
 type CapabilityStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 let pendingLoad: Promise<DeploymentCapabilities> | null = null
 
-export function useDeploymentCapabilities() {
+export interface UseDeploymentCapabilitiesReturn {
+  capabilities: Ref<DeploymentCapabilities | null>
+  lastError: Ref<string | null>
+  load: (force?: boolean) => Promise<DeploymentCapabilities>
+  status: Ref<CapabilityStatus>
+}
+
+export function useDeploymentCapabilities(): UseDeploymentCapabilitiesReturn {
   const capabilities = useState<DeploymentCapabilities | null>(
     'deployment-capabilities',
     () => null,

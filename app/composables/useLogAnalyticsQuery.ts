@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref, ShallowRef } from 'vue'
 
 import type {
   FirewallLogFilters,
@@ -39,6 +39,30 @@ interface UseLogAnalyticsQueryOptions {
   draftRange?: LogAnalysisDateRange
 }
 
+export interface UseLogAnalyticsQueryReturn {
+  records: ShallowRef<FirewallLogRecord[]>
+  status: Ref<LogAnalyticsQueryStatus>
+  lastError: Ref<string | null>
+  truncated: Ref<boolean>
+  limit: Ref<number | null>
+  hasRun: Ref<boolean>
+  datasetVersion: Ref<number>
+  draftRange: LogAnalysisDateRange
+  appliedRange: Ref<{ from: string; to: string } | null>
+  appliedFilters: FirewallLogFilters
+  rangeError: ComputedRef<string | null>
+  rangeDirty: ComputedRef<boolean>
+  filtersDirty: ComputedRef<boolean>
+  actionOptions: Ref<string[]>
+  protocolOptions: Ref<string[]>
+  visibleLimit: ComputedRef<number>
+  abort: () => void
+  clear: () => void
+  run: (requestForExecution?: QueryRequest) => Promise<boolean>
+  addActionOption: (value: string) => void
+  addProtocolOption: (value: string) => void
+}
+
 function queryError(error: unknown) {
   if (typeof error === 'object' && error !== null && 'data' in error) {
     const data = error.data
@@ -57,14 +81,16 @@ const collator = new Intl.Collator()
 function mergeOptions(current: readonly string[], values: readonly (string | undefined)[]) {
   const options = new Map(current.map((value) => [value.toLowerCase(), value]))
   for (const value of values) {
-    if (value?.trim()) {
+    if (value !== undefined && value.trim() !== '') {
       options.set(value.trim().toLowerCase(), value.trim())
     }
   }
   return [...options.values()].toSorted((left, right) => collator.compare(left, right))
 }
 
-export function useLogAnalyticsQuery(options: UseLogAnalyticsQueryOptions) {
+export function useLogAnalyticsQuery(
+  options: UseLogAnalyticsQueryOptions,
+): UseLogAnalyticsQueryReturn {
   let request: QueryRequest
   if (options.request) {
     request = options.request

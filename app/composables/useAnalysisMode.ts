@@ -5,21 +5,30 @@ import { onBeforeRouteLeave } from 'vue-router'
 export type AnalysisMode = 'real-time-analysis' | 'log-analysis'
 
 interface UseAnalysisModeOptions {
-  abortLogAnalysis(): void
+  abortLogAnalysis: () => void
   canUseLogAnalysis: Readonly<Ref<boolean>>
   canUseRealTime: Readonly<Ref<boolean>>
-  closeDetail(): void
-  disconnectRealTime(): Promise<void>
+  closeDetail: () => void
+  disconnectRealTime: () => Promise<void>
   mode: Ref<AnalysisMode>
-  pauseRealTime(): void
-  resetRealTime(): Promise<void>
+  pauseRealTime: () => void
+  resetRealTime: () => Promise<void>
+  /** Registers the teardown guard for leaving the route; defaults to Vue Router's guard. */
+  onRouteLeave?: (guard: () => Promise<void>) => void
+}
+
+export interface AnalysisModeState {
+  commitLogAnalysis: () => Promise<boolean>
+  lastError: Ref<string | null>
+  setMode: (nextMode: AnalysisMode) => Promise<boolean>
+  transitioning: Ref<boolean>
 }
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Could not switch analysis mode.'
 }
 
-export function useAnalysisMode(options: UseAnalysisModeOptions) {
+export function useAnalysisMode(options: UseAnalysisModeOptions): AnalysisModeState {
   const transitioning = ref(false)
   const lastError = ref<string | null>(null)
   let logAnalysisCommitted = false
@@ -72,7 +81,8 @@ export function useAnalysisMode(options: UseAnalysisModeOptions) {
     }
   }
 
-  onBeforeRouteLeave(async () => {
+  const onRouteLeave = options.onRouteLeave ?? onBeforeRouteLeave
+  onRouteLeave(async () => {
     options.abortLogAnalysis()
     try {
       await options.disconnectRealTime()

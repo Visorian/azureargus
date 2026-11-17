@@ -10,11 +10,20 @@ interface BoundedLogBufferOptions<T> {
   publishedSize?: Readonly<Ref<number>>
 }
 
+export interface UseBoundedLogBufferReturn<T> {
+  clear: () => void
+  flush: () => void
+  getRawItems: () => readonly T[]
+  items: Ref<T[]>
+  pushMany: (nextItems: readonly T[]) => void
+  version: Ref<number>
+}
+
 function normalizeBufferSize(maxSize: number) {
   return Number.isFinite(maxSize) ? Math.max(0, Math.floor(maxSize)) : 0
 }
 
-export function trimToBufferSize<T>(items: readonly T[], maxSize: number) {
+export function trimToBufferSize<T>(items: readonly T[], maxSize: number): T[] {
   const boundedSize = normalizeBufferSize(maxSize)
   if (items.length <= boundedSize) {
     return [...items]
@@ -27,7 +36,7 @@ export function prependToBoundedBuffer<T>(
   currentItems: readonly T[],
   nextItems: readonly T[],
   maxSize: number,
-) {
+): T[] {
   const boundedSize = normalizeBufferSize(maxSize)
   if (boundedSize === 0) {
     return []
@@ -54,7 +63,7 @@ export function mergeIntoBoundedBuffer<T>(
   nextItems: readonly T[],
   maxSize: number,
   compare: (left: T, right: T) => number,
-) {
+): T[] {
   const boundedSize = normalizeBufferSize(maxSize)
   if (boundedSize === 0) {
     return []
@@ -92,7 +101,7 @@ export function useBoundedLogBuffer<T>(
     publishingEnabled = ref(true),
     publishedSize = maxSize,
   }: BoundedLogBufferOptions<T> = {},
-) {
+): UseBoundedLogBufferReturn<T> {
   const items = useState<T[]>(key, () => shallowRef<T[]>([]))
   const rawItems = useState<T[]>(`${key}-raw`, () =>
     shallowRef(items.value.map((item) => toRaw(item))),

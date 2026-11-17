@@ -11,7 +11,7 @@ import {
   mockManagedEventHubStream,
 } from './support/managedEventHub'
 
-const LOGS_URL_PATTERN = /\/logs/
+const LOGS_URL_PATTERN = /\/logs/u
 const RETENTION_OFF_ROW_PATTERN = /Jul 21.*10:00:00.*Network rules/u
 const RETENTION_ON_ROW_PATTERN = /Jul 21.*10:01:00.*Network rules/u
 

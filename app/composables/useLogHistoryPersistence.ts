@@ -1,3 +1,5 @@
+import type { Ref } from 'vue'
+
 import type { FirewallLogRecord } from '#shared/types/firewall'
 import { createLogHistoryPersistenceQueue } from '~/utils/logHistoryPersistenceQueue'
 import type { LogHistoryPersistenceQueue } from '~/utils/logHistoryPersistenceQueue'
@@ -6,6 +8,20 @@ import type { LogHistoryRangeQuery, LogHistoryStoreApi } from '~/utils/logHistor
 
 let sharedQueue: LogHistoryPersistenceQueue | null = null
 let startupCleanupPromise: Promise<void> | null = null
+
+export interface UseLogHistoryPersistenceReturn {
+  clearHistory: () => Promise<boolean>
+  clearQueueIfDisabled: () => void
+  disable: () => void
+  disableAndClearHistory: () => Promise<void>
+  enable: () => void
+  enabled: Ref<boolean>
+  flush: () => Promise<void>
+  historyResults: Ref<PersistedFirewallLogRecord[]>
+  lastError: Ref<string | null>
+  queueRecords: (records: readonly FirewallLogRecord[]) => void
+  queryHistoryRange: (query: LogHistoryRangeQuery) => Promise<PersistedFirewallLogRecord[]>
+}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown log history persistence error.'
@@ -60,7 +76,7 @@ function createBrowserLogHistoryStore(): LogHistoryStoreApi {
   }
 }
 
-export function useLogHistoryPersistence() {
+export function useLogHistoryPersistence(): UseLogHistoryPersistenceReturn {
   const enabled = useState('log-history-enabled', () => false)
   const historyResults = useState<PersistedFirewallLogRecord[]>('log-history-results', () => [])
   const lastError = useState<string | null>('log-history-last-error', () => null)

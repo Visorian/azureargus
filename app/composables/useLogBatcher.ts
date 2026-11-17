@@ -5,10 +5,17 @@ interface LogBatcherOptions<T> {
   onFlush: (items: readonly T[]) => void
 }
 
+export interface LogBatcher<T> {
+  readonly pendingCount: number
+  clear: () => void
+  flush: () => void
+  pushMany: (items: readonly T[]) => void
+}
+
 export function createLogBatcher<T>({
   flushIntervalMs = DEFAULT_LOG_BATCH_FLUSH_INTERVAL_MS,
   onFlush,
-}: LogBatcherOptions<T>) {
+}: LogBatcherOptions<T>): LogBatcher<T> {
   let pendingItems: T[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -56,7 +63,7 @@ export function createLogBatcher<T>({
   }
 
   return {
-    get pendingCount() {
+    get pendingCount(): number {
       return pendingItems.length
     },
     clear,

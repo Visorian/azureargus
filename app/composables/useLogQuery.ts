@@ -1,12 +1,12 @@
 import { computed, reactive, shallowRef, watch } from 'vue'
-import type { Ref } from 'vue'
+import type { Ref, ShallowRef } from 'vue'
 
 import type { FirewallLogFilters, FirewallLogRecord } from '#shared/types/firewall'
 
 import { trimToBufferSize } from './useBoundedLogBuffer'
 
 interface LogQueryRawSource {
-  getRecords(): readonly FirewallLogRecord[]
+  getRecords: () => readonly FirewallLogRecord[]
   version: Readonly<Ref<number>>
 }
 
@@ -16,6 +16,12 @@ interface UseLogQueryOptions {
   filters?: FirewallLogFilters
   rawSource?: LogQueryRawSource
   visibleLimit?: Readonly<Ref<number>>
+}
+
+export interface UseLogQueryReturn {
+  filters: FirewallLogFilters
+  filteredLogs: ShallowRef<FirewallLogRecord[]>
+  resetFilters: () => void
 }
 
 export function createDefaultLogFilters(): FirewallLogFilters {
@@ -36,13 +42,13 @@ const filterOptionCollator = new Intl.Collator(undefined, { sensitivity: 'base' 
 export function createCaseInsensitiveFilterOptions(
   values: readonly (string | undefined)[],
   formatValue: (value: string) => string = (value) => value,
-) {
+): string[] {
   const seen = new Set<string>()
   const options: string[] = []
 
   for (const value of values) {
     const trimmed = value?.trim()
-    if (!trimmed) {
+    if (trimmed === undefined || trimmed === '') {
       continue
     }
 
@@ -77,7 +83,7 @@ export function filterFirewallLogs(
   logs: readonly FirewallLogRecord[],
   filters: FirewallLogFilters,
   limit?: number,
-) {
+): FirewallLogRecord[] {
   const search = filters.search.trim().toLowerCase()
   const categories = new Set(
     filters.category.map((value) => value.trim().toLowerCase()).filter(Boolean),
@@ -115,7 +121,7 @@ export function filterFirewallLogs(
   return matches
 }
 
-export function hasActiveLogFilters(filters: FirewallLogFilters) {
+export function hasActiveLogFilters(filters: FirewallLogFilters): boolean {
   const values: Record<keyof FirewallLogFilters, string | string[]> = filters
   return Object.values(values).some((value) =>
     Array.isArray(value) ? value.some((item) => item.trim().length > 0) : value.trim().length > 0,
@@ -125,19 +131,21 @@ export function hasActiveLogFilters(filters: FirewallLogFilters) {
 export function isLogCategoryFilterValueActive(
   currentValues: readonly string[],
   candidateValue: string | undefined,
-) {
+): boolean {
   const candidate = candidateValue?.trim().toLowerCase()
-  return Boolean(
-    candidate && currentValues.some((value) => value.trim().toLowerCase() === candidate),
+  return (
+    candidate !== undefined &&
+    candidate !== '' &&
+    currentValues.some((value) => value.trim().toLowerCase() === candidate)
   )
 }
 
 export function toggleLogCategoryFilterValue(
   currentValues: readonly string[],
   candidateValue: string | undefined,
-) {
+): string[] {
   const nextValue = candidateValue?.trim()
-  if (!nextValue) {
+  if (nextValue === undefined || nextValue === '') {
     return [...currentValues]
   }
 
@@ -149,22 +157,30 @@ export function toggleLogCategoryFilterValue(
   return [...currentValues, nextValue]
 }
 
-export function isLogFilterValueActive(currentValue: string, candidateValue: string | undefined) {
-  return Boolean(
-    candidateValue && currentValue.trim().toLowerCase() === candidateValue.trim().toLowerCase(),
+export function isLogFilterValueActive(
+  currentValue: string,
+  candidateValue: string | undefined,
+): boolean {
+  return (
+    candidateValue !== undefined &&
+    candidateValue !== '' &&
+    currentValue.trim().toLowerCase() === candidateValue.trim().toLowerCase()
   )
 }
 
-export function toggleLogFilterValue(currentValue: string, candidateValue: string | undefined) {
+export function toggleLogFilterValue(
+  currentValue: string,
+  candidateValue: string | undefined,
+): string {
   const nextValue = candidateValue?.trim()
-  if (!nextValue) {
+  if (nextValue === undefined || nextValue === '') {
     return currentValue
   }
 
   return isLogFilterValueActive(currentValue, nextValue) ? '' : nextValue
 }
 
-export function getLogFiltersKey(filters: FirewallLogFilters) {
+export function getLogFiltersKey(filters: FirewallLogFilters): string {
   return [
     filters.search,
     filters.category
@@ -187,7 +203,7 @@ export function queryFirewallLogs(
   logs: readonly FirewallLogRecord[],
   filters: FirewallLogFilters,
   visibleLimit: number,
-) {
+): FirewallLogRecord[] {
   if (!hasActiveLogFilters(filters)) {
     return trimToBufferSize(logs, visibleLimit)
   }
@@ -199,7 +215,7 @@ export function mergeFilteredLogCache(
   currentMatches: readonly FirewallLogRecord[],
   cachedMatches: readonly FirewallLogRecord[],
   visibleLimit: number,
-) {
+): FirewallLogRecord[] {
   const seen = new Set<string>()
   const merged: FirewallLogRecord[] = []
 
@@ -224,7 +240,7 @@ export function useLogQuery(
     rawSource,
     visibleLimit = computed(() => logs.value.length),
   }: UseLogQueryOptions = {},
-) {
+): UseLogQueryReturn {
   const filters = providedFilters ?? reactive(createDefaultLogFilters())
   const filterKey = computed(() => getLogFiltersKey(filters))
   const filteredLogs = shallowRef<FirewallLogRecord[]>([])

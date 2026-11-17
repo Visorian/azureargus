@@ -1,5 +1,5 @@
 interface ManagedEventHubStreamRegistration {
-  close(): Promise<void>
+  close: () => Promise<void>
   owner: symbol
 }
 
@@ -24,7 +24,10 @@ async function activateAfter(
   activeStreams.set(sessionId, registration)
 }
 
-export async function registerManagedEventHubStream(sessionId: string, close: () => Promise<void>) {
+export async function registerManagedEventHubStream(
+  sessionId: string,
+  close: () => Promise<void>,
+): Promise<() => void> {
   const owner = Symbol(sessionId)
   const previousRegistration = registrationQueues.get(sessionId) ?? Promise.resolve()
   const registration = activateAfter(previousRegistration, sessionId, { close, owner })

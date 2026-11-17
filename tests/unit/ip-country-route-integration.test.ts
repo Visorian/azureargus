@@ -44,7 +44,7 @@ describe('IP country route integration', () => {
   it('uses runtime configuration to query the real MMDB', async () => {
     await expect(
       handler(createTestEvent({ ips: ['81.2.69.142', '2001:218::', '10.0.0.1'] })),
-    ).resolves.toEqual({
+    ).resolves.toStrictEqual({
       results: [
         { ip: '81.2.69.142', countryCode: 'GB' },
         { ip: '2001:218::', countryCode: 'JP' },

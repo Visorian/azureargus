@@ -1,7 +1,7 @@
 import { expect } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 
-const LOGS_URL_PATTERN = /\/logs/
+const LOGS_URL_PATTERN = /\/logs/u
 
 export async function expectActiveResultVisible(grid: Locator) {
   await expect

@@ -49,7 +49,7 @@ export const DNS_SORT_ITEMS = [
   },
 ] as const
 
-export function dnsSourceLabel(source: string) {
+export function dnsSourceLabel(source: string): string {
   if (source === 'dns-proxy') {
     return 'Legacy DNS proxy logs'
   }
@@ -58,7 +58,7 @@ export function dnsSourceLabel(source: string) {
   )
 }
 
-export function dnsModalTitle(entry: DnsEntry | null) {
+export function dnsModalTitle(entry: DnsEntry | null): string {
   if (entry?.source === 'network-rule') {
     return 'DNS transport detail'
   }
@@ -71,7 +71,7 @@ export function dnsModalTitle(entry: DnsEntry | null) {
   return 'DNS resolution detail'
 }
 
-export function dnsStageActor(observation: DnsObservation) {
+export function dnsStageActor(observation: DnsObservation): string {
   if (observation.stage === 'transport') {
     return 'Network rule'
   }
@@ -90,13 +90,13 @@ export function dnsObservationFields(observation: DnsObservation): DisplayField[
   }
   add('Protocol', observation.protocol)
   add('Firewall action', observation.action)
-  if (observation.clientIp) {
+  if (observation.clientIp !== undefined && observation.clientIp !== '') {
     add('Client endpoint', dnsObservationEndpoint(observation, 'client'), true)
   }
-  if (observation.serverIp) {
+  if (observation.serverIp !== undefined && observation.serverIp !== '') {
     add('Destination endpoint', dnsObservationEndpoint(observation, 'server'), true)
   }
-  if (observation.responseCode) {
+  if (observation.responseCode !== undefined && observation.responseCode !== '') {
     add(
       'Response code',
       [observation.responseCode, DNS_RCODE_LABELS[observation.responseCode]]
@@ -104,7 +104,7 @@ export function dnsObservationFields(observation: DnsObservation): DisplayField[
         .join(' — '),
     )
   }
-  if (observation.queryClass) {
+  if (observation.queryClass !== undefined && observation.queryClass !== '') {
     add(
       'Query class',
       [observation.queryClass, DNS_CLASS_LABELS[observation.queryClass]]
@@ -156,12 +156,14 @@ export function dnsRelatedFields(evidence: DnsRelatedEvidence): DisplayField[] {
     ['Protocol', evidence.protocol],
     [
       'Source endpoint',
-      evidence.sourceIp ? formatDnsEndpoint(evidence.sourceIp, evidence.sourcePort) : undefined,
+      evidence.sourceIp !== undefined && evidence.sourceIp !== ''
+        ? formatDnsEndpoint(evidence.sourceIp, evidence.sourcePort)
+        : undefined,
       true,
     ],
     [
       'Destination endpoint',
-      evidence.destinationIp
+      evidence.destinationIp !== undefined && evidence.destinationIp !== ''
         ? formatDnsEndpoint(evidence.destinationIp, evidence.destinationPort)
         : undefined,
       true,
@@ -171,7 +173,7 @@ export function dnsRelatedFields(evidence: DnsRelatedEvidence): DisplayField[] {
     ['Flag', evidence.flag],
     [
       'Translated endpoint',
-      evidence.translatedIp
+      evidence.translatedIp !== undefined && evidence.translatedIp !== ''
         ? formatDnsEndpoint(evidence.translatedIp, evidence.translatedPort)
         : undefined,
       true,
@@ -182,5 +184,7 @@ export function dnsRelatedFields(evidence: DnsRelatedEvidence): DisplayField[] {
     ['Rule', evidence.rule, true],
     ['Azure resource', evidence.resourceId, true],
   ]
-  return values.flatMap(([label, value, mono]) => (value ? [{ label, value, mono }] : []))
+  return values.flatMap(([label, value, mono]) =>
+    value !== undefined && value !== '' ? [{ label, value, mono }] : [],
+  )
 }

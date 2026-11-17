@@ -1,14 +1,14 @@
-const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/
+const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/u
 const REGIONAL_INDICATOR_OFFSET = 127_397
 
-export function normalizeCountryCode(value: string | null | undefined) {
+export function normalizeCountryCode(value: string | null | undefined): string | null {
   const countryCode = value?.trim().toUpperCase()
-  return countryCode && COUNTRY_CODE_PATTERN.test(countryCode) ? countryCode : null
+  return countryCode !== undefined && COUNTRY_CODE_PATTERN.test(countryCode) ? countryCode : null
 }
 
-export function countryCodeToFlag(value: string | null | undefined) {
+export function countryCodeToFlag(value: string | null | undefined): string {
   const countryCode = normalizeCountryCode(value)
-  if (!countryCode) {
+  if (countryCode === null) {
     return ''
   }
 
@@ -20,9 +20,9 @@ export function countryCodeToFlag(value: string | null | undefined) {
 export function countryCodeToName(
   value: string | null | undefined,
   locales?: Intl.LocalesArgument,
-) {
+): string {
   const countryCode = normalizeCountryCode(value)
-  if (!countryCode) {
+  if (countryCode === null) {
     return ''
   }
 

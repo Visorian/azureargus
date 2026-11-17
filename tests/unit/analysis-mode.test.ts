@@ -2,15 +2,13 @@ import { ref } from 'vue'
 
 import { useAnalysisMode } from '../../app/composables/useAnalysisMode'
 
-type RouteLeaveGuard = () => unknown
+type RouteLeaveGuard = () => Promise<void>
 
-const routeLeaveGuards = vi.hoisted((): RouteLeaveGuard[] => [])
+const routeLeaveGuards: RouteLeaveGuard[] = []
 
-vi.mock('vue-router', () => ({
-  onBeforeRouteLeave: (guard: RouteLeaveGuard) => {
-    routeLeaveGuards.push(guard)
-  },
-}))
+function registerRouteLeaveGuard(guard: RouteLeaveGuard) {
+  routeLeaveGuards.push(guard)
+}
 
 function createVoidMock() {
   return vi.fn<() => void>()
@@ -42,6 +40,7 @@ describe('analysis mode orchestration', () => {
       mode,
       pauseRealTime,
       resetRealTime: createAsyncVoidMock(),
+      onRouteLeave: registerRouteLeaveGuard,
     })
 
     await expect(state.setMode('log-analysis')).resolves.toBe(true)
@@ -62,6 +61,7 @@ describe('analysis mode orchestration', () => {
       mode,
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
+      onRouteLeave: registerRouteLeaveGuard,
     })
 
     await expect(state.setMode('log-analysis')).resolves.toBe(false)
@@ -83,6 +83,7 @@ describe('analysis mode orchestration', () => {
       mode,
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
+      onRouteLeave: registerRouteLeaveGuard,
     })
 
     await expect(state.setMode('real-time-analysis')).resolves.toBe(true)
@@ -104,6 +105,7 @@ describe('analysis mode orchestration', () => {
         throw new Error('pause failed')
       }),
       resetRealTime: createAsyncVoidMock(),
+      onRouteLeave: registerRouteLeaveGuard,
     })
 
     await expect(state.setMode('log-analysis')).resolves.toBe(false)
@@ -126,6 +128,7 @@ describe('analysis mode orchestration', () => {
       mode: ref('real-time-analysis'),
       pauseRealTime: createVoidMock(),
       resetRealTime: createAsyncVoidMock(),
+      onRouteLeave: registerRouteLeaveGuard,
     })
     const guard = routeLeaveGuards.at(-1)
 
@@ -153,6 +156,7 @@ describe('analysis mode orchestration', () => {
       mode,
       pauseRealTime: createVoidMock(),
       resetRealTime,
+      onRouteLeave: registerRouteLeaveGuard,
     })
 
     await state.setMode('log-analysis')

@@ -22,10 +22,10 @@ interface IpCountryLookupClientOptions {
 }
 
 export interface IpCountryLookupClient {
-  dispose(): void
-  getCountryCode(ip: string | undefined): string | null | undefined
-  queue(ip: string | undefined): void
-  setActive(active: boolean): void
+  dispose: () => void
+  getCountryCode: (ip: string | undefined) => string | null | undefined
+  queue: (ip: string | undefined) => void
+  setActive: (active: boolean) => void
 }
 
 function getStatusCode(error: unknown): number | undefined {
@@ -206,7 +206,8 @@ export function createIpCountryLookupClient(
   function queue(ip: string | undefined) {
     const normalizedIp = ip?.trim()
     if (
-      !normalizedIp ||
+      normalizedIp === undefined ||
+      normalizedIp === '' ||
       normalizedIp.length > MAX_IP_COUNTRY_VALUE_LENGTH ||
       !lookupActive ||
       disposed ||
@@ -228,7 +229,7 @@ export function createIpCountryLookupClient(
 
   function getCountryCode(ip: string | undefined) {
     const normalizedIp = ip?.trim()
-    return normalizedIp ? cache.get(normalizedIp) : undefined
+    return normalizedIp === undefined || normalizedIp === '' ? undefined : cache.get(normalizedIp)
   }
 
   function dispose() {
@@ -254,7 +255,7 @@ export function createIpCountryLookupClient(
   return { dispose, getCountryCode, queue, setActive }
 }
 
-export function useIpCountryLookup() {
+export function useIpCountryLookup(): IpCountryLookupClient {
   const requestFetch = useRequestFetch()
   const client = createIpCountryLookupClient(
     async (body, signal) =>

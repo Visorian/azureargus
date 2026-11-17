@@ -9,12 +9,27 @@ export interface DnsObservationStoreSnapshot {
   evictedTransportIds: string[]
 }
 
+export interface DnsObservationStore {
+  clear: () => DnsObservationStoreSnapshot
+  pushRecords: (records: readonly FirewallLogRecord[]) => {
+    evictedEntryIds: string[]
+    evictedTransportIds: string[]
+  }
+  snapshot: (
+    evictedEntryIds?: string[],
+    evictedTransportIds?: string[],
+  ) => DnsObservationStoreSnapshot
+}
+
 function newestFirst<T extends { id: string; timestamp: string }>(left: T, right: T) {
   const timestampOrder = right.timestamp.localeCompare(left.timestamp)
   return timestampOrder || right.id.localeCompare(left.id)
 }
 
-export function createDnsObservationStore(maxEntries = 10_000, maxTransports = maxEntries) {
+export function createDnsObservationStore(
+  maxEntries = 10_000,
+  maxTransports = maxEntries,
+): DnsObservationStore {
   const entries = new Map<string, DnsEntry>()
   const transports = new Map<string, DnsObservation>()
 

@@ -1,6 +1,6 @@
-const IPV4_OCTET_PATTERN = /^(0|[1-9]\d{0,2})$/
+const IPV4_OCTET_PATTERN = /^(0|[1-9]\d{0,2})$/u
 
-export function isRfc1918Ipv4Address(value: string | null | undefined) {
+export function isRfc1918Ipv4Address(value: string | null | undefined): boolean {
   const parts = value?.trim().split('.')
   if (
     parts?.length !== 4 ||

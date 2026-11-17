@@ -408,7 +408,7 @@ describe('DNS parser', () => {
     expect(observation?.errorMessage).toHaveLength(2_048)
     expect(observation?.errorNumber).toHaveLength(64)
     expect(observation?.outcome).toBe('transport-error')
-    expect(observation?.warnings).toEqual(
+    expect(observation?.warnings).toStrictEqual(
       expect.arrayContaining([
         'Query name truncated',
         'Error message truncated',

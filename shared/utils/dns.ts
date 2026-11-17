@@ -11,6 +11,8 @@ import type {
   DnsCorrelationConfidence,
 } from '../types/dns'
 import type { LogAnalyticsStorageKind } from '../types/logAnalytics'
+import type { JsonObject } from './json'
+import { isJsonObject } from './json'
 
 export const DNS_OUTCOME_LABELS: Readonly<Record<DnsOutcome, string>> = {
   'answer-observed': 'Answer observed',
@@ -66,7 +68,7 @@ export const DNS_STAGE_LABELS: Readonly<Record<DnsStage, string>> = {
   transport: 'Transport',
 }
 
-export function formatDnsDuration(seconds: number | undefined) {
+export function formatDnsDuration(seconds: number | undefined): string {
   if (seconds === undefined) {
     return 'Not observed'
   }
@@ -79,31 +81,45 @@ export function formatDnsDuration(seconds: number | undefined) {
   return `${seconds.toFixed(2)} s`
 }
 
-export function formatDnsEndpoint(ip: string | undefined, port?: string) {
-  if (!ip) {
-    return port ? `Any:${port}` : 'Not observed'
+export function formatDnsEndpoint(ip: string | undefined, port?: string): string {
+  const hasPort = port !== undefined && port !== ''
+  if (ip === undefined || ip === '') {
+    return hasPort ? `Any:${port}` : 'Not observed'
   }
-  return port ? `${ip.includes(':') ? `[${ip}]` : ip}:${port}` : ip
+  return hasPort ? `${ip.includes(':') ? `[${ip}]` : ip}:${port}` : ip
 }
 
-export function dnsObservationEndpoint(observation: DnsObservation, side: 'client' | 'server') {
+export function dnsObservationEndpoint(
+  observation: DnsObservation,
+  side: 'client' | 'server',
+): string {
   return side === 'client'
     ? formatDnsEndpoint(observation.clientIp, observation.clientPort)
     : formatDnsEndpoint(observation.serverIp, observation.serverPort)
 }
 
-export function dnsEntryDestination(entry: DnsEntry) {
-  const observation = entry.observations.find((item) => item.serverIp || item.serverPort)
-  return observation
-    ? dnsObservationEndpoint(observation, 'server')
-    : entry.destination || 'Not observed'
+function textOrNotObserved(value: string | undefined): string {
+  return value === undefined || value === '' ? 'Not observed' : value
 }
 
-export function dnsEntryClient(entry: DnsEntry) {
-  const observation = entry.observations.find((item) => item.clientIp)
-  return observation
-    ? dnsObservationEndpoint(observation, 'client')
-    : entry.client || 'Not observed'
+function hasText(value: string | undefined): boolean {
+  return value !== undefined && value !== ''
+}
+
+export function dnsEntryDestination(entry: DnsEntry): string {
+  const observation = entry.observations.find(
+    (item) => hasText(item.serverIp) || hasText(item.serverPort),
+  )
+  return observation === undefined
+    ? textOrNotObserved(entry.destination)
+    : dnsObservationEndpoint(observation, 'server')
+}
+
+export function dnsEntryClient(entry: DnsEntry): string {
+  const observation = entry.observations.find((item) => hasText(item.clientIp))
+  return observation === undefined
+    ? textOrNotObserved(entry.client)
+    : dnsObservationEndpoint(observation, 'client')
 }
 
 const RAW_FIELD_LIMIT = 2_048
@@ -122,10 +138,10 @@ const DNS_SOURCE_PATHS: Readonly<Record<DnsSourceKind, DnsPathKind>> = {
   'proxy-structured': 'proxy',
 }
 const DNS_PROXY_SUCCESS_PATTERN =
-  /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>\d+(?:\.\d+)?)s$/i
+  /^DNS Request:\s*(?<client>\S+)\s+[-–]\s+(?<queryId>\d+)\s+(?<queryType>\S+)\s+(?<queryClass>\S+)\s+(?<queryName>\S+)\s+(?<protocol>\S+)\s+(?<requestSize>\d+)\s+(?<dnssecOk>true|false)\s+(?<ednsBuffer>\d+)\s+(?<responseCode>\S+)\s+(?<flags>\S+)\s+(?<responseSize>\d+)\s+(?<duration>\d+(?:\.\d+)?)s$/iu
 const DNS_PROXY_ERROR_PATTERN =
-  /^\s*Error:\s*(?<errorNumber>\d+)\s+(?<queryName>\S+)\s+(?<queryType>[^:]+):\s*(?<errorMessage>.+)$/i
-const BRACKETED_ENDPOINT_PATTERN = /^\[(?<ip>.+)](?::(?<port>\d+))?$/
+  /^\s*Error:\s*(?<errorNumber>\d+)\s+(?<queryName>\S+)\s+(?<queryType>[^:]+):\s*(?<errorMessage>.+)$/iu
+const BRACKETED_ENDPOINT_PATTERN = /^\[(?<ip>.+)\](?::(?<port>\d+))?$/u
 
 export interface DnsRecordInput {
   id: string
@@ -149,21 +165,15 @@ export interface DnsRecordInput {
   origin?: 'event-hub' | 'log-analytics'
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+const EMPTY_JSON_OBJECT: JsonObject = {}
 
-function readRecord(raw: unknown) {
-  const record = isRecord(raw) ? raw : {}
-  const properties = isRecord(record['properties']) ? record['properties'] : {}
+function readRecord(raw: unknown): { properties: JsonObject; record: JsonObject } {
+  const record = isJsonObject(raw) ? raw : EMPTY_JSON_OBJECT
+  const properties = isJsonObject(record['properties']) ? record['properties'] : EMPTY_JSON_OBJECT
   return { properties, record }
 }
 
-function readValue(
-  record: Record<string, unknown>,
-  properties: Record<string, unknown>,
-  keys: readonly string[],
-): unknown {
+function readValue(record: JsonObject, properties: JsonObject, keys: readonly string[]): unknown {
   for (const key of keys) {
     if (properties[key] !== undefined && properties[key] !== null) {
       return properties[key]
@@ -175,21 +185,18 @@ function readValue(
   return undefined
 }
 
-function readText(
-  record: Record<string, unknown>,
-  properties: Record<string, unknown>,
-  keys: readonly string[],
-) {
+function readText(record: JsonObject, properties: JsonObject, keys: readonly string[]) {
   const value = readValue(record, properties, keys)
   if (typeof value === 'string') {
-    return value.trim() || undefined
+    const trimmed = value.trim()
+    return trimmed === '' ? undefined : trimmed
   }
   return typeof value === 'number' ? String(value) : undefined
 }
 
 function readNumber(
-  record: Record<string, unknown>,
-  properties: Record<string, unknown>,
+  record: JsonObject,
+  properties: JsonObject,
   keys: readonly string[],
 ): number | undefined {
   const value = readValue(record, properties, keys)
@@ -204,8 +211,8 @@ function readNumber(
 }
 
 function readBoolean(
-  record: Record<string, unknown>,
-  properties: Record<string, unknown>,
+  record: JsonObject,
+  properties: JsonObject,
   keys: readonly string[],
 ): boolean | undefined {
   const value = readValue(record, properties, keys)
@@ -224,7 +231,7 @@ function readBoolean(
 }
 
 function splitEndpoint(value: string | undefined) {
-  if (!value) {
+  if (value === undefined || value === '') {
     return {}
   }
   if (value.startsWith('[')) {
@@ -243,10 +250,10 @@ function getOutcome(
   errorMessage?: string,
   errorNumber?: string,
 ): DnsOutcome {
-  if (errorMessage || (errorNumber && errorNumber !== '0')) {
+  if (hasText(errorMessage) || (hasText(errorNumber) && errorNumber !== '0')) {
     return 'transport-error'
   }
-  if (!responseCode) {
+  if (responseCode === undefined || responseCode === '') {
     return 'pending'
   }
   const normalized = responseCode.toUpperCase()
@@ -339,7 +346,7 @@ function canonicalText(
   warnings: string[],
   limit = CANONICAL_TEXT_LIMIT,
 ) {
-  if (!value || value.length <= limit) {
+  if (value === undefined || value.length <= limit) {
     return value
   }
   warnings.push(`${label} truncated`)
@@ -348,7 +355,7 @@ function canonicalText(
 
 function canonicalFlags(value: string | undefined, warnings: string[]) {
   const bounded = canonicalText(value, 'Response flags', warnings, SHORT_TEXT_LIMIT)
-  if (!bounded || bounded === '-') {
+  if (bounded === undefined || bounded === '' || bounded === '-') {
     return []
   }
   const flags = bounded.split(',')
@@ -587,7 +594,7 @@ function parseInternalFqdnFailure(input: DnsRecordInput): DnsObservation {
     ),
     rule: canonicalText(input.rule, 'Rule', warnings, SHORT_TEXT_LIMIT),
     outcome: 'dns-error',
-    parseState: queryName && errorMessage ? 'parsed' : 'partial',
+    parseState: hasText(queryName) && hasText(errorMessage) ? 'parsed' : 'partial',
     warnings,
   }
 }
@@ -651,8 +658,10 @@ function parseStructured(input: DnsRecordInput): DnsObservation {
     errorNumber,
     errorMessage: canonicalText(errorMessage, 'Error message', warnings),
     outcome: getOutcome(responseCode, errorMessage, errorNumber),
-    parseState: queryName ? 'parsed' : 'partial',
-    warnings: queryName ? warnings : [...warnings, 'Structured DNS query has no QueryName'],
+    parseState: hasText(queryName) ? 'parsed' : 'partial',
+    warnings: hasText(queryName)
+      ? warnings
+      : [...warnings, 'Structured DNS query has no QueryName'],
   }
 }
 
@@ -746,7 +755,7 @@ export function parseDnsObservation(input: DnsRecordInput): DnsObservation | und
 export function createDnsDetailSelector(
   observation: DnsObservation,
 ): DnsDetailSelector | undefined {
-  if (!observation.resourceId) {
+  if (observation.resourceId === undefined || observation.resourceId === '') {
     return undefined
   }
   if (observation.source === 'dns-proxy') {
@@ -754,11 +763,11 @@ export function createDnsDetailSelector(
   }
   if (observation.source === 'network-rule') {
     if (
-      !observation.protocol ||
-      !observation.networkSourceIp ||
-      !observation.networkSourcePort ||
-      !observation.networkDestinationIp ||
-      !observation.networkDestinationPort
+      !hasText(observation.protocol) ||
+      !hasText(observation.networkSourceIp) ||
+      !hasText(observation.networkSourcePort) ||
+      !hasText(observation.networkDestinationIp) ||
+      !hasText(observation.networkDestinationPort)
     ) {
       return undefined
     }

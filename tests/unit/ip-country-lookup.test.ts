@@ -14,7 +14,9 @@ function createReader(countryCode = 'DE'): IpCountryReader {
 
 describe('IP country lookup', () => {
   it('reuses one reader and returns normalized country codes', async () => {
-    const openReader = vi.fn().mockResolvedValue(createReader(' de '))
+    const openReader = vi
+      .fn<(databasePath: string) => Promise<IpCountryReader>>()
+      .mockResolvedValue(createReader(' de '))
     const lookup = createIpCountryLookup({ openReader })
 
     await expect(lookup.lookup('8.8.8.8', '/geo.mmdb')).resolves.toBe('DE')

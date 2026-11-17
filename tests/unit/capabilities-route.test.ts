@@ -56,7 +56,7 @@ describe('deployment capabilities route', () => {
     const result = handler(event)
     const serialized = JSON.stringify(result)
 
-    expect(result).toEqual({
+    expect(result).toStrictEqual({
       errors: [],
       eventHubAvailable: true,
       mode: 'managed',

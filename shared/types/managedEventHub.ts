@@ -1,3 +1,5 @@
+import type { JsonObject } from '../utils/json'
+
 export const MANAGED_EVENT_HUB_LOOKBACK_MINUTES = [1, 3, 5, 10, 15] as const
 
 export type ManagedEventHubLookbackMinutes = (typeof MANAGED_EVENT_HUB_LOOKBACK_MINUTES)[number]
@@ -16,7 +18,7 @@ export interface ManagedEventHubEventEnvelope {
     partitionId: string
     sequenceNumber: number
     offset?: string
-    applicationProperties?: Record<string, unknown>
+    applicationProperties?: JsonObject
   }[]
 }
 

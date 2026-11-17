@@ -30,8 +30,35 @@ import { isEntraId } from '~/utils/logAnalyticsOnboarding'
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 15_000
 
 interface TemporaryLogAnalyticsTokenProvider {
-  getLogAnalyticsAccessToken(tenantId: string, allowInteractive?: boolean): Promise<string>
-  getManagementAccessToken(tenantId: string, allowInteractive?: boolean): Promise<string>
+  getLogAnalyticsAccessToken: (tenantId: string, allowInteractive?: boolean) => Promise<string>
+  getManagementAccessToken: (tenantId: string, allowInteractive?: boolean) => Promise<string>
+}
+
+export interface TemporaryLogAnalyticsClient {
+  discover: (tenantId: string, signal: AbortSignal) => Promise<AzureLogAnalyticsAccess>
+  query: (
+    tenantId: string,
+    workspaceId: string,
+    request: LogAnalyticsQueryRequest,
+    signal: AbortSignal,
+  ) => Promise<LogAnalyticsQueryResponse>
+  dnsReadiness: (
+    tenantId: string,
+    workspaceId: string,
+    signal: AbortSignal,
+  ) => Promise<DnsReadinessResponse>
+  dnsList: (
+    tenantId: string,
+    workspaceId: string,
+    request: DnsListQueryRequest,
+    signal: AbortSignal,
+  ) => Promise<DnsListQueryResponse>
+  dnsDetail: (
+    tenantId: string,
+    workspaceId: string,
+    request: DnsDetailQueryRequest,
+    signal: AbortSignal,
+  ) => Promise<DnsDetailQueryResponse>
 }
 
 interface TemporaryLogAnalyticsClientOptions {
@@ -172,7 +199,7 @@ function toDiscoveryClientError(error: unknown): Error {
 export function createTemporaryLogAnalyticsClient(
   tokenProvider: TemporaryLogAnalyticsTokenProvider,
   options: TemporaryLogAnalyticsClientOptions = {},
-) {
+): TemporaryLogAnalyticsClient {
   const fetchImplementation = options.fetchImplementation ?? globalThis.fetch
 
   async function withLogAnalyticsToken<T>(
