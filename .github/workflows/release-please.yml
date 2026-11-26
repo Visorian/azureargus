@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   candidate:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       pull-requests: read
@@ -145,13 +145,13 @@ jobs:
   prepare:
     needs: candidate
     if: needs.candidate.outputs.pending != 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
       - name: Create release app token
         id: release-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.AZURE_ARGUS_RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.AZURE_ARGUS_RELEASE_APP_PRIVATE_KEY }}
